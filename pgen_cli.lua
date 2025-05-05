@@ -1,52 +1,29 @@
 #!/usr/bin/env lua5.1
 
 local pgen = require "pgen"
+local argparse = require "argparse"
 
-local function print_usage()
-  print("PGen: Lua Pattern Generator for C")
-  print("Usage: pgen_cli.lua [options] input_file")
-  print("")
-  print("Options:")
-  print("  -o, --output FILE    Output C file (default: parser.c)")
-  print("  -n, --name NAME      Parser name (default: parser)")
-  print("  -h, --help           Show this help message")
-  print("")
-  print("Example:")
-  print("  pgen_cli.lua -o my_parser.c -n my_parser grammar.lua")
-end
+local parser = argparse()
+  :name("pgen")
+  :description("PGen: Lua Pattern Generator for C")
+  :epilog("Example: pgen_cli.lua -o my_parser.c -n my_parser grammar.lua")
 
-local args = {...}
-local input_file
-local output_file = "parser.c"
-local parser_name = "parser"
+parser:argument("input_file", "Input grammar file")
+  :args(1)
 
-local i = 1
-while i <= #args do
-  local arg = args[i]
-  if arg == "-h" or arg == "--help" then
-    print_usage()
-    os.exit(0)
-  elseif arg == "-o" or arg == "--output" then
-    i = i + 1
-    output_file = args[i]
-  elseif arg == "-n" or arg == "--name" then
-    i = i + 1
-    parser_name = args[i]
-  elseif not input_file then
-    input_file = arg
-  else
-    print("Error: Unexpected argument: " .. arg)
-    print_usage()
-    os.exit(1)
-  end
-  i = i + 1
-end
+parser:option("-o --output", "Output C file")
+  :argname("FILE")
+  :default("parser.c")
 
-if not input_file then
-  print("Error: No input file specified")
-  print_usage()
-  os.exit(1)
-end
+parser:option("-n --name", "Parser name")
+  :argname("NAME")
+  :default("parser")
+
+local args = parser:parse()
+
+local input_file = args.input_file
+local output_file = args.output
+local parser_name = args.name
 
 -- Load the grammar file
 local chunk, err = loadfile(input_file)
