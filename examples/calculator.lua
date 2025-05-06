@@ -2,6 +2,8 @@ local pgen = require "pgen"
 local P, R, S, V = pgen.P, pgen.R, pgen.S, pgen.V
 
 return {
+  V"expr",
+
   -- Start rule: expression
   expr = V"additive",
   

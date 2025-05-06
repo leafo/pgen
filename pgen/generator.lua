@@ -79,7 +79,9 @@ function generator.generate(grammar, parser_name, output_file)
 end
 
 -- Convert grammar to C code
-function generator.create_c_code(grammar, parser_name)
+function generator.create_c_code(grammar, parser_name, options)
+  options = options or {}
+
   local rules = {}
   local start_rule = nil
 
@@ -214,7 +216,7 @@ if (parser->pos + $LITERAL_LEN$ <= parser->input_len &&
   parser->pos += $LITERAL_LEN$;
 } else {
   parser->pos = start_pos;
-  sprintf(parser->error_message, "Expected " $LITERAL$ "at position %zu", parser->pos);
+  sprintf(parser->error_message, "Expected `" $LITERAL$ "` at position %zu", parser->pos);
   parser->success = false;
   return false;
 }]], {
@@ -267,7 +269,7 @@ if (parser->pos < parser->input_len &&
 }]], {
     SET = escape_string(set),
     CONDITIONS = table.concat(cond, " || "),
-    SET_LITERAL = escape_c_literal(set)
+    SET_LITERAL = escape_c_literal(escape_c_literal(set))
   })
 end
 

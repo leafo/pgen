@@ -4,6 +4,8 @@ local P, R, S, V = pgen.P, pgen.R, pgen.S, pgen.V
 -- Define a JSON grammar
 return {
   -- Start rule: a JSON value
+  V"json",
+
   json = V"value",
   
   -- Whitespace: optional spaces, tabs, newlines
