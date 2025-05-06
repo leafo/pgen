@@ -7,4 +7,10 @@ calc_parser.c: examples/calculator.lua
 	clang-format -i calc_parser.c
 
 
+json_parser.so: json_parser.c
+	gcc -shared -o json_parser.so -fPIC json_parser.c `pkg-config --cflags --libs lua5.1`
+
+json_parser.c: examples/json_grammar.lua
+	./pgen_cli.lua -o json_parser.c -n json_parser examples/json_grammar.lua
+	clang-format -i json_parser.c
 

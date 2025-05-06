@@ -1,8 +1,7 @@
 local pgen = require "pgen"
 local P, R, S, V = pgen.P, pgen.R, pgen.S, pgen.V
 
--- Define a grammar for simple arithmetic expressions
-local grammar = {
+return {
   -- Start rule: expression
   expr = V"additive",
   
@@ -27,6 +26,3 @@ local grammar = {
   -- Float: integer.integer
   float = V"integer" + P"." + V"integer"
 }
-
--- Return the grammar
-return grammar
