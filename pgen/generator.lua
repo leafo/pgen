@@ -43,6 +43,25 @@ local function escape_c_literal(str)
   return '"' .. escaped .. '"'
 end
 
+local function template_code(template, vars)
+  -- Use gsub to find placeholders like $VARNAME
+  -- The pattern matches '$' followed by UPPER_CASE letters
+  local result = template:gsub("%$([A-Z_]+)%$", function(var_name)
+    -- Look up the captured variable name in the vars table
+    local value = vars[var_name]
+    -- If the variable exists in the table, return its value (converted to string)
+    if value ~= nil then
+      return tostring(value)
+    else
+      -- If the variable is not found, return the original placeholder string
+      -- (e.g., "$UNDEFINED_VAR") so it's not replaced.
+      return "$" .. var_name .. "$"
+    end
+  end)
+  return result
+end
+
+
 -- Compile a grammar definition to C code
 function generator.generate(grammar, parser_name, output_file)
   local c_code = generator.create_c_code(grammar, parser_name)
@@ -83,23 +102,22 @@ function generator.create_c_code(grammar, parser_name)
   c_code = c_code .. generator.generate_parser_main(parser_name, start_rule)
 
   -- Add compilation instructions as a comment
-  c_code = c_code .. string.format([[/*
+  c_code = c_code .. template_code([[/*
 To compile as a Lua module:
-gcc -shared -o %s.so -fPIC %s.c `pkg-config --cflags --libs lua5.1`
+gcc -shared -o $PARSER_NAME$.so -fPIC $PARSER_NAME$.c `pkg-config --cflags --libs lua5.1`
 
 To use in Lua:
-local %s = require "%s"
-local result = %s.parse("your input string")
+local $PARSER_NAME$ = require "$PARSER_NAME$"
+local result = $PARSER_NAME$.parse("your input string")
 */
-]],
-    parser_name, parser_name, parser_name, parser_name, parser_name)
+]], {PARSER_NAME = parser_name})
 
   return c_code
 end
 
 -- Generate parser header
 function generator.generate_parser_header(parser_name)
-  return string.format([[#include <stdio.h>
+  return template_code([[#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
@@ -107,7 +125,7 @@ function generator.generate_parser_header(parser_name)
 #include <lauxlib.h>
 #include <lualib.h>
 
-// %s - generated parser
+// $PARSER_NAME$ - generated parser
 
 typedef struct {
   const char *input;
@@ -117,7 +135,7 @@ typedef struct {
   char error_message[256];
 } Parser;
 
-]], parser_name)
+]], {PARSER_NAME = parser_name})
 end
 
 -- Generate forward declarations for all rules
@@ -125,7 +143,7 @@ function generator.generate_forward_declarations(rules)
   local result = "// Forward declarations\n"
 
   for name, _ in pairs(rules) do
-    result = result .. string.format("static bool parse_%s(Parser *parser);\n", name)
+    result = result .. template_code("static bool parse_$NAME$(Parser *parser);\n", {NAME = name})
   end
 
   return result .. "\n"
@@ -144,17 +162,17 @@ end
 
 -- Generate a function for a specific rule
 function generator.generate_rule_function(name, pattern)
-  local func = string.format([[static bool parse_%s(Parser *parser) {
+  return template_code([[static bool parse_$NAME$(Parser *parser) {
   size_t start_pos = parser->pos;
 
-  %s
+  $BODY$
 
   return true;
 }
-
-]], name, generator.generate_pattern_code(pattern))
-
-  return func
+]], {
+    NAME = name,
+    BODY = generator.generate_pattern_code(pattern)
+  })
 end
 
 -- Generate code for a pattern
@@ -190,32 +208,41 @@ end
 
 -- Generate code for a literal string match
 function generator.generate_literal_code(literal)
-  return string.format([[// Match literal %s
-if (parser->pos + %d <= parser->input_len &&
-    memcmp(parser->input + parser->pos, %s, %d) == 0) {
-  parser->pos += %d;
+  return template_code([[// Match literal $ESCAPED_LITERAL$
+if (parser->pos + $LITERAL_LEN$ <= parser->input_len &&
+    memcmp(parser->input + parser->pos, $LITERAL$, $LITERAL_LEN$) == 0) {
+  parser->pos += $LITERAL_LEN$;
 } else {
   parser->pos = start_pos;
-  sprintf(parser->error_message, "Expected " %s "at position %%zu", parser->pos);
+  sprintf(parser->error_message, "Expected " $LITERAL$ "at position %zu", parser->pos);
   parser->success = false;
   return false;
-}]],
-    escape_c_literal(literal), #literal, escape_c_literal(literal), #literal, #literal, escape_c_literal(literal))
+}]], {
+    ESCAPED_LITERAL = escape_string(literal),
+    LITERAL = escape_c_literal(literal),
+    LITERAL_LEN = #literal
+  })
 end
 
 -- Generate code for a character range match
 function generator.generate_range_code(start, stop)
-  return string.format([[// Match character range %s - %s
+  return template_code([[// Match character range $START$ - $STOP$
 if (parser->pos < parser->input_len &&
-    parser->input[parser->pos] >= %s && parser->input[parser->pos] <= %s) {
+    parser->input[parser->pos] >= $START_BYTE$ && parser->input[parser->pos] <= $STOP_BYTE$) {
   parser->pos++;
 } else {
   parser->pos = start_pos;
-  sprintf(parser->error_message, "Expected character in range " %s " - " %s " at position %%zu", parser->pos);
+  sprintf(parser->error_message, "Expected character in range " $START_LIT$ " - " $STOP_LIT$ " at position %zu", parser->pos);
   parser->success = false;
   return false;
-}]],
-    escape_string(start), escape_string(stop), string.byte(start), string.byte(stop), escape_c_literal(start), escape_c_literal(stop))
+}]], {
+    START = escape_string(start),
+    STOP = escape_string(stop),
+    START_BYTE = string.byte(start),
+    STOP_BYTE = string.byte(stop),
+    START_LIT = escape_c_literal(start),
+    STOP_LIT = escape_c_literal(stop)
+  })
 end
 
 -- Generate code for a character set match
@@ -223,94 +250,104 @@ function generator.generate_set_code(set)
   local cond = {}
   for i = 1, #set do
     local c = set:sub(i, i)
-    table.insert(cond, string.format("parser->input[parser->pos] == %d", string.byte(c)))
+    table.insert(cond, template_code("parser->input[parser->pos] == $BYTE$", {
+      BYTE = tostring(string.byte(c))
+    }))
   end
 
-  return string.format([[// Match character set %s
+  return template_code([[// Match character set $SET$
 if (parser->pos < parser->input_len &&
-    (%s)) {
+    ($CONDITIONS$)) {
   parser->pos++;
 } else {
   parser->pos = start_pos;
-  sprintf(parser->error_message, "Expected one of " %s " at position %%zu", parser->pos);
+  sprintf(parser->error_message, "Expected one of " $SET_LITERAL$ " at position %zu", parser->pos);
   parser->success = false;
   return false;
-}]],
-    escape_string(set), table.concat(cond, " || "), escape_c_literal(set))
+}]], {
+    SET = escape_string(set),
+    CONDITIONS = table.concat(cond, " || "),
+    SET_LITERAL = escape_c_literal(set)
+  })
 end
 
 -- Generate code for a rule call
 function generator.generate_rule_call_code(rule_name)
-  return string.format([[// Call rule %s
-if (!parse_%s(parser)) {
+  return template_code([[// Call rule $RULE$
+if (!parse_$RULE$(parser)) {
   return false;
-}]], rule_name, rule_name)
+}]], {
+  RULE = rule_name
+})
 end
 
 -- Generate code for a sequence
 function generator.generate_sequence_code(a, b)
-  return string.format([[// Sequence
-%s
+  return template_code([[// Sequence
+$A$
 
-%s]],
-    generator.generate_pattern_code(a),
-    generator.generate_pattern_code(b))
+$B$]], {
+    A = generator.generate_pattern_code(a),
+    B = generator.generate_pattern_code(b)
+  })
 end
 
 -- Generate code for a choice
 function generator.generate_choice_code(a, b)
-  return string.format([[// Choice
+  return template_code([[// Choice
 {
   size_t choice_pos = parser->pos;
   bool choice_result = true;
 
   // Try first alternative
-  %s
+  $A$
 
   if (!choice_result) {
     // Restore position and try second alternative
     parser->pos = choice_pos;
     parser->success = true;
 
-    %s
+    $B$
 
     if (!parser->success) {
       parser->pos = start_pos;
       return false;
     }
   }
-}]],
-    generator.generate_pattern_code(a),
-    generator.generate_pattern_code(b))
+}]], {
+  A = generator.generate_pattern_code(a),
+  B = generator.generate_pattern_code(b)
+})
 end
 
 -- Generate code for an optional pattern
 function generator.generate_optional_code(a)
-  return string.format([[// Optional
+  return template_code([[// Optional
 {
   size_t opt_pos = parser->pos;
   bool opt_success = parser->success;
 
   // Try to match but don't fail if it doesn't match
-  %s
+  $BODY$
 
   if (!parser->success) {
     // Restore position and continue
     parser->pos = opt_pos;
     parser->success = opt_success;
   }
-}]],
-    generator.generate_pattern_code(a))
+}]], {
+  BODY = generator.generate_pattern_code(a)
+})
 end
 
 -- Generate code for zero or more repetitions
 function generator.generate_star_code(a)
-  return string.format([[// Zero or more repetitions
+  return template_code([[// Zero or more repetitions
 while (parser->success && parser->pos < parser->input_len) {
   size_t repeat_pos = parser->pos;
 
   // Try to match pattern
-  %s
+  $BODY$
 
   if (!parser->success || repeat_pos == parser->pos) {
     // Restore position and exit loop on failure or no progress
@@ -318,23 +355,26 @@ while (parser->success && parser->pos < parser->input_len) {
     parser->success = true;
     break;
   }
-}]],
-    generator.generate_pattern_code(a))
+}]], {
+  BODY = generator.generate_pattern_code(a)
+})
 end
 
 -- Generate code for exact number of repetitions
 function generator.generate_repeat_code(a, n)
-  return string.format([[// Exactly %d repetitions
-for (int i = 0; i < %d; i++) {
-  %s
+  return template_code([[// Exactly $N$ repetitions
+for (int i = 0; i < $N$; i++) {
+  $BODY$
 
   if (!parser->success) {
     parser->pos = start_pos;
-    sprintf(parser->error_message, "Expected %d repetitions at position %%zu", parser->pos);
+    sprintf(parser->error_message, "Expected $N$ repetitions at position %zu", parser->pos);
     return false;
   }
-}]],
-    n, n, generator.generate_pattern_code(a), n)
+}]], {
+  N = n,
+  BODY = generator.generate_pattern_code(a)
+})
 end
 
 
@@ -343,9 +383,9 @@ generator = generator or {}
 
 -- Generate core C parser functions (_init, _free, _parse)
 function generator.generate_c_core_functions(parser_name, start_rule)
-  local c_core_template = [[
+  return template_code([[
 // Initialize parser
-static Parser* %s_init(const char *input) {
+static Parser* $PARSER_NAME$_init(const char *input) {
   Parser *parser = (Parser*)malloc(sizeof(Parser));
   if (!parser) {
     // Handle allocation failure if necessary, though often parser might exit
@@ -360,7 +400,7 @@ static Parser* %s_init(const char *input) {
 }
 
 // Free parser
-static void %s_free(Parser *parser) {
+static void $PARSER_NAME$_free(Parser *parser) {
   // Check for NULL in case _init failed or was called with NULL
   if (parser) {
      free(parser);
@@ -368,51 +408,46 @@ static void %s_free(Parser *parser) {
 }
 
 // Parse input using the generated start rule function
-static bool %s_parse(const char *input) {
-  Parser *parser = %s_init(input);
+static bool $PARSER_NAME$_parse(const char *input) {
+  Parser *parser = $PARSER_NAME$_init(input);
   if (!parser) {
      fprintf(stderr, "Parser initialization failed (memory allocation?).\n");
      return false; // Indicate failure if init failed
   }
 
-  bool result = parse_%s(parser); // Call the specific start rule parser
+  bool result = parse_$START_RULE$(parser); // Call the specific start rule parser
 
   // Check if entire input was consumed after a successful rule parse
   if (result && parser->pos < parser->input_len) {
     parser->success = false;
     // Use snprintf for safety against buffer overflows
     snprintf(parser->error_message, sizeof(parser->error_message),
-             "Unexpected input at position %%zu", parser->pos);
+             "Unexpected input at position %zu", parser->pos);
     result = false;
   }
 
   // Report error if parsing failed at any point
   if (!result && parser->success == false) { // Only print if we set an error
-    fprintf(stderr, "Parse error: %%s\n", parser->error_message);
+    fprintf(stderr, "Parse error: %s\n", parser->error_message);
   }
 
   // It's crucial to free the parser even if parsing failed
-  %s_free(parser);
+  $PARSER_NAME$_free(parser);
   return result;
 }
-]]
-  return string.format(c_core_template,
-    parser_name, -- for _init
-    parser_name, -- for _free
-    parser_name, -- for _parse
-    parser_name, -- call to _init inside _parse
-    start_rule,  -- call to parse_rule inside _parse
-    parser_name  -- call to _free inside _parse
-  )
+]], {
+    PARSER_NAME = parser_name,
+    START_RULE = start_rule
+  })
 end
 
 -- Generate C code for the Lua module interface
 function generator.generate_lua_module_code(parser_name)
-  local lua_module_template = [[
+  return template_code([[
 // --- Lua Module Interface ---
 
 // Lua wrapper function
-static int l_%s_parse(lua_State *L) {
+static int l_$PARSER_NAME$_parse(lua_State *L) {
   // Check type and get the input string
   if (!lua_isstring(L, 1)) {
     return luaL_error(L, "Expected string argument for parsing");
@@ -424,7 +459,7 @@ static int l_%s_parse(lua_State *L) {
   }
 
   // Call the core C parsing function
-  bool result = %s_parse(input);
+  bool result = $PARSER_NAME$_parse(input);
 
   // Push the boolean result onto the Lua stack
   lua_pushboolean(L, result);
@@ -432,8 +467,8 @@ static int l_%s_parse(lua_State *L) {
 }
 
 // Lua module function registration table
-static const struct luaL_Reg %s_module[] = {
-  {"parse", l_%s_parse}, // Expose l_parsername_parse as "parse" in Lua
+static const struct luaL_Reg $PARSER_NAME$_module[] = {
+  {"parse", l_$PARSER_NAME$_parse}, // Expose l_parsername_parse as "parse" in Lua
   {NULL, NULL} // Sentinel
 };
 
@@ -441,29 +476,18 @@ static const struct luaL_Reg %s_module[] = {
 // Note: LUA_VERSION_NUM wasn't defined before 5.1
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
   // Lua 5.2+ uses luaL_setfuncs
-  int luaopen_%s(lua_State *L) {
-    luaL_newlib(L, %s_module); // Creates table and registers functions
+  int luaopen_$PARSER_NAME$(lua_State *L) {
+    luaL_newlib(L, $PARSER_NAME$_module); // Creates table and registers functions
     return 1;
   }
 #else
   // Lua 5.1 uses luaL_register
-  int luaopen_%s(lua_State *L) {
-    luaL_register(L, "%s", %s_module); // Registers functions in global table (or package table)
+  int luaopen_$PARSER_NAME$(lua_State *L) {
+    luaL_register(L, "$PARSER_NAME$", $PARSER_NAME$_module); // Registers functions in global table (or package table)
     return 1;
   }
 #endif
-]]
-  return string.format(lua_module_template,
-    parser_name, -- for l_..._parse function name
-    parser_name, -- call to core ..._parse inside l_..._parse
-    parser_name, -- for ..._module registry name
-    parser_name, -- inside ..._module registry
-    parser_name, -- for luaopen_... name (5.2+)
-    parser_name, -- ..._module reference (5.2+)
-    parser_name, -- for luaopen_... name (5.1)
-    parser_name, -- module name string (5.1)
-    parser_name  -- ..._module reference (5.1)
-  )
+]], {PARSER_NAME = parser_name})
 end
 
 -- Generate the final combined parser main C code
