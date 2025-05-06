@@ -442,7 +442,7 @@ static bool $PARSER_NAME$_parse(const char *input) {
 end
 
 -- Generate C code for the Lua module interface
-function generator.generate_lua_module_code(parser_name)
+function generator.generate_lua_module_code(parser_name, start_rule)
   return template_code([[
 // --- Lua Module Interface ---
 
@@ -458,12 +458,37 @@ static int l_$PARSER_NAME$_parse(lua_State *L) {
       return luaL_error(L, "Failed to get string argument");
   }
 
-  // Call the core C parsing function
-  bool result = $PARSER_NAME$_parse(input);
+  // Initialize the parser directly
+  Parser *parser = $PARSER_NAME$_init(input);
+  if (!parser) {
+     lua_pushnil(L);
+     lua_pushstring(L, "Parser initialization failed (memory allocation?)");
+     return 2;
+  }
 
-  // Push the boolean result onto the Lua stack
-  lua_pushboolean(L, result);
-  return 1; // Number of return values
+  // Call the start rule parser function
+  bool result = parse_$START_RULE$(parser);
+
+  // Check if entire input was consumed
+  if (result && parser->pos < parser->input_len) {
+    parser->success = false;
+    snprintf(parser->error_message, sizeof(parser->error_message),
+             "Unexpected input at position %zu", parser->pos);
+    result = false;
+  }
+
+  // Return nil and error message on failure, true on success
+  if (!result) {
+    lua_pushnil(L);
+    lua_pushstring(L, parser->error_message);
+    $PARSER_NAME$_free(parser);
+    return 2; // Return nil and error message
+  }
+
+  // Success case
+  lua_pushboolean(L, true);
+  $PARSER_NAME$_free(parser);
+  return 1; // Return just true
 }
 
 // Lua module function registration table
@@ -487,7 +512,10 @@ static const struct luaL_Reg $PARSER_NAME$_module[] = {
     return 1;
   }
 #endif
-]], {PARSER_NAME = parser_name})
+]], {
+  PARSER_NAME = parser_name,
+  START_RULE = start_rule
+})
 end
 
 -- Generate the final combined parser main C code
@@ -495,7 +523,7 @@ function generator.generate_parser_main(parser_name, start_rule)
   -- core C functions
   local c_core_code = generator.generate_c_core_functions(parser_name, start_rule)
   -- Lua module interface
-  local lua_module_code = generator.generate_lua_module_code(parser_name)
+  local lua_module_code = generator.generate_lua_module_code(parser_name, start_rule)
 
   return c_core_code .. "\n" .. lua_module_code
 end
