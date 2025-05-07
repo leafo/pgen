@@ -227,7 +227,9 @@ function generator.generate_literal_code(literal)
       memcmp(parser->input + parser->pos, $LITERAL$, $LITERAL_LEN$) == 0) {
     parser->pos += $LITERAL_LEN$;
   } else {
+#ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Expected `" $LITERAL$ "` at position %zu", parser->pos);
+#endif
     parser->success = false;
   }
 }]], {
@@ -243,7 +245,9 @@ function generator.generate_n_chars_code(n)
   if (parser->pos + $N$ <= parser->input_len) {
     parser->pos += $N$;
   } else {
+#ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Expected at least $N$ more characters at position %zu", parser->pos);
+#endif
     parser->success = false;
   }
 }]], {
@@ -258,7 +262,9 @@ function generator.generate_range_code(start, stop)
       parser->input[parser->pos] >= $START_BYTE$ && parser->input[parser->pos] <= $STOP_BYTE$) {
     parser->pos++;
   } else {
+#ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Expected character in range " $START_LIT$ " - " $STOP_LIT$ " at position %zu", parser->pos);
+#endif
     parser->success = false;
   }
 }]], {
@@ -286,7 +292,9 @@ function generator.generate_set_code(set)
       ($CONDITIONS$)) {
     parser->pos++;
   } else {
+#ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Expected one of " $SET_LITERAL$ " at position %zu", parser->pos);
+#endif
     parser->success = false;
   }
 }]], {
@@ -388,7 +396,9 @@ function generator.generate_repeat_code(a, n)
     parser->success = true;
   } else {
     parser->pos = start_pos;
+#ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Expected $N$ repetitions at position %zu", parser->pos);
+#endif
   }
 }]], {
     N = n,
@@ -407,7 +417,9 @@ function generator.generate_negate_code(a)
     // Pattern matched, so negate fails
     parser->pos = start_pos; // Restore original position
     parser->success = false;
+#ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", start_pos);
+#endif
   } else {
     // Pattern failed, so negate succeeds
     parser->success = true;
