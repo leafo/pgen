@@ -1,4 +1,10 @@
 
+
+.PHONY: test
+
+test:
+	make -B calc_parser.so && lua5.1 test.lua
+
 calc_parser.so: calc_parser.c
 	gcc -shared -o calc_parser.so -fPIC calc_parser.c `pkg-config --cflags --libs lua5.1`
 

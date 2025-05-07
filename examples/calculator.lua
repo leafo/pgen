@@ -4,7 +4,6 @@ local P, R, S, V = pgen.P, pgen.R, pgen.S, pgen.V
 return {
   V"ws" * V"expr" * V"ws" *  -1,
 
-  -- Start rule: expression
   expr = V"additive",
 
   -- Whitespace: optional spaces, tabs, newlines

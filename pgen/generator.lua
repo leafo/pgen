@@ -87,14 +87,22 @@ function generator.create_c_code(grammar, parser_name, options)
 
   -- Extract rules from grammar
   for name, pattern in pairs(grammar) do
+    local skip = false
     if not start_rule then
-      start_rule = name
+      if type(pattern) == "string" and name == 1 then
+        start_rule = pattern
+        skip = true
+      else
+        start_rule = name
+      end
     end
-    rules[name] = pattern
+    if not skip then
+      rules[name] = pattern
+    end
   end
 
   if not start_rule then
-    error("Grammar must contain at least one rule")
+    error("Grammar does not contain a starting rule")
   end
 
   -- Generate the C code
