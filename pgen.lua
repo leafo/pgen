@@ -62,6 +62,15 @@ function mt.__add(a, b)
   }
 end
 
+function mt.__sub(a, b)
+  return -b * a
+
+  -- return make{
+  --   type = "except",
+  --   coerce_pattern(a), coerce_pattern(b)
+  -- }
+end
+
 function mt.__mul(a, b)
   return make{
     type = "sequence",

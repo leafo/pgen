@@ -56,4 +56,4 @@ if not output then
   os.exit(1)
 end
 
-print("Parser generated: " .. output)
+print("Success")

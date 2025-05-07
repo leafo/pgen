@@ -218,7 +218,8 @@ function generator.generate_pattern_code(pattern)
 
   elseif t == 2 then -- R (character range)
     -- TODO: support multiple range groups
-    require("moon").p(pattern)
+    assert(not pattern.value[2], "don't support multi-ranges yet")
+
     local range_left, range_right = pattern.value[1]:match("^(.)(.)")
     assert(range_left, "range must have two characters")
     return generator.generate_range_code(range_left, range_right)
