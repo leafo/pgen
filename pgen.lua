@@ -14,8 +14,23 @@ local function pattern(type, value, name)
   }
 end
 
+local function coerce_pattern(value)
+  local t = type(value)
+
+  if t == "number" or t == "string" then
+    return pgen.P(value)
+  end
+
+  return value
+end
+
 -- Create literal string pattern
 function pgen.P(val)
+  -- if it's negative number, conver it to -pgen.P(-n)
+  if type(val) == "number" and val < 0 then
+    return -pattern(P, -val)
+  end
+
   return pattern(P, val)
 end
 
@@ -34,7 +49,6 @@ function pgen.V(name)
   return pattern(V, name)
 end
 
--- Sequence operator
 local mt = {}
 
 function make(t)
@@ -43,41 +57,33 @@ end
 
 function mt.__add(a, b)
   return make{
-    type = "sequence",
-    a, b
+    type = "choice",
+    coerce_pattern(a), coerce_pattern(b)
   }
 end
 
--- Choice operator
 function mt.__mul(a, b)
   return make{
-    type = "choice",
-    a, b
+    type = "sequence",
+    coerce_pattern(a), coerce_pattern(b)
   }
 end
 
--- Optional operator
+-- negative predicate
 function mt.__unm(a)
   return make{
-    type = "optional",
+    type = "negate",
     a
   }
 end
 
 -- Zero or more operator
 function mt.__pow(a, n)
-  if n == 0 then
-    return make{
-      type = "star",
-      a
-    }
-  else
-    return make{
-      type = "repeat",
-      a,
-      n
-    }
-  end
+  return make{
+    type = "repeat",
+    a,
+    n
+  }
 end
 
 -- Compile grammar to C code
@@ -85,7 +91,7 @@ function pgen.compile(grammar, options)
   options = options or {}
   local output_file = options.output_file or "parser.c"
   local parser_name = options.parser_name or "parser"
-  
+
   local generator = require("pgen.generator")
   return generator.generate(grammar, parser_name, output_file)
 end

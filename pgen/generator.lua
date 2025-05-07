@@ -165,12 +165,10 @@ end
 -- Generate a function for a specific rule
 function generator.generate_rule_function(name, pattern)
   return template_code([[static bool parse_$NAME$(Parser *parser) {
-  size_t start_pos = parser->pos;
-
   $BODY$
-
-  return true;
+  return parser->success;
 }
+
 ]], {
     NAME = name,
     BODY = generator.generate_pattern_code(pattern)
@@ -183,7 +181,12 @@ function generator.generate_pattern_code(pattern)
 
   if t == 1 then -- P (literal string)
     local literal = pattern.value
-    return generator.generate_literal_code(literal)
+    if type(literal) == "number" then
+      return generator.generate_n_chars_code(literal)
+    else
+      return generator.generate_literal_code(literal)
+    end
+
   elseif t == 2 then -- R (character range)
     local range = pattern.value
     return generator.generate_range_code(range[1], range[2])
@@ -197,12 +200,13 @@ function generator.generate_pattern_code(pattern)
     return generator.generate_sequence_code(pattern[1], pattern[2])
   elseif t == "choice" then
     return generator.generate_choice_code(pattern[1], pattern[2])
-  elseif t == "optional" then
-    return generator.generate_optional_code(pattern[1])
-  elseif t == "star" then
-    return generator.generate_star_code(pattern[1])
+  -- TODO: this is redundant, but might be able to optimize ^-1 with reduced code
+  --elseif t == "optional" then
+  --  return generator.generate_optional_code(pattern[1])
   elseif t == "repeat" then
     return generator.generate_repeat_code(pattern[1], pattern[2])
+  elseif t == "negate" then
+    return generator.generate_negate_code(pattern[1])
   else
     error("Unknown pattern type: " .. tostring(t))
   end
@@ -210,15 +214,14 @@ end
 
 -- Generate code for a literal string match
 function generator.generate_literal_code(literal)
-  return template_code([[// Match literal $ESCAPED_LITERAL$
-if (parser->pos + $LITERAL_LEN$ <= parser->input_len &&
-    memcmp(parser->input + parser->pos, $LITERAL$, $LITERAL_LEN$) == 0) {
-  parser->pos += $LITERAL_LEN$;
-} else {
-  parser->pos = start_pos;
-  sprintf(parser->error_message, "Expected `" $LITERAL$ "` at position %zu", parser->pos);
-  parser->success = false;
-  return false;
+  return template_code([[{// Match literal $ESCAPED_LITERAL$
+  if (parser->pos + $LITERAL_LEN$ <= parser->input_len &&
+      memcmp(parser->input + parser->pos, $LITERAL$, $LITERAL_LEN$) == 0) {
+    parser->pos += $LITERAL_LEN$;
+  } else {
+    sprintf(parser->error_message, "Expected `" $LITERAL$ "` at position %zu", parser->pos);
+    parser->success = false;
+  }
 }]], {
     ESCAPED_LITERAL = escape_string(literal),
     LITERAL = escape_c_literal(literal),
@@ -226,17 +229,30 @@ if (parser->pos + $LITERAL_LEN$ <= parser->input_len &&
   })
 end
 
+-- Generate code for matching exactly n characters
+function generator.generate_n_chars_code(n)
+  return template_code([[{// Match any $N$ characters
+  if (parser->pos + $N$ <= parser->input_len) {
+    parser->pos += $N$;
+  } else {
+    sprintf(parser->error_message, "Expected at least $N$ more characters at position %zu", parser->pos);
+    parser->success = false;
+  }
+}]], {
+    N = n
+  })
+end
+
 -- Generate code for a character range match
 function generator.generate_range_code(start, stop)
-  return template_code([[// Match character range $START$ - $STOP$
-if (parser->pos < parser->input_len &&
-    parser->input[parser->pos] >= $START_BYTE$ && parser->input[parser->pos] <= $STOP_BYTE$) {
-  parser->pos++;
-} else {
-  parser->pos = start_pos;
-  sprintf(parser->error_message, "Expected character in range " $START_LIT$ " - " $STOP_LIT$ " at position %zu", parser->pos);
-  parser->success = false;
-  return false;
+  return template_code([[{// Match character range $START$ - $STOP$
+  if (parser->pos < parser->input_len &&
+      parser->input[parser->pos] >= $START_BYTE$ && parser->input[parser->pos] <= $STOP_BYTE$) {
+    parser->pos++;
+  } else {
+    sprintf(parser->error_message, "Expected character in range " $START_LIT$ " - " $STOP_LIT$ " at position %zu", parser->pos);
+    parser->success = false;
+  }
 }]], {
     START = escape_string(start),
     STOP = escape_string(stop),
@@ -257,15 +273,14 @@ function generator.generate_set_code(set)
     }))
   end
 
-  return template_code([[// Match character set $SET$
-if (parser->pos < parser->input_len &&
-    ($CONDITIONS$)) {
-  parser->pos++;
-} else {
-  parser->pos = start_pos;
-  sprintf(parser->error_message, "Expected one of " $SET_LITERAL$ " at position %zu", parser->pos);
-  parser->success = false;
-  return false;
+  return template_code([[{// Match character set $SET$
+  if (parser->pos < parser->input_len &&
+      ($CONDITIONS$)) {
+    parser->pos++;
+  } else {
+    sprintf(parser->error_message, "Expected one of " $SET_LITERAL$ " at position %zu", parser->pos);
+    parser->success = false;
+  }
 }]], {
     SET = escape_string(set),
     CONDITIONS = table.concat(cond, " || "),
@@ -275,20 +290,26 @@ end
 
 -- Generate code for a rule call
 function generator.generate_rule_call_code(rule_name)
-  return template_code([[// Call rule $RULE$
-if (!parse_$RULE$(parser)) {
-  return false;
-}]], {
+  return template_code([[parse_$RULE$(parser);]], {
   RULE = rule_name
 })
 end
 
 -- Generate code for a sequence
 function generator.generate_sequence_code(a, b)
-  return template_code([[// Sequence
-$A$
+  return template_code([[{// Sequence
+  size_t start_pos = parser->pos;
 
-$B$]], {
+  $A$
+
+  if (parser->success) {
+    $B$
+
+    if (!parser->success) {
+      parser->pos = start_pos;
+    }
+  }
+}]], {
     A = generator.generate_pattern_code(a),
     B = generator.generate_pattern_code(b)
   })
@@ -296,25 +317,12 @@ end
 
 -- Generate code for a choice
 function generator.generate_choice_code(a, b)
-  return template_code([[// Choice
-{
-  size_t choice_pos = parser->pos;
-  bool choice_result = true;
-
-  // Try first alternative
+  return template_code([[{ // Choice
   $A$
 
-  if (!choice_result) {
-    // Restore position and try second alternative
-    parser->pos = choice_pos;
+  if (!parser->success) {
     parser->success = true;
-
     $B$
-
-    if (!parser->success) {
-      parser->pos = start_pos;
-      return false;
-    }
   }
 }]], {
   A = generator.generate_pattern_code(a),
@@ -322,61 +330,84 @@ function generator.generate_choice_code(a, b)
 })
 end
 
--- Generate code for an optional pattern
-function generator.generate_optional_code(a)
-  return template_code([[// Optional
-{
-  size_t opt_pos = parser->pos;
-  bool opt_success = parser->success;
-
-  // Try to match but don't fail if it doesn't match
-  $BODY$
-
-  if (!parser->success) {
-    // Restore position and continue
-    parser->pos = opt_pos;
-    parser->success = opt_success;
-  }
-}]], {
-  BODY = generator.generate_pattern_code(a)
-})
-end
-
--- Generate code for zero or more repetitions
-function generator.generate_star_code(a)
-  return template_code([[// Zero or more repetitions
-while (parser->success && parser->pos < parser->input_len) {
-  size_t repeat_pos = parser->pos;
-
-  // Try to match pattern
-  $BODY$
-
-  if (!parser->success || repeat_pos == parser->pos) {
-    // Restore position and exit loop on failure or no progress
-    parser->pos = repeat_pos;
-    parser->success = true;
-    break;
-  }
-}]], {
-  BODY = generator.generate_pattern_code(a)
-})
-end
-
--- Generate code for exact number of repetitions
+-- Generate code for number of repetitions
+-- if n is zero or positive, at least n repetitions
+-- if n is negative, at most n repetitions
 function generator.generate_repeat_code(a, n)
-  return template_code([[// Exactly $N$ repetitions
-for (int i = 0; i < $N$; i++) {
-  $BODY$
+  if n < 0 then
+    local at_most = -n
 
-  if (!parser->success) {
+  return template_code([[{ // At most $N$ repetitions
+  size_t rep_count = 0;
+  size_t start_pos = parser->pos;
+
+  while(rep_count < $N$) {
+    size_t before_pos = parser->pos;
+
+    {
+      $BODY$
+    }
+
+    if (!parser->success || before_pos == parser->pos) {
+      // Break on failure or zero-width match
+      parser->success = true;
+      break;
+    }
+
+    rep_count += 1;
+  }
+}]], {
+      N = at_most,
+      BODY = generator.generate_pattern_code(a)
+    })
+  end
+
+  return template_code([[{ // At least $N$ repetitions
+  size_t start_pos = parser->pos;
+  size_t rep_count = 0;
+
+  while(true) {
+    $BODY$
+
+    if (!parser->success) {
+      break;
+    }
+
+    rep_count += 1;
+  }
+
+  if (rep_count >= $N$) {
+    parser->success = true;
+  } else {
     parser->pos = start_pos;
     sprintf(parser->error_message, "Expected $N$ repetitions at position %zu", parser->pos);
-    return false;
   }
 }]], {
-  N = n,
-  BODY = generator.generate_pattern_code(a)
-})
+    N = n,
+    BODY = generator.generate_pattern_code(a)
+  })
+end
+
+-- Generate code for a negated pattern
+function generator.generate_negate_code(a)
+  return template_code([[{// Negate (only match if pattern fails)
+  size_t start_pos = parser->pos;
+
+  $BODY$
+
+  if (parser->success) {
+    // Pattern matched, so negate fails
+    parser->pos = start_pos; // Restore original position
+    parser->success = false;
+    sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", start_pos);
+  } else {
+    // Pattern failed, so negate succeeds
+    parser->success = true;
+    parser->pos = start_pos; // Restore original position
+  }
+}]], {
+    BODY = generator.generate_pattern_code(a)
+  })
 end
 
 
@@ -407,35 +438,6 @@ static void $PARSER_NAME$_free(Parser *parser) {
   if (parser) {
      free(parser);
   }
-}
-
-// Parse input using the generated start rule function
-static bool $PARSER_NAME$_parse(const char *input) {
-  Parser *parser = $PARSER_NAME$_init(input);
-  if (!parser) {
-     fprintf(stderr, "Parser initialization failed (memory allocation?).\n");
-     return false; // Indicate failure if init failed
-  }
-
-  bool result = parse_$START_RULE$(parser); // Call the specific start rule parser
-
-  // Check if entire input was consumed after a successful rule parse
-  if (result && parser->pos < parser->input_len) {
-    parser->success = false;
-    // Use snprintf for safety against buffer overflows
-    snprintf(parser->error_message, sizeof(parser->error_message),
-             "Unexpected input at position %zu", parser->pos);
-    result = false;
-  }
-
-  // Report error if parsing failed at any point
-  if (!result && parser->success == false) { // Only print if we set an error
-    fprintf(stderr, "Parse error: %s\n", parser->error_message);
-  }
-
-  // It's crucial to free the parser even if parsing failed
-  $PARSER_NAME$_free(parser);
-  return result;
 }
 ]], {
     PARSER_NAME = parser_name,
@@ -468,19 +470,10 @@ static int l_$PARSER_NAME$_parse(lua_State *L) {
      return 2;
   }
 
-  // Call the start rule parser function
-  bool result = parse_$START_RULE$(parser);
-
-  // Check if entire input was consumed
-  if (result && parser->pos < parser->input_len) {
-    parser->success = false;
-    snprintf(parser->error_message, sizeof(parser->error_message),
-             "Unexpected input at position %zu", parser->pos);
-    result = false;
-  }
+  parse_$START_RULE$(parser);
 
   // Return nil and error message on failure, true on success
-  if (!result) {
+  if (!parser->success) {
     lua_pushnil(L);
     lua_pushstring(L, parser->error_message);
     $PARSER_NAME$_free(parser);
@@ -488,9 +481,9 @@ static int l_$PARSER_NAME$_parse(lua_State *L) {
   }
 
   // Success case
-  lua_pushboolean(L, true);
+  lua_pushinteger(L, parser->pos);
   $PARSER_NAME$_free(parser);
-  return 1; // Return just true
+  return 1; // Return position of consumed input
 }
 
 // Lua module function registration table
