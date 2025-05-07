@@ -1,11 +1,12 @@
-# PGen: Lua Pattern Generator for C
+parser generator in Lua that takes LPEG-like pattern definitions written in Lua
+and generates a Lua module written in C that can parse input strings.
 
-PGen is a parser generator in Lua that takes LPEG-like pattern definitions and generates corresponding C code parsers.
+This is just an experiment that will eventually find its way into [moonparse](https://github.com/leafo/moonparse)
 
 ## Features
 
 - LPEG-inspired syntax for defining grammars
-- Generates standalone C parsers
+- Generates parser in pure C
 - Supports common pattern types: literals, character ranges, character sets
 - Operators for sequences, choices, repetition and optional patterns
 
@@ -19,11 +20,14 @@ local P, R, S, V = pgen.P, pgen.R, pgen.S, pgen.V
 
 -- Define grammar
 local grammar = {
-  -- rule name = pattern definition
-  main = P"hello" + P" " + P"world",
-  
-  -- Use rule references with V
-  alt = V"main" * P"!" + P"?"
+  "numbers", -- initial rule name
+
+  numbers = (V"ws" * V"number")^1 * -1,
+
+  ws = (S" \t\n\r")^0,
+  number = P"-"^-1 * (V"float" + V"integer"),
+  integer = R("09")^1,
+  float = V"integer" * P"." * V"integer"
 }
 
 -- Compile to C
@@ -42,26 +46,32 @@ pgen.compile(grammar, {
 
 ## Operators
 
-- `a + b` - Sequence: match a followed by b
-- `a * b` - Choice: match a or b
-- `-a` - Optional: match a or nothing
-- `a^0` - Match a zero or more times
-- `a^n` - Match a exactly n times
+- `a * b` - Sequence: match a followed by b
+- `a + b` - Choice: match a or b
+- `-a` - Negative predicate, continue only if a can't be matched
+- `a^n` - Matches at least n repetitions of patt 
+- `a^-n` - Matches at most n repetitions of patt
 
 ## Compilation
 
-The generated C code includes:
+To compile the generated C code as a Lua module, follow these steps:
 
-- A parser struct with state tracking
-- Functions for each grammar rule
-- Error tracking and reporting
-- Helper functions to initialize and run the parser
+1. Ensure you have a C compiler installed (e.g., GCC).
+2. Use the following command to compile the `.c` file into a shared library, adjusting for your Lua version if necessary:
 
-## Building
+   ```bash
+   gcc -shared -o <module_name>.so -fPIC <c_file_name>.c `pkg-config --cflags --libs lua5.1`
+   ```
 
-Compile the generated C file with your favorite C compiler:
+   - Replace `<module_name>` with the desired name of your Lua module.
+   - Replace `<c_file_name>` with the name of the generated C file.
 
-```bash
-gcc -o my_parser my_parser.c
-```
+3. Place the resulting shared library (`.so` file) in a directory included in your Lua `package.cpath`.
+
+4. In your Lua script, load the module using `require`:
+
+   ```lua
+   local my_parser = require "<module_name>"
+   local result = my_parser.parse("your input string")
+   ```
 

@@ -67,15 +67,17 @@ function generator.generate(grammar, parser_name, output_file)
   local c_code = generator.create_c_code(grammar, parser_name)
 
   -- Write C code to file
-  local file = io.open(output_file, "w")
-  if not file then
-    return nil, "Could not open output file: " .. output_file
+  if output_file then
+    local file = io.open(output_file, "w")
+    if not file then
+      return nil, "Could not open output file: " .. output_file
+    end
+
+    file:write(c_code)
+    file:close()
   end
 
-  file:write(c_code)
-  file:close()
-
-  return output_file
+  return c_code
 end
 
 -- Convert grammar to C code
@@ -143,6 +145,7 @@ typedef struct {
   size_t pos;
   bool success;
   char error_message[256];
+  size_t depth;
 } Parser;
 
 ]], {PARSER_NAME = parser_name})
@@ -173,7 +176,25 @@ end
 -- Generate a function for a specific rule
 function generator.generate_rule_function(name, pattern)
   return template_code([[static bool parse_$NAME$(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "$NAME$", start);
+#endif
+
   $BODY$
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "$NAME$", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "$NAME$", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
   return parser->success;
 }
 
@@ -197,9 +218,9 @@ function generator.generate_pattern_code(pattern)
 
   elseif t == 2 then -- R (character range)
     -- TODO: support multiple range groups
-    local range_left, range_right = assert(pattern.value[1]:match("(.)(.)"),
-     "range must have two characters")
-
+    require("moon").p(pattern)
+    local range_left, range_right = pattern.value[1]:match("^(.)(.)")
+    assert(range_left, "range must have two characters")
     return generator.generate_range_code(range_left, range_right)
   elseif t == 3 then -- S (character set)
     local set = pattern.value
@@ -450,6 +471,7 @@ static Parser* $PARSER_NAME$_init(const char *input) {
   parser->input = input;
   parser->input_len = strlen(input);
   parser->pos = 0;
+  parser->depth = 0;
   parser->success = true;
   parser->error_message[0] = '\0';
   return parser;
@@ -504,7 +526,8 @@ static int l_$PARSER_NAME$_parse(lua_State *L) {
   }
 
   // Success case
-  lua_pushinteger(L, parser->pos);
+  // NOTE: add 1 for Lua 1 indexed positioning
+  lua_pushinteger(L, parser->pos + 1);
   $PARSER_NAME$_free(parser);
   return 1; // Return position of consumed input
 }
