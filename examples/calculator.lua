@@ -2,7 +2,9 @@ local pgen = require "pgen"
 local P, R, S, V = pgen.P, pgen.R, pgen.S, pgen.V
 
 return {
-  V"ws" * V"expr" * V"ws" *  -1,
+  "input",
+
+  input = V"ws" * V"expr" * V"ws" *  -1,
 
   expr = V"additive",
 
@@ -22,7 +24,7 @@ return {
   number = P"-"^-1 * (V"float" + V"integer"),
 
   -- Integer: sequence of digits
-  integer = R("0", "9")^1,
+  integer = R("09")^1,
 
   -- Float: integer.integer
   float = V"integer" * P"." * V"integer"

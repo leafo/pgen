@@ -196,8 +196,11 @@ function generator.generate_pattern_code(pattern)
     end
 
   elseif t == 2 then -- R (character range)
-    local range = pattern.value
-    return generator.generate_range_code(range[1], range[2])
+    -- TODO: support multiple range groups
+    local range_left, range_right = assert(pattern.value[1]:match("(.)(.)"),
+     "range must have two characters")
+
+    return generator.generate_range_code(range_left, range_right)
   elseif t == 3 then -- S (character set)
     local set = pattern.value
     return generator.generate_set_code(set)
