@@ -31,11 +31,12 @@ local grammar = {
 }
 
 -- Compile to C
-pgen.compile(grammar, {
-  output_file = "my_parser.c",
+print(pgen.compile(grammar, {
   parser_name = "my_parser"
-})
+}))
 ```
+
+See [Compilation](#compilation) for more details on how to compile the generated C code.
 
 ## Pattern Types
 
