@@ -108,9 +108,25 @@ end
 -- code, then compile it with gcc to temp file, then load the shared object as
 -- a lua module, then return it
 -- this does not cache the compiled code, so it will be recompiled every time require is called
-function pgen.require(module_name)
+function pgen.require(module_name, options)
+  options = options or {}
+  local show_timing = options.show_timing
+
+  local socket
+  if show_timing then
+    socket = require("socket")
+  end
+
+  local function log_time(stage_name, start_time)
+    if show_timing and socket then
+      io.stderr:write(string.format("%s took %.2f seconds\n", stage_name, socket.gettime() - start_time))
+    end
+  end
+
   -- Load the grammar module
+  local start_time = show_timing and socket.gettime()
   local grammar = require(module_name)
+  log_time("Loading grammar module", start_time)
 
   local parser_name = "parser"
 
@@ -120,16 +136,19 @@ function pgen.require(module_name)
   end
 
   -- Compile the grammar into C code
+  start_time = show_timing and socket.gettime()
   local output, err = pgen.compile(grammar, {
     -- TODO: generate non-conflicting parser name
     parser_name = parser_name
   })
+  log_time("Compiling grammar to C code", start_time)
 
   if not output then
     error("Error generating parser: " .. (err or "unknown error"))
   end
 
   -- Compile the C code to a shared object using gcc, piping to stdin
+  start_time = show_timing and socket.gettime()
   local tmp_so = os.tmpname() .. ".so"
   local gcc_command = string.format("gcc -shared -o %s -O3 -fPIC -x c - `pkg-config --cflags --libs lua5.1`", tmp_so)
   local gcc_process = io.popen(gcc_command, "w")
@@ -138,9 +157,12 @@ function pgen.require(module_name)
   end
   gcc_process:write(output)
   gcc_process:close()
+  log_time("Compiling C code to shared object", start_time)
 
   -- Load the compiled shared object
+  start_time = show_timing and socket.gettime()
   local parser = assert(package.loadlib(tmp_so, "luaopen_" .. parser_name))
+  log_time("Loading compiled shared object", start_time)
 
   -- Cleanup temporary files
   os.remove(tmp_so)
