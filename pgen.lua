@@ -1,9 +1,13 @@
 local pgen = {}
 
 -- Pattern types
-local P, R, S, V = 1, 2, 3, 4
+local P, R, S, V, C, Ct = 1, 2, 3, 4, 5, 6
 
-local make
+local mt = {}
+
+local function make(t)
+  return setmetatable(t, mt)
+end
 
 -- Helper to create a pattern object
 local function pattern(type, value, name)
@@ -49,10 +53,15 @@ function pgen.V(name)
   return pattern(V, name)
 end
 
-local mt = {}
 
-function make(t)
-  return setmetatable(t, mt)
+-- Capture
+function pgen.C(patt)
+  return pattern(C, patt)
+end
+
+-- Capture table
+function pgen.Ct(patt)
+  return pattern(Ct, patt)
 end
 
 function mt.__add(a, b)
