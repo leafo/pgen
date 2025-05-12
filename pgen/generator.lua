@@ -123,6 +123,7 @@ function generator.generate_parser_header(parser_name)
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
+#include <assert.h>
 
 // $PARSER_NAME$ - generated parser
 
@@ -133,7 +134,35 @@ typedef struct {
   bool success;
   char error_message[256];
   size_t depth;
+  lua_State *L;
 } Parser;
+
+
+#ifdef PGEN_DEBUG
+static void dumpstack (lua_State *L) {
+  int top=lua_gettop(L);
+  for (int i=1; i <= top; i++) {
+    printf("%d\t%s\t", i, luaL_typename(L,i));
+    switch (lua_type(L, i)) {
+      case LUA_TNUMBER:
+        printf("%g\n",lua_tonumber(L,i));
+        break;
+      case LUA_TSTRING:
+        printf("%s\n",lua_tostring(L,i));
+        break;
+      case LUA_TBOOLEAN:
+        printf("%s\n", (lua_toboolean(L, i) ? "true" : "false"));
+        break;
+      case LUA_TNIL:
+        printf("%s\n", "nil");
+        break;
+      default:
+        printf("%p\n",lua_topointer(L,i));
+        break;
+    }
+  }
+}
+#endif
 
 ]], {PARSER_NAME = parser_name})
 end
@@ -216,6 +245,10 @@ function generator.generate_pattern_code(pattern)
   elseif t == 4 then -- V (reference to another rule)
     local rule_name = pattern.value
     return generator.generate_rule_call_code(rule_name)
+  elseif t == 5 then -- C (capture)
+    return generator.generate_capture_code(pattern.value)
+  elseif t == 6 then -- Ct (capture table)
+    return generator.generate_capture_table_code(pattern.value)
   elseif t == "sequence" then
     return generator.generate_sequence_code(pattern[1], pattern[2])
   elseif t == "choice" then
@@ -442,6 +475,46 @@ function generator.generate_negate_code(a)
   })
 end
 
+-- Generate code for a capture
+function generator.generate_capture_code(body)
+  return template_code([[{ // Capture
+  size_t start_pos = parser->pos;
+  $BODY$
+
+  if (parser->success) {
+    size_t capture_length = parser->pos - start_pos;
+    lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+  }
+}]], {
+    BODY = generator.generate_pattern_code(body)
+  })
+end
+
+-- Generate code for a capture table (Ct)
+function generator.generate_capture_table_code(body)
+  return template_code([[{ // Capture Table
+  int initial_stack_size = lua_gettop(parser->L);
+  $BODY$
+
+  if (parser->success) {
+    int new_stack_size = lua_gettop(parser->L);
+    int items_count = new_stack_size - initial_stack_size;
+    int table_position = -items_count - 1;
+
+    lua_createtable(parser->L, items_count, 0);
+
+    lua_insert(parser->L, table_position);
+
+    for (int i = items_count; i >= 1; --i) {
+      lua_rawseti(parser->L, table_position, i);
+      table_position += 1;
+    }
+  }
+}]], {
+    BODY = generator.generate_pattern_code(body)
+  })
+end
+
 
 -- Assuming 'generator' is a table used to organize functions
 generator = generator or {}
@@ -450,7 +523,7 @@ generator = generator or {}
 function generator.generate_c_core_functions(parser_name, start_rule)
   return template_code([[
 // Initialize parser
-static Parser* $PARSER_NAME$_init(const char *input) {
+static Parser* $PARSER_NAME$_init(const char *input, lua_State *L) {
   Parser *parser = (Parser*)malloc(sizeof(Parser));
   if (!parser) {
     // Handle allocation failure if necessary, though often parser might exit
@@ -462,6 +535,7 @@ static Parser* $PARSER_NAME$_init(const char *input) {
   parser->depth = 0;
   parser->success = true;
   parser->error_message[0] = '\0';
+  parser->L = L;
   return parser;
 }
 
@@ -496,25 +570,35 @@ static int l_$PARSER_NAME$_parse(lua_State *L) {
   }
 
   // Initialize the parser directly
-  Parser *parser = $PARSER_NAME$_init(input);
+  Parser *parser = $PARSER_NAME$_init(input, L);
   if (!parser) {
      lua_pushnil(L);
      lua_pushstring(L, "Parser initialization failed (memory allocation?)");
      return 2;
   }
 
+  int initial_stack_size = lua_gettop(parser->L);
+
   parse_$START_RULE$(parser);
+
+  int final_stack_size = lua_gettop(parser->L);
 
   // Return nil and error message on failure, true on success
   if (!parser->success) {
+    assert(final_stack_size == initial_stack_size && "Unexpected stack size change on parse failure.");
     lua_pushnil(L);
     lua_pushstring(L, parser->error_message);
     $PARSER_NAME$_free(parser);
     return 2; // Return nil and error message
   }
 
-  // Success case
-  // NOTE: add 1 for Lua 1 indexed positioning
+  // If stack size has changed, use new items as return values
+  if (final_stack_size > initial_stack_size) {
+    $PARSER_NAME$_free(parser);
+    return final_stack_size - initial_stack_size; // Return new items
+  }
+
+  // Success case with no stack change
   lua_pushinteger(L, parser->pos + 1);
   $PARSER_NAME$_free(parser);
   return 1; // Return position of consumed input
