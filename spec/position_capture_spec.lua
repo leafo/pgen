@@ -1,7 +1,9 @@
 -- Use the compiled parser
-local parser = require("position_capture_parser")
 
 describe("position_capture", function()
+  local pgen = require "pgen"
+  local parser = pgen.require("spec.parsers.position_capture")
+
   it("captures positions correctly", function()
     local result = parser.parse("a, b, c,")
     

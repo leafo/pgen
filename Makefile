@@ -5,7 +5,7 @@
 test: calc_parser.so
 	lua5.1 test.lua
 
-busted: json_parser.so calc_parser.so position_capture_parser.so
+busted: json_parser.so calc_parser.so
 	busted spec
 
 parser.so: examples/numbers.lua

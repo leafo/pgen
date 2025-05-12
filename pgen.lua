@@ -1,7 +1,7 @@
 local pgen = {}
 
 -- Pattern types
-local P, R, S, V, C, Ct, Cp = 1, 2, 3, 4, 5, 6, 7
+local P, R, S, V, C, Ct, Cp, Cc = 1, 2, 3, 4, 5, 6, 7, 8
 
 local mt = {}
 
@@ -67,6 +67,11 @@ end
 -- Capture position
 function pgen.Cp()
   return pattern(Cp)
+end
+
+-- Constant capture
+function pgen.Cc(...)
+  return pattern(Cc, {...})
 end
 
 function mt.__add(a, b)

@@ -266,6 +266,8 @@ function generator.generate_pattern_code(pattern)
     return generator.generate_capture_table_code(pattern.value)
   elseif t == 7 then -- Cp (capture position)
     return generator.generate_position_capture_code()
+  elseif t == 8 then -- Cc (constant capture)
+    return generator.generate_constant_capture_code(pattern.value)
   elseif t == "sequence" then
     return generator.generate_sequence_code(pattern[1], pattern[2])
   elseif t == "choice" then
@@ -538,6 +540,44 @@ function generator.generate_position_capture_code()
   // Push current position + 1 (Lua uses 1-based indexing)
   lua_pushinteger(parser->L, parser->pos + 1);
 }]], {})
+end
+
+-- Generate code for a constant capture (Cc)
+function generator.generate_constant_capture_code(values)
+  local push_code = ""
+
+  for i, value in ipairs(values) do
+    local t = type(value)
+    if t == "string" then
+      push_code = push_code .. template_code([[
+  lua_pushlstring(parser->L, $VALUE$, $LENGTH$);]], {
+        VALUE = escape_c_literal(value),
+        LENGTH = #value
+      })
+    elseif t == "number" then
+      push_code = push_code .. template_code([[
+  lua_pushnumber(parser->L, $VALUE$);]], {
+        VALUE = value
+      })
+    elseif t == "boolean" then
+      push_code = push_code .. template_code([[
+  lua_pushboolean(parser->L, $VALUE$);]], {
+        VALUE = value and "1" or "0"
+      })
+    elseif t == "nil" then
+      push_code = push_code .. [[
+  lua_pushnil(parser->L);]]
+    else
+      error("Unsupported constant capture type: " .. t)
+    end
+  end
+
+  return template_code([[{ // Constant Capture
+  // A constant capture matches the empty string and produces all given values
+$PUSH_CODE$
+}]], {
+    PUSH_CODE = push_code
+  })
 end
 
 
