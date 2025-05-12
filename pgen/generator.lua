@@ -546,7 +546,8 @@ end
 function generator.generate_constant_capture_code(values)
   local push_code = ""
 
-  for i, value in ipairs(values) do
+  for i=1, values.count do
+    local value = values[i]
     local t = type(value)
     if t == "string" then
       push_code = push_code .. template_code([[

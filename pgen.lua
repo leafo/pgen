@@ -71,7 +71,8 @@ end
 
 -- Constant capture
 function pgen.Cc(...)
-  return pattern(Cc, {...})
+  local count = select("#", ...)
+  return pattern(Cc, {..., count = count})
 end
 
 function mt.__add(a, b)

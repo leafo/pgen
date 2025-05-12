@@ -5,5 +5,6 @@ local P, R, S, V, C, Ct, Cp, Cc = pgen.P, pgen.R, pgen.S, pgen.V, pgen.C, pgen.C
 return {
   "main",
 
-  main = P"test" * Cc(42) * Cc("test_field") * Cc(true) * Cc(nil)
+  -- nil in the middle to test capturing empty slot
+  main = P"test" * Cc(42) * Cc("test_field") * Cc(nil) * Cc(true),
 }
