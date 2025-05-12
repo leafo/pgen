@@ -137,6 +137,21 @@ typedef struct {
   lua_State *L;
 } Parser;
 
+typedef struct {
+  size_t pos;
+  int stack_size;
+} ParserPosition;
+
+#define REMEMBER_POSITION(parser, pos) \
+  ParserPosition pos; \
+  (pos).pos = (parser)->pos; \
+  (pos).stack_size = lua_gettop((parser)->L);
+
+// Restore parser position
+#define RESTORE_POSITION(parser, pos) \
+  (parser)->pos = (pos).pos; \
+  lua_settop((parser)->L, (pos).stack_size);
+
 
 #ifdef PGEN_DEBUG
 static void dumpstack (lua_State *L) {
@@ -359,7 +374,7 @@ end
 -- Generate code for a sequence
 function generator.generate_sequence_code(a, b)
   return template_code([[{// Sequence
-  size_t start_pos = parser->pos;
+  REMEMBER_POSITION(parser, pos);
 
   $A$
 
@@ -367,7 +382,7 @@ function generator.generate_sequence_code(a, b)
     $B$
 
     if (!parser->success) {
-      parser->pos = start_pos;
+      RESTORE_POSITION(parser, pos);
     }
   }
 }]], {
@@ -400,7 +415,6 @@ function generator.generate_repeat_code(a, n)
 
   return template_code([[{ // At most $N$ repetitions
   size_t rep_count = 0;
-  size_t start_pos = parser->pos;
 
   while(rep_count < $N$) {
     size_t before_pos = parser->pos;
@@ -424,7 +438,7 @@ function generator.generate_repeat_code(a, n)
   end
 
   return template_code([[{ // At least $N$ repetitions
-  size_t start_pos = parser->pos;
+  REMEMBER_POSITION(parser, pos);
   size_t rep_count = 0;
 
   while(true) {
@@ -440,7 +454,7 @@ function generator.generate_repeat_code(a, n)
   if (rep_count >= $N$) {
     parser->success = true;
   } else {
-    parser->pos = start_pos;
+    RESTORE_POSITION(parser, pos);
 #ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Expected $N$ repetitions at position %zu", parser->pos);
 #endif
@@ -454,21 +468,21 @@ end
 -- Generate code for a negated pattern
 function generator.generate_negate_code(a)
   return template_code([[{// Negate (only match if pattern fails)
-  size_t start_pos = parser->pos;
+  REMEMBER_POSITION(parser, pos);
 
   $BODY$
 
   if (parser->success) {
     // Pattern matched, so negate fails
-    parser->pos = start_pos; // Restore original position
+    RESTORE_POSITION(parser, pos);
     parser->success = false;
 #ifdef PGEN_ERRORS
-    sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", start_pos);
+    sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
 #endif
   } else {
     // Pattern failed, so negate succeeds
     parser->success = true;
-    parser->pos = start_pos; // Restore original position
+    RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
   }
 }]], {
     BODY = generator.generate_pattern_code(a)
@@ -483,6 +497,7 @@ function generator.generate_capture_code(body)
 
   if (parser->success) {
     size_t capture_length = parser->pos - start_pos;
+    // TODO: ensure stack has enough space for push
     lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
   }
 }]], {
@@ -538,6 +553,7 @@ static Parser* $PARSER_NAME$_init(const char *input, lua_State *L) {
   parser->L = L;
   return parser;
 }
+
 
 // Free parser
 static void $PARSER_NAME$_free(Parser *parser) {
