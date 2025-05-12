@@ -63,21 +63,8 @@ end
 
 
 -- Compile a grammar definition to C code
-function generator.generate(grammar, parser_name, output_file)
-  local c_code = generator.create_c_code(grammar, parser_name)
-
-  -- Write C code to file
-  if output_file then
-    local file = io.open(output_file, "w")
-    if not file then
-      return nil, "Could not open output file: " .. output_file
-    end
-
-    file:write(c_code)
-    file:close()
-  end
-
-  return c_code
+function generator.generate(grammar, parser_name)
+  return generator.create_c_code(grammar, parser_name)
 end
 
 -- Convert grammar to C code
