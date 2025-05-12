@@ -1,9 +1,12 @@
 
 
-.PHONY: test
+.PHONY: test busted
 
 test:
 	make -B calc_parser.so && lua5.1 test.lua
+
+busted: json_parser.so calc_parser.so
+	busted spec
 
 calc_parser.so: calc_parser.c
 	gcc -shared -o calc_parser.so -O3 -fPIC calc_parser.c `pkg-config --cflags --libs lua5.1`
