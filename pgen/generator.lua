@@ -264,6 +264,8 @@ function generator.generate_pattern_code(pattern)
     return generator.generate_capture_code(pattern.value)
   elseif t == 6 then -- Ct (capture table)
     return generator.generate_capture_table_code(pattern.value)
+  elseif t == 7 then -- Cp (capture position)
+    return generator.generate_position_capture_code()
   elseif t == "sequence" then
     return generator.generate_sequence_code(pattern[1], pattern[2])
   elseif t == "choice" then
@@ -528,6 +530,14 @@ function generator.generate_capture_table_code(body)
 }]], {
     BODY = generator.generate_pattern_code(body)
   })
+end
+
+-- Generate code for a position capture (Cp)
+function generator.generate_position_capture_code()
+  return template_code([[{ // Position Capture
+  // Push current position + 1 (Lua uses 1-based indexing)
+  lua_pushinteger(parser->L, parser->pos + 1);
+}]], {})
 end
 
 

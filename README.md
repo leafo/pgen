@@ -43,6 +43,9 @@ pgen.compile(grammar, {
 - `R(start, end)` - Match character range
 - `S(set)` - Match character in set
 - `V(rule)` - Reference another rule
+- `C(patt)` - Capture pattern
+- `Ct(patt)` - Capture table
+- `Cp()` - Capture current position without consuming input
 
 ## Operators
 
