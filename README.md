@@ -9,6 +9,7 @@ This is just an experiment that will eventually find its way into [moonparse](ht
 - Generates parser in pure C
 - Supports common pattern types: literals, character ranges, character sets
 - Operators for sequences, choices, repetition and optional patterns
+- Supports captures, table captures, and constant captures
 
 ## Usage
 
@@ -41,20 +42,25 @@ See [Compilation](#compilation) for more details on how to compile the generated
 ## Pattern Types
 
 - `P(string)` - Match literal string
-- `R(start, end)` - Match character range
+- `P(number)` - Match exactly n characters (positive number) or fail if n characters can be matched (negative number)
+- `R(...)` - Match character ranges (can handle multiple ranges: `R("az", "AZ", "09")`)
 - `S(set)` - Match character in set
-- `V(rule)` - Reference another rule
-- `C(patt)` - Capture pattern
-- `Ct(patt)` - Capture table
+- `V(rule)` - Reference another rule by name in a grammar
+- `C(patt)` - Capture text matched by patt
+- `Ct(patt)` - Capture table, any captures created by patt are wrapped into a single table
 - `Cp()` - Capture current position without consuming input
+- `Cc(...)` - Constant capture, consumes no input and always matches (appends the given values as captures)
+- `L(patt)` - Lookahead pattern (matches without consuming input)
 
 ## Operators
 
 - `a * b` - Sequence: match a followed by b
 - `a + b` - Choice: match a or b
 - `-a` - Negative predicate, continue only if a can't be matched
-- `a^n` - Matches at least n repetitions of patt 
-- `a^-n` - Matches at most n repetitions of patt
+- `a^n` - Matches at least n repetitions of pattern
+- `a^-n` - Matches at most n repetitions of pattern
+- `a - b` - Difference: match a only if it's not followed by b (implemented as `-b * a`)
+- `#a` - Lookahead: matches a without consuming input (shorthand for `L(a)`)
 
 ## Compilation
 
