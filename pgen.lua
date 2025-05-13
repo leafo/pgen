@@ -184,7 +184,7 @@ function pgen.require(module_name, options)
   -- Compile the C code to a shared object using gcc, piping to stdin
   start_time = show_timing and socket.gettime()
   local tmp_so = os.tmpname() .. ".so"
-  local gcc_command = string.format("gcc -shared -o %s -O3 -fPIC -x c - `pkg-config --cflags --libs lua5.1`", tmp_so)
+  local gcc_command = string.format("gcc -shared -o %s -march=native -flto -finline-functions -O3 -fPIC -x c - `pkg-config --cflags --libs lua5.1`", tmp_so)
   local gcc_process = io.popen(gcc_command, "w")
   if not gcc_process then
     error("Error: Could not execute gcc for compiling C code")
