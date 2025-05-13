@@ -63,12 +63,7 @@ end
 
 
 -- Compile a grammar definition to C code
-function generator.generate(grammar, parser_name)
-  return generator.create_c_code(grammar, parser_name)
-end
-
--- Convert grammar to C code
-function generator.create_c_code(grammar, parser_name, options)
+function generator.generate(grammar, parser_name, options)
   options = options or {}
 
   local rules = {}
@@ -95,13 +90,13 @@ function generator.create_c_code(grammar, parser_name, options)
   end
 
   -- Generate the C code
-  local c_code = generator.generate_parser_header(parser_name)
-  c_code = c_code .. generator.generate_forward_declarations(rules)
-  c_code = c_code .. generator.generate_rule_functions(rules)
-  c_code = c_code .. generator.generate_parser_main(parser_name, start_rule)
-
-  -- Add compilation instructions as a comment
-  c_code = c_code .. template_code([[/*
+  local c_chunks = {
+    generator.generate_parser_header(parser_name),
+    generator.generate_forward_declarations(rules),
+    generator.generate_rule_functions(rules),
+    generator.generate_parser_main(parser_name, start_rule),
+    -- Add compilation instructions as a comment
+    template_code([[/*
 To compile as a Lua module:
 gcc -shared -o $PARSER_NAME$.so -fPIC $PARSER_NAME$.c `pkg-config --cflags --libs lua5.1`
 
@@ -110,8 +105,17 @@ local $PARSER_NAME$ = require "$PARSER_NAME$"
 local result = $PARSER_NAME$.parse("your input string")
 */
 ]], {PARSER_NAME = parser_name})
+  }
 
-  return c_code
+  if options.pgen_debug then
+    talbe.insert(c_chunks, 1, "#DEFINE PGEN_DEBUG")
+  end
+
+  if options.pgen_errors then
+    table.insert(c_chunks, 1, "#DEFINE PGEN_ERRORS")
+  end
+
+  return table.concat(c_chunks, "\n")
 end
 
 -- Generate parser header
