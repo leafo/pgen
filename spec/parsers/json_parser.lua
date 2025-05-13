@@ -24,7 +24,7 @@ return {
 
   -- String: "..."
   string = P"\"" * Ct(Cc("string") * C(V"char"^0)) * P"\"",
-  char = V"escape" + (P(1) - P"\"" - P"\\"),
+  char = V"escape" + (P(1) - S"\"\\"),
 
   -- Escape sequences
   escape = P"\\" * (S"\"\\/bfnrt" + V"unicode"),

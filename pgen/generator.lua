@@ -272,7 +272,7 @@ function generator.generate_pattern_code(pattern)
   elseif t == 9 then -- L (lookahead)
     return generator.generate_lookahead_code(pattern.value)
   elseif t == "sequence" then
-    return generator.generate_sequence_code(pattern[1], pattern[2])
+    return generator.generate_sequence_code(unpack(pattern))
   elseif t == "choice" then
     return generator.generate_choice_code(pattern[1], pattern[2])
   -- TODO: this is redundant, but might be able to optimize ^-1 with reduced code
@@ -428,22 +428,38 @@ function generator.generate_rule_call_code(rule_name)
 end
 
 -- Generate code for a sequence
-function generator.generate_sequence_code(a, b)
-  return template_code([[{// Sequence
-  REMEMBER_POSITION(parser, pos);
+function generator.generate_sequence_code(...)
+  local patterns = {...}
 
-  $A$
+  if #patterns == 1 then
+    -- TODO: throw an error here? shouldn't happen
+    return generator.generate_pattern_code(patterns[1])
+  end
 
-  if (parser->success) {
-    $B$
-
-    if (!parser->success) {
-      RESTORE_POSITION(parser, pos);
-    }
-  }
+  function step(idx, current, ...)
+    local rest = ... and template_code([[
+if (parser->success) {
+  $PATTERN$
+  $RESET$
 }]], {
-    A = generator.generate_pattern_code(a),
-    B = generator.generate_pattern_code(b)
+      PATTERN = step(idx + 1, ...),
+      RESET = idx == 1 and "if (!parser->success) { RESTORE_POSITION(parser, pos); }" or ""
+    })
+
+    return table.concat({
+      generator.generate_pattern_code(current),
+      rest
+    },"\n")
+  end
+
+  -- Generate the initial position storage and first pattern
+  return template_code([[{// Sequence with $N$ patterns
+REMEMBER_POSITION(parser, pos);
+
+$SEQUENCE$
+}]], {
+    N = #patterns,
+    SEQUENCE = step(1, unpack(patterns))
   })
 end
 

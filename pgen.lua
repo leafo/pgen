@@ -99,10 +99,30 @@ function mt.__sub(a, b)
 end
 
 function mt.__mul(a, b)
-  return make{
-    type = "sequence",
-    coerce_pattern(a), coerce_pattern(b)
+  a = coerce_pattern(a)
+  b = coerce_pattern(b)
+
+  local sequence = {
+    type = "sequence"
   }
+
+  if a.type == "sequence" then
+    for i, p in ipairs(a) do
+      table.insert(sequence, p)
+    end
+  else
+    table.insert(sequence, a)
+  end
+
+  if b.type == "sequence" then
+    for i, p in ipairs(b) do
+      table.insert(sequence, p)
+    end
+  else
+    table.insert(sequence, b)
+  end
+
+  return make(sequence)
 end
 
 -- negative predicate

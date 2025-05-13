@@ -90,7 +90,7 @@ static bool parse_number(Parser *parser) {
 
   { // Capture Table
     int initial_stack_size = lua_gettop(parser->L);
-    { // Sequence
+    { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
 
       { // Constant Capture
@@ -98,137 +98,120 @@ static bool parse_number(Parser *parser) {
         // values
         lua_pushlstring(parser->L, "number", 6);
       }
-
       if (parser->success) {
         { // Capture
           size_t start_pos = parser->pos;
-          { // Sequence
+          { // Sequence with 4 patterns
             REMEMBER_POSITION(parser, pos);
 
-            { // Sequence
-              REMEMBER_POSITION(parser, pos);
+            { // At most 1 repetitions
+              size_t rep_count = 0;
 
-              { // Sequence
-                REMEMBER_POSITION(parser, pos);
+              while (rep_count < 1) {
+                size_t before_pos = parser->pos;
 
-                { // At most 1 repetitions
-                  size_t rep_count = 0;
-
-                  while (rep_count < 1) {
-                    size_t before_pos = parser->pos;
-
-                    {
-                      { // Match single character "-"
-                        if (parser->pos < parser->input_len &&
-                            parser->input[parser->pos] == 45) {
-                          parser->pos++;
-                        } else {
+                {
+                  { // Match single character "-"
+                    if (parser->pos < parser->input_len &&
+                        parser->input[parser->pos] == 45) {
+                      parser->pos++;
+                    } else {
 #ifdef PGEN_ERRORS
-                          sprintf(parser->error_message,
-                                  "Expected character `"
-                                  "-"
-                                  "` at position %zu",
-                                  parser->pos);
+                      sprintf(parser->error_message,
+                              "Expected character `"
+                              "-"
+                              "` at position %zu",
+                              parser->pos);
 #endif
-                          parser->success = false;
-                        }
-                      }
+                      parser->success = false;
                     }
-
-                    if (!parser->success || before_pos == parser->pos) {
-                      // Break on failure or zero-width match
-                      parser->success = true;
-                      break;
-                    }
-
-                    rep_count += 1;
                   }
                 }
 
-                if (parser->success) {
-                  {   // Choice
-                    { // Match single character "0"
+                if (!parser->success || before_pos == parser->pos) {
+                  // Break on failure or zero-width match
+                  parser->success = true;
+                  break;
+                }
+
+                rep_count += 1;
+              }
+            }
+            if (parser->success) {
+              {   // Choice
+                { // Match single character "0"
+                  if (parser->pos < parser->input_len &&
+                      parser->input[parser->pos] == 48) {
+                    parser->pos++;
+                  } else {
+#ifdef PGEN_ERRORS
+                    sprintf(parser->error_message,
+                            "Expected character `"
+                            "0"
+                            "` at position %zu",
+                            parser->pos);
+#endif
+                    parser->success = false;
+                  }
+                }
+
+                if (!parser->success) {
+                  parser->success = true;
+                  { // Sequence with 2 patterns
+                    REMEMBER_POSITION(parser, pos);
+
+                    { // Match character range: "19"
                       if (parser->pos < parser->input_len &&
-                          parser->input[parser->pos] == 48) {
+                          ((parser->input[parser->pos] >= 49 &&
+                            parser->input[parser->pos] <= 57))) {
                         parser->pos++;
                       } else {
 #ifdef PGEN_ERRORS
                         sprintf(parser->error_message,
-                                "Expected character `"
-                                "0"
-                                "` at position %zu",
+                                "Expected character in ranges ["
+                                "1"
+                                " - "
+                                "9"
+                                "] at position %zu",
                                 parser->pos);
 #endif
                         parser->success = false;
                       }
                     }
-
-                    if (!parser->success) {
-                      parser->success = true;
-                      { // Sequence
-                        REMEMBER_POSITION(parser, pos);
-
-                        { // Match character range: "19"
-                          if (parser->pos < parser->input_len &&
-                              ((parser->input[parser->pos] >= 49 &&
-                                parser->input[parser->pos] <= 57))) {
-                            parser->pos++;
-                          } else {
+                    if (parser->success) {
+                      { // Zero or more repetitions
+                        while (true) {
+                          { // Match character range: "09"
+                            if (parser->pos < parser->input_len &&
+                                ((parser->input[parser->pos] >= 48 &&
+                                  parser->input[parser->pos] <= 57))) {
+                              parser->pos++;
+                            } else {
 #ifdef PGEN_ERRORS
-                            sprintf(parser->error_message,
-                                    "Expected character in ranges ["
-                                    "1"
-                                    " - "
-                                    "9"
-                                    "] at position %zu",
-                                    parser->pos);
+                              sprintf(parser->error_message,
+                                      "Expected character in ranges ["
+                                      "0"
+                                      " - "
+                                      "9"
+                                      "] at position %zu",
+                                      parser->pos);
 #endif
-                            parser->success = false;
-                          }
-                        }
-
-                        if (parser->success) {
-                          { // Zero or more repetitions
-                            while (true) {
-                              { // Match character range: "09"
-                                if (parser->pos < parser->input_len &&
-                                    ((parser->input[parser->pos] >= 48 &&
-                                      parser->input[parser->pos] <= 57))) {
-                                  parser->pos++;
-                                } else {
-#ifdef PGEN_ERRORS
-                                  sprintf(parser->error_message,
-                                          "Expected character in ranges ["
-                                          "0"
-                                          " - "
-                                          "9"
-                                          "] at position %zu",
-                                          parser->pos);
-#endif
-                                  parser->success = false;
-                                }
-                              }
-                              if (!parser->success) {
-                                break;
-                              }
+                              parser->success = false;
                             }
-                            parser->success = true;
                           }
-
                           if (!parser->success) {
-                            RESTORE_POSITION(parser, pos);
+                            break;
                           }
                         }
+                        parser->success = true;
+                      }
+                      if (!parser->success) {
+                        RESTORE_POSITION(parser, pos);
                       }
                     }
                   }
-
-                  if (!parser->success) {
-                    RESTORE_POSITION(parser, pos);
-                  }
                 }
               }
-
               if (parser->success) {
                 { // At most 1 repetitions
                   size_t rep_count = 0;
@@ -237,7 +220,7 @@ static bool parse_number(Parser *parser) {
                     size_t before_pos = parser->pos;
 
                     {
-                      { // Sequence
+                      { // Sequence with 2 patterns
                         REMEMBER_POSITION(parser, pos);
 
                         { // Match single character "."
@@ -255,7 +238,6 @@ static bool parse_number(Parser *parser) {
                             parser->success = false;
                           }
                         }
-
                         if (parser->success) {
                           { // At least 1 repetitions
                             REMEMBER_POSITION(parser, pos);
@@ -299,7 +281,6 @@ static bool parse_number(Parser *parser) {
 #endif
                             }
                           }
-
                           if (!parser->success) {
                             RESTORE_POSITION(parser, pos);
                           }
@@ -316,173 +297,158 @@ static bool parse_number(Parser *parser) {
                     rep_count += 1;
                   }
                 }
+                if (parser->success) {
+                  { // At most 1 repetitions
+                    size_t rep_count = 0;
 
-                if (!parser->success) {
-                  RESTORE_POSITION(parser, pos);
-                }
-              }
-            }
+                    while (rep_count < 1) {
+                      size_t before_pos = parser->pos;
 
-            if (parser->success) {
-              { // At most 1 repetitions
-                size_t rep_count = 0;
-
-                while (rep_count < 1) {
-                  size_t before_pos = parser->pos;
-
-                  {
-                    { // Sequence
-                      REMEMBER_POSITION(parser, pos);
-
-                      { // Sequence
-                        REMEMBER_POSITION(parser, pos);
-
-                        { // Match character set "eE"
-                          if (parser->pos < parser->input_len) {
-                            switch (parser->input[parser->pos]) {
-                            case 101: /* "e" */
-                            case 69:  /* "E" */
-                              parser->pos++;
-                              break;
-                            default:
-#ifdef PGEN_ERRORS
-                              sprintf(parser->error_message,
-                                      "Expected one of "
-                                      "\"eE\""
-                                      " at position %zu",
-                                      parser->pos);
-#endif
-                              parser->success = false;
-                            }
-                          } else {
-#ifdef PGEN_ERRORS
-                            sprintf(parser->error_message,
-                                    "Expected one of "
-                                    "\"eE\""
-                                    " at position %zu but reached end of input",
-                                    parser->pos);
-#endif
-                            parser->success = false;
-                          }
-                        }
-
-                        if (parser->success) {
-                          { // At most 1 repetitions
-                            size_t rep_count = 0;
-
-                            while (rep_count < 1) {
-                              size_t before_pos = parser->pos;
-
-                              {
-                                { // Match character set "+-"
-                                  if (parser->pos < parser->input_len) {
-                                    switch (parser->input[parser->pos]) {
-                                    case 43: /* "+" */
-                                    case 45: /* "-" */
-                                      parser->pos++;
-                                      break;
-                                    default:
-#ifdef PGEN_ERRORS
-                                      sprintf(parser->error_message,
-                                              "Expected one of "
-                                              "\"+-\""
-                                              " at position %zu",
-                                              parser->pos);
-#endif
-                                      parser->success = false;
-                                    }
-                                  } else {
-#ifdef PGEN_ERRORS
-                                    sprintf(parser->error_message,
-                                            "Expected one of "
-                                            "\"+-\""
-                                            " at position %zu but reached end "
-                                            "of input",
-                                            parser->pos);
-#endif
-                                    parser->success = false;
-                                  }
-                                }
-                              }
-
-                              if (!parser->success ||
-                                  before_pos == parser->pos) {
-                                // Break on failure or zero-width match
-                                parser->success = true;
-                                break;
-                              }
-
-                              rep_count += 1;
-                            }
-                          }
-
-                          if (!parser->success) {
-                            RESTORE_POSITION(parser, pos);
-                          }
-                        }
-                      }
-
-                      if (parser->success) {
-                        { // At least 1 repetitions
+                      {
+                        { // Sequence with 3 patterns
                           REMEMBER_POSITION(parser, pos);
-                          size_t rep_count = 0;
 
-                          while (true) {
-                            { // Match character range: "09"
-                              if (parser->pos < parser->input_len &&
-                                  ((parser->input[parser->pos] >= 48 &&
-                                    parser->input[parser->pos] <= 57))) {
+                          { // Match character set "eE"
+                            if (parser->pos < parser->input_len) {
+                              switch (parser->input[parser->pos]) {
+                              case 101: /* "e" */
+                              case 69:  /* "E" */
                                 parser->pos++;
-                              } else {
+                                break;
+                              default:
 #ifdef PGEN_ERRORS
                                 sprintf(parser->error_message,
-                                        "Expected character in ranges ["
-                                        "0"
-                                        " - "
-                                        "9"
-                                        "] at position %zu",
+                                        "Expected one of "
+                                        "\"eE\""
+                                        " at position %zu",
                                         parser->pos);
 #endif
                                 parser->success = false;
                               }
-                            }
-
-                            if (!parser->success) {
-                              break;
-                            }
-
-                            rep_count += 1;
-                          }
-
-                          if (rep_count >= 1) {
-                            parser->success = true;
-                          } else {
-                            RESTORE_POSITION(parser, pos);
+                            } else {
 #ifdef PGEN_ERRORS
-                            sprintf(parser->error_message,
-                                    "Expected 1 repetitions at position %zu",
-                                    parser->pos);
+                              sprintf(
+                                  parser->error_message,
+                                  "Expected one of "
+                                  "\"eE\""
+                                  " at position %zu but reached end of input",
+                                  parser->pos);
 #endif
+                              parser->success = false;
+                            }
                           }
-                        }
+                          if (parser->success) {
+                            { // At most 1 repetitions
+                              size_t rep_count = 0;
 
-                        if (!parser->success) {
-                          RESTORE_POSITION(parser, pos);
+                              while (rep_count < 1) {
+                                size_t before_pos = parser->pos;
+
+                                {
+                                  { // Match character set "+-"
+                                    if (parser->pos < parser->input_len) {
+                                      switch (parser->input[parser->pos]) {
+                                      case 43: /* "+" */
+                                      case 45: /* "-" */
+                                        parser->pos++;
+                                        break;
+                                      default:
+#ifdef PGEN_ERRORS
+                                        sprintf(parser->error_message,
+                                                "Expected one of "
+                                                "\"+-\""
+                                                " at position %zu",
+                                                parser->pos);
+#endif
+                                        parser->success = false;
+                                      }
+                                    } else {
+#ifdef PGEN_ERRORS
+                                      sprintf(parser->error_message,
+                                              "Expected one of "
+                                              "\"+-\""
+                                              " at position %zu but reached "
+                                              "end of input",
+                                              parser->pos);
+#endif
+                                      parser->success = false;
+                                    }
+                                  }
+                                }
+
+                                if (!parser->success ||
+                                    before_pos == parser->pos) {
+                                  // Break on failure or zero-width match
+                                  parser->success = true;
+                                  break;
+                                }
+
+                                rep_count += 1;
+                              }
+                            }
+                            if (parser->success) {
+                              { // At least 1 repetitions
+                                REMEMBER_POSITION(parser, pos);
+                                size_t rep_count = 0;
+
+                                while (true) {
+                                  { // Match character range: "09"
+                                    if (parser->pos < parser->input_len &&
+                                        ((parser->input[parser->pos] >= 48 &&
+                                          parser->input[parser->pos] <= 57))) {
+                                      parser->pos++;
+                                    } else {
+#ifdef PGEN_ERRORS
+                                      sprintf(parser->error_message,
+                                              "Expected character in ranges ["
+                                              "0"
+                                              " - "
+                                              "9"
+                                              "] at position %zu",
+                                              parser->pos);
+#endif
+                                      parser->success = false;
+                                    }
+                                  }
+
+                                  if (!parser->success) {
+                                    break;
+                                  }
+
+                                  rep_count += 1;
+                                }
+
+                                if (rep_count >= 1) {
+                                  parser->success = true;
+                                } else {
+                                  RESTORE_POSITION(parser, pos);
+#ifdef PGEN_ERRORS
+                                  sprintf(
+                                      parser->error_message,
+                                      "Expected 1 repetitions at position %zu",
+                                      parser->pos);
+#endif
+                                }
+                              }
+                            }
+                            if (!parser->success) {
+                              RESTORE_POSITION(parser, pos);
+                            }
+                          }
                         }
                       }
+
+                      if (!parser->success || before_pos == parser->pos) {
+                        // Break on failure or zero-width match
+                        parser->success = true;
+                        break;
+                      }
+
+                      rep_count += 1;
                     }
                   }
-
-                  if (!parser->success || before_pos == parser->pos) {
-                    // Break on failure or zero-width match
-                    parser->success = true;
-                    break;
-                  }
-
-                  rep_count += 1;
                 }
               }
-
               if (!parser->success) {
                 RESTORE_POSITION(parser, pos);
               }
@@ -496,7 +462,6 @@ static bool parse_number(Parser *parser) {
                             capture_length);
           }
         }
-
         if (!parser->success) {
           RESTORE_POSITION(parser, pos);
         }
@@ -544,106 +509,92 @@ static bool parse_string(Parser *parser) {
           "", "string", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 3 patterns
     REMEMBER_POSITION(parser, pos);
 
-    { // Sequence
-      REMEMBER_POSITION(parser, pos);
-
-      { // Match single character "\""
-        if (parser->pos < parser->input_len &&
-            parser->input[parser->pos] == 34) {
-          parser->pos++;
-        } else {
+    { // Match single character "\""
+      if (parser->pos < parser->input_len && parser->input[parser->pos] == 34) {
+        parser->pos++;
+      } else {
 #ifdef PGEN_ERRORS
-          sprintf(parser->error_message,
-                  "Expected character `"
-                  "\\\""
-                  "` at position %zu",
-                  parser->pos);
+        sprintf(parser->error_message,
+                "Expected character `"
+                "\\\""
+                "` at position %zu",
+                parser->pos);
 #endif
-          parser->success = false;
-        }
-      }
-
-      if (parser->success) {
-        { // Capture Table
-          int initial_stack_size = lua_gettop(parser->L);
-          { // Sequence
-            REMEMBER_POSITION(parser, pos);
-
-            { // Constant Capture
-              // A constant capture matches the empty string and produces all
-              // given values
-              lua_pushlstring(parser->L, "string", 6);
-            }
-
-            if (parser->success) {
-              { // Capture
-                size_t start_pos = parser->pos;
-                { // Zero or more repetitions
-                  while (true) {
-                    parse_char(parser);
-                    if (!parser->success) {
-                      break;
-                    }
-                  }
-                  parser->success = true;
-                }
-
-                if (parser->success) {
-                  size_t capture_length = parser->pos - start_pos;
-                  // TODO: ensure stack has enough space for push
-                  lua_pushlstring(parser->L, parser->input + start_pos,
-                                  capture_length);
-                }
-              }
-
-              if (!parser->success) {
-                RESTORE_POSITION(parser, pos);
-              }
-            }
-          }
-
-          if (parser->success) {
-            int new_stack_size = lua_gettop(parser->L);
-            int items_count = new_stack_size - initial_stack_size;
-            int table_position = -items_count - 1;
-
-            lua_createtable(parser->L, items_count, 0);
-
-            lua_insert(parser->L, table_position);
-
-            for (int i = items_count; i >= 1; --i) {
-              lua_rawseti(parser->L, table_position, i);
-              table_position += 1;
-            }
-          }
-        }
-
-        if (!parser->success) {
-          RESTORE_POSITION(parser, pos);
-        }
+        parser->success = false;
       }
     }
-
     if (parser->success) {
-      { // Match single character "\""
-        if (parser->pos < parser->input_len &&
-            parser->input[parser->pos] == 34) {
-          parser->pos++;
-        } else {
-#ifdef PGEN_ERRORS
-          sprintf(parser->error_message,
-                  "Expected character `"
-                  "\\\""
-                  "` at position %zu",
-                  parser->pos);
-#endif
-          parser->success = false;
+      { // Capture Table
+        int initial_stack_size = lua_gettop(parser->L);
+        { // Sequence with 2 patterns
+          REMEMBER_POSITION(parser, pos);
+
+          { // Constant Capture
+            // A constant capture matches the empty string and produces all
+            // given values
+            lua_pushlstring(parser->L, "string", 6);
+          }
+          if (parser->success) {
+            { // Capture
+              size_t start_pos = parser->pos;
+              { // Zero or more repetitions
+                while (true) {
+                  parse_char(parser);
+                  if (!parser->success) {
+                    break;
+                  }
+                }
+                parser->success = true;
+              }
+
+              if (parser->success) {
+                size_t capture_length = parser->pos - start_pos;
+                // TODO: ensure stack has enough space for push
+                lua_pushlstring(parser->L, parser->input + start_pos,
+                                capture_length);
+              }
+            }
+            if (!parser->success) {
+              RESTORE_POSITION(parser, pos);
+            }
+          }
+        }
+
+        if (parser->success) {
+          int new_stack_size = lua_gettop(parser->L);
+          int items_count = new_stack_size - initial_stack_size;
+          int table_position = -items_count - 1;
+
+          lua_createtable(parser->L, items_count, 0);
+
+          lua_insert(parser->L, table_position);
+
+          for (int i = items_count; i >= 1; --i) {
+            lua_rawseti(parser->L, table_position, i);
+            table_position += 1;
+          }
         }
       }
-
+      if (parser->success) {
+        { // Match single character "\""
+          if (parser->pos < parser->input_len &&
+              parser->input[parser->pos] == 34) {
+            parser->pos++;
+          } else {
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message,
+                    "Expected character `"
+                    "\\\""
+                    "` at position %zu",
+                    parser->pos);
+#endif
+            parser->success = false;
+          }
+        }
+      }
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }
@@ -739,7 +690,7 @@ static bool parse_escape(Parser *parser) {
           "", "escape", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 2 patterns
     REMEMBER_POSITION(parser, pos);
 
     { // Match single character "\\"
@@ -756,7 +707,6 @@ static bool parse_escape(Parser *parser) {
         parser->success = false;
       }
     }
-
     if (parser->success) {
       {   // Choice
         { // Match character set "\"\\\/bfnrt"
@@ -799,7 +749,6 @@ static bool parse_escape(Parser *parser) {
           parse_unicode(parser);
         }
       }
-
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }
@@ -831,7 +780,7 @@ static bool parse_false(Parser *parser) {
           "", "false", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 2 patterns
     REMEMBER_POSITION(parser, pos);
 
     { // Match literal "false"
@@ -849,11 +798,10 @@ static bool parse_false(Parser *parser) {
         parser->success = false;
       }
     }
-
     if (parser->success) {
       { // Capture Table
         int initial_stack_size = lua_gettop(parser->L);
-        { // Sequence
+        { // Sequence with 2 patterns
           REMEMBER_POSITION(parser, pos);
 
           { // Constant Capture
@@ -861,14 +809,12 @@ static bool parse_false(Parser *parser) {
             // given values
             lua_pushlstring(parser->L, "boolean", 7);
           }
-
           if (parser->success) {
             { // Constant Capture
               // A constant capture matches the empty string and produces all
               // given values
               lua_pushboolean(parser->L, 0);
             }
-
             if (!parser->success) {
               RESTORE_POSITION(parser, pos);
             }
@@ -890,7 +836,6 @@ static bool parse_false(Parser *parser) {
           }
         }
       }
-
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }
@@ -924,45 +869,18 @@ static bool parse_member(Parser *parser) {
 
   { // Capture Table
     int initial_stack_size = lua_gettop(parser->L);
-    { // Sequence
+    { // Sequence with 6 patterns
       REMEMBER_POSITION(parser, pos);
 
-      { // Sequence
-        REMEMBER_POSITION(parser, pos);
-
-        { // Sequence
-          REMEMBER_POSITION(parser, pos);
-
-          { // Sequence
-            REMEMBER_POSITION(parser, pos);
-
-            { // Sequence
-              REMEMBER_POSITION(parser, pos);
-
-              { // Constant Capture
-                // A constant capture matches the empty string and produces all
-                // given values
-                lua_pushlstring(parser->L, "member", 6);
-              }
-
-              if (parser->success) {
-                parse_string(parser);
-
-                if (!parser->success) {
-                  RESTORE_POSITION(parser, pos);
-                }
-              }
-            }
-
-            if (parser->success) {
-              parse_ws(parser);
-
-              if (!parser->success) {
-                RESTORE_POSITION(parser, pos);
-              }
-            }
-          }
-
+      { // Constant Capture
+        // A constant capture matches the empty string and produces all given
+        // values
+        lua_pushlstring(parser->L, "member", 6);
+      }
+      if (parser->success) {
+        parse_string(parser);
+        if (parser->success) {
+          parse_ws(parser);
           if (parser->success) {
             { // Match single character ":"
               if (parser->pos < parser->input_len &&
@@ -979,25 +897,14 @@ static bool parse_member(Parser *parser) {
                 parser->success = false;
               }
             }
-
-            if (!parser->success) {
-              RESTORE_POSITION(parser, pos);
+            if (parser->success) {
+              parse_ws(parser);
+              if (parser->success) {
+                parse_value(parser);
+              }
             }
           }
         }
-
-        if (parser->success) {
-          parse_ws(parser);
-
-          if (!parser->success) {
-            RESTORE_POSITION(parser, pos);
-          }
-        }
-      }
-
-      if (parser->success) {
-        parse_value(parser);
-
         if (!parser->success) {
           RESTORE_POSITION(parser, pos);
         }
@@ -1106,22 +1013,35 @@ static bool parse_char(Parser *parser) {
 
     if (!parser->success) {
       parser->success = true;
-      { // Sequence
+      { // Sequence with 2 patterns
         REMEMBER_POSITION(parser, pos);
 
         { // Negate (only match if pattern fails)
           REMEMBER_POSITION(parser, pos);
 
-          { // Match single character "\\"
-            if (parser->pos < parser->input_len &&
-                parser->input[parser->pos] == 92) {
-              parser->pos++;
+          { // Match character set "\"\\"
+            if (parser->pos < parser->input_len) {
+              switch (parser->input[parser->pos]) {
+              case 34: /* "\"" */
+              case 92: /* "\\" */
+                parser->pos++;
+                break;
+              default:
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message,
+                        "Expected one of "
+                        "\"\\\"\\\\\""
+                        " at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
             } else {
 #ifdef PGEN_ERRORS
               sprintf(parser->error_message,
-                      "Expected character `"
-                      "\\\\"
-                      "` at position %zu",
+                      "Expected one of "
+                      "\"\\\"\\\\\""
+                      " at position %zu but reached end of input",
                       parser->pos);
 #endif
               parser->success = false;
@@ -1146,69 +1066,19 @@ static bool parse_char(Parser *parser) {
                                    // no changes to position)
           }
         }
-
         if (parser->success) {
-          { // Sequence
-            REMEMBER_POSITION(parser, pos);
-
-            { // Negate (only match if pattern fails)
-              REMEMBER_POSITION(parser, pos);
-
-              { // Match single character "\""
-                if (parser->pos < parser->input_len &&
-                    parser->input[parser->pos] == 34) {
-                  parser->pos++;
-                } else {
+          { // Match any 1 characters
+            if (parser->pos + 1 <= parser->input_len) {
+              parser->pos += 1;
+            } else {
 #ifdef PGEN_ERRORS
-                  sprintf(parser->error_message,
-                          "Expected character `"
-                          "\\\""
-                          "` at position %zu",
-                          parser->pos);
+              sprintf(parser->error_message,
+                      "Expected at least 1 more characters at position %zu",
+                      parser->pos);
 #endif
-                  parser->success = false;
-                }
-              }
-
-              if (parser->success) {
-                // Pattern matched, so negate fails
-                RESTORE_POSITION(parser, pos);
-                parser->success = false;
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message,
-                        "Negated pattern unexpectedly matched at position %zu",
-                        pos.pos);
-#endif
-              } else {
-                // Pattern failed, so negate succeeds
-                parser->success = true;
-                RESTORE_POSITION(parser,
-                                 pos); // Restore original position (technically
-                                       // not necessary since failed pattern
-                                       // should make no changes to position)
-              }
-            }
-
-            if (parser->success) {
-              { // Match any 1 characters
-                if (parser->pos + 1 <= parser->input_len) {
-                  parser->pos += 1;
-                } else {
-#ifdef PGEN_ERRORS
-                  sprintf(parser->error_message,
-                          "Expected at least 1 more characters at position %zu",
-                          parser->pos);
-#endif
-                  parser->success = false;
-                }
-              }
-
-              if (!parser->success) {
-                RESTORE_POSITION(parser, pos);
-              }
+              parser->success = false;
             }
           }
-
           if (!parser->success) {
             RESTORE_POSITION(parser, pos);
           }
@@ -1242,7 +1112,7 @@ static bool parse_true(Parser *parser) {
           "", "true", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 2 patterns
     REMEMBER_POSITION(parser, pos);
 
     { // Match literal "true"
@@ -1260,11 +1130,10 @@ static bool parse_true(Parser *parser) {
         parser->success = false;
       }
     }
-
     if (parser->success) {
       { // Capture Table
         int initial_stack_size = lua_gettop(parser->L);
-        { // Sequence
+        { // Sequence with 2 patterns
           REMEMBER_POSITION(parser, pos);
 
           { // Constant Capture
@@ -1272,14 +1141,12 @@ static bool parse_true(Parser *parser) {
             // given values
             lua_pushlstring(parser->L, "boolean", 7);
           }
-
           if (parser->success) {
             { // Constant Capture
               // A constant capture matches the empty string and produces all
               // given values
               lua_pushboolean(parser->L, 1);
             }
-
             if (!parser->success) {
               RESTORE_POSITION(parser, pos);
             }
@@ -1301,7 +1168,6 @@ static bool parse_true(Parser *parser) {
           }
         }
       }
-
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }
@@ -1333,200 +1199,147 @@ static bool parse_object(Parser *parser) {
           "", "object", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 5 patterns
     REMEMBER_POSITION(parser, pos);
 
-    { // Sequence
-      REMEMBER_POSITION(parser, pos);
-
-      { // Sequence
-        REMEMBER_POSITION(parser, pos);
-
-        { // Sequence
-          REMEMBER_POSITION(parser, pos);
-
-          { // Match single character "{"
-            if (parser->pos < parser->input_len &&
-                parser->input[parser->pos] == 123) {
-              parser->pos++;
-            } else {
+    { // Match single character "{"
+      if (parser->pos < parser->input_len &&
+          parser->input[parser->pos] == 123) {
+        parser->pos++;
+      } else {
 #ifdef PGEN_ERRORS
-              sprintf(parser->error_message,
-                      "Expected character `"
-                      "{"
-                      "` at position %zu",
-                      parser->pos);
+        sprintf(parser->error_message,
+                "Expected character `"
+                "{"
+                "` at position %zu",
+                parser->pos);
 #endif
-              parser->success = false;
+        parser->success = false;
+      }
+    }
+    if (parser->success) {
+      parse_ws(parser);
+      if (parser->success) {
+        { // Capture Table
+          int initial_stack_size = lua_gettop(parser->L);
+          { // Sequence with 2 patterns
+            REMEMBER_POSITION(parser, pos);
+
+            { // Constant Capture
+              // A constant capture matches the empty string and produces all
+              // given values
+              lua_pushlstring(parser->L, "object", 6);
+            }
+            if (parser->success) {
+              { // At most 1 repetitions
+                size_t rep_count = 0;
+
+                while (rep_count < 1) {
+                  size_t before_pos = parser->pos;
+
+                  {
+                    { // Sequence with 2 patterns
+                      REMEMBER_POSITION(parser, pos);
+
+                      parse_member(parser);
+                      if (parser->success) {
+                        { // Zero or more repetitions
+                          while (true) {
+                            { // Sequence with 4 patterns
+                              REMEMBER_POSITION(parser, pos);
+
+                              parse_ws(parser);
+                              if (parser->success) {
+                                { // Match single character ","
+                                  if (parser->pos < parser->input_len &&
+                                      parser->input[parser->pos] == 44) {
+                                    parser->pos++;
+                                  } else {
+#ifdef PGEN_ERRORS
+                                    sprintf(parser->error_message,
+                                            "Expected character `"
+                                            ","
+                                            "` at position %zu",
+                                            parser->pos);
+#endif
+                                    parser->success = false;
+                                  }
+                                }
+                                if (parser->success) {
+                                  parse_ws(parser);
+                                  if (parser->success) {
+                                    parse_member(parser);
+                                  }
+                                }
+                                if (!parser->success) {
+                                  RESTORE_POSITION(parser, pos);
+                                }
+                              }
+                            }
+                            if (!parser->success) {
+                              break;
+                            }
+                          }
+                          parser->success = true;
+                        }
+                        if (!parser->success) {
+                          RESTORE_POSITION(parser, pos);
+                        }
+                      }
+                    }
+                  }
+
+                  if (!parser->success || before_pos == parser->pos) {
+                    // Break on failure or zero-width match
+                    parser->success = true;
+                    break;
+                  }
+
+                  rep_count += 1;
+                }
+              }
+              if (!parser->success) {
+                RESTORE_POSITION(parser, pos);
+              }
             }
           }
 
           if (parser->success) {
-            parse_ws(parser);
+            int new_stack_size = lua_gettop(parser->L);
+            int items_count = new_stack_size - initial_stack_size;
+            int table_position = -items_count - 1;
 
-            if (!parser->success) {
-              RESTORE_POSITION(parser, pos);
+            lua_createtable(parser->L, items_count, 0);
+
+            lua_insert(parser->L, table_position);
+
+            for (int i = items_count; i >= 1; --i) {
+              lua_rawseti(parser->L, table_position, i);
+              table_position += 1;
             }
           }
         }
-
         if (parser->success) {
-          { // Capture Table
-            int initial_stack_size = lua_gettop(parser->L);
-            { // Sequence
-              REMEMBER_POSITION(parser, pos);
-
-              { // Constant Capture
-                // A constant capture matches the empty string and produces all
-                // given values
-                lua_pushlstring(parser->L, "object", 6);
-              }
-
-              if (parser->success) {
-                { // At most 1 repetitions
-                  size_t rep_count = 0;
-
-                  while (rep_count < 1) {
-                    size_t before_pos = parser->pos;
-
-                    {
-                      { // Sequence
-                        REMEMBER_POSITION(parser, pos);
-
-                        parse_member(parser);
-
-                        if (parser->success) {
-                          { // Zero or more repetitions
-                            while (true) {
-                              { // Sequence
-                                REMEMBER_POSITION(parser, pos);
-
-                                { // Sequence
-                                  REMEMBER_POSITION(parser, pos);
-
-                                  { // Sequence
-                                    REMEMBER_POSITION(parser, pos);
-
-                                    parse_ws(parser);
-
-                                    if (parser->success) {
-                                      { // Match single character ","
-                                        if (parser->pos < parser->input_len &&
-                                            parser->input[parser->pos] == 44) {
-                                          parser->pos++;
-                                        } else {
+          parse_ws(parser);
+          if (parser->success) {
+            { // Match single character "}"
+              if (parser->pos < parser->input_len &&
+                  parser->input[parser->pos] == 125) {
+                parser->pos++;
+              } else {
 #ifdef PGEN_ERRORS
-                                          sprintf(parser->error_message,
-                                                  "Expected character `"
-                                                  ","
-                                                  "` at position %zu",
-                                                  parser->pos);
+                sprintf(parser->error_message,
+                        "Expected character `"
+                        "}"
+                        "` at position %zu",
+                        parser->pos);
 #endif
-                                          parser->success = false;
-                                        }
-                                      }
-
-                                      if (!parser->success) {
-                                        RESTORE_POSITION(parser, pos);
-                                      }
-                                    }
-                                  }
-
-                                  if (parser->success) {
-                                    parse_ws(parser);
-
-                                    if (!parser->success) {
-                                      RESTORE_POSITION(parser, pos);
-                                    }
-                                  }
-                                }
-
-                                if (parser->success) {
-                                  parse_member(parser);
-
-                                  if (!parser->success) {
-                                    RESTORE_POSITION(parser, pos);
-                                  }
-                                }
-                              }
-                              if (!parser->success) {
-                                break;
-                              }
-                            }
-                            parser->success = true;
-                          }
-
-                          if (!parser->success) {
-                            RESTORE_POSITION(parser, pos);
-                          }
-                        }
-                      }
-                    }
-
-                    if (!parser->success || before_pos == parser->pos) {
-                      // Break on failure or zero-width match
-                      parser->success = true;
-                      break;
-                    }
-
-                    rep_count += 1;
-                  }
-                }
-
-                if (!parser->success) {
-                  RESTORE_POSITION(parser, pos);
-                }
-              }
-            }
-
-            if (parser->success) {
-              int new_stack_size = lua_gettop(parser->L);
-              int items_count = new_stack_size - initial_stack_size;
-              int table_position = -items_count - 1;
-
-              lua_createtable(parser->L, items_count, 0);
-
-              lua_insert(parser->L, table_position);
-
-              for (int i = items_count; i >= 1; --i) {
-                lua_rawseti(parser->L, table_position, i);
-                table_position += 1;
+                parser->success = false;
               }
             }
           }
-
-          if (!parser->success) {
-            RESTORE_POSITION(parser, pos);
-          }
         }
       }
-
-      if (parser->success) {
-        parse_ws(parser);
-
-        if (!parser->success) {
-          RESTORE_POSITION(parser, pos);
-        }
-      }
-    }
-
-    if (parser->success) {
-      { // Match single character "}"
-        if (parser->pos < parser->input_len &&
-            parser->input[parser->pos] == 125) {
-          parser->pos++;
-        } else {
-#ifdef PGEN_ERRORS
-          sprintf(parser->error_message,
-                  "Expected character `"
-                  "}"
-                  "` at position %zu",
-                  parser->pos);
-#endif
-          parser->success = false;
-        }
-      }
-
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }
@@ -1558,64 +1371,35 @@ static bool parse_unicode(Parser *parser) {
           "", "unicode", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 5 patterns
     REMEMBER_POSITION(parser, pos);
 
-    { // Sequence
-      REMEMBER_POSITION(parser, pos);
-
-      { // Sequence
-        REMEMBER_POSITION(parser, pos);
-
-        { // Sequence
-          REMEMBER_POSITION(parser, pos);
-
-          { // Match single character "u"
-            if (parser->pos < parser->input_len &&
-                parser->input[parser->pos] == 117) {
-              parser->pos++;
-            } else {
+    { // Match single character "u"
+      if (parser->pos < parser->input_len &&
+          parser->input[parser->pos] == 117) {
+        parser->pos++;
+      } else {
 #ifdef PGEN_ERRORS
-              sprintf(parser->error_message,
-                      "Expected character `"
-                      "u"
-                      "` at position %zu",
-                      parser->pos);
+        sprintf(parser->error_message,
+                "Expected character `"
+                "u"
+                "` at position %zu",
+                parser->pos);
 #endif
-              parser->success = false;
-            }
-          }
-
-          if (parser->success) {
-            parse_hex(parser);
-
-            if (!parser->success) {
-              RESTORE_POSITION(parser, pos);
-            }
-          }
-        }
-
-        if (parser->success) {
-          parse_hex(parser);
-
-          if (!parser->success) {
-            RESTORE_POSITION(parser, pos);
-          }
-        }
-      }
-
-      if (parser->success) {
-        parse_hex(parser);
-
-        if (!parser->success) {
-          RESTORE_POSITION(parser, pos);
-        }
+        parser->success = false;
       }
     }
-
     if (parser->success) {
       parse_hex(parser);
-
+      if (parser->success) {
+        parse_hex(parser);
+        if (parser->success) {
+          parse_hex(parser);
+          if (parser->success) {
+            parse_hex(parser);
+          }
+        }
+      }
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }
@@ -1716,200 +1500,146 @@ static bool parse_array(Parser *parser) {
           "", "array", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 5 patterns
     REMEMBER_POSITION(parser, pos);
 
-    { // Sequence
-      REMEMBER_POSITION(parser, pos);
-
-      { // Sequence
-        REMEMBER_POSITION(parser, pos);
-
-        { // Sequence
-          REMEMBER_POSITION(parser, pos);
-
-          { // Match single character "["
-            if (parser->pos < parser->input_len &&
-                parser->input[parser->pos] == 91) {
-              parser->pos++;
-            } else {
+    { // Match single character "["
+      if (parser->pos < parser->input_len && parser->input[parser->pos] == 91) {
+        parser->pos++;
+      } else {
 #ifdef PGEN_ERRORS
-              sprintf(parser->error_message,
-                      "Expected character `"
-                      "["
-                      "` at position %zu",
-                      parser->pos);
+        sprintf(parser->error_message,
+                "Expected character `"
+                "["
+                "` at position %zu",
+                parser->pos);
 #endif
-              parser->success = false;
+        parser->success = false;
+      }
+    }
+    if (parser->success) {
+      parse_ws(parser);
+      if (parser->success) {
+        { // Capture Table
+          int initial_stack_size = lua_gettop(parser->L);
+          { // Sequence with 2 patterns
+            REMEMBER_POSITION(parser, pos);
+
+            { // Constant Capture
+              // A constant capture matches the empty string and produces all
+              // given values
+              lua_pushlstring(parser->L, "array", 5);
+            }
+            if (parser->success) {
+              { // At most 1 repetitions
+                size_t rep_count = 0;
+
+                while (rep_count < 1) {
+                  size_t before_pos = parser->pos;
+
+                  {
+                    { // Sequence with 2 patterns
+                      REMEMBER_POSITION(parser, pos);
+
+                      parse_value(parser);
+                      if (parser->success) {
+                        { // Zero or more repetitions
+                          while (true) {
+                            { // Sequence with 4 patterns
+                              REMEMBER_POSITION(parser, pos);
+
+                              parse_ws(parser);
+                              if (parser->success) {
+                                { // Match single character ","
+                                  if (parser->pos < parser->input_len &&
+                                      parser->input[parser->pos] == 44) {
+                                    parser->pos++;
+                                  } else {
+#ifdef PGEN_ERRORS
+                                    sprintf(parser->error_message,
+                                            "Expected character `"
+                                            ","
+                                            "` at position %zu",
+                                            parser->pos);
+#endif
+                                    parser->success = false;
+                                  }
+                                }
+                                if (parser->success) {
+                                  parse_ws(parser);
+                                  if (parser->success) {
+                                    parse_value(parser);
+                                  }
+                                }
+                                if (!parser->success) {
+                                  RESTORE_POSITION(parser, pos);
+                                }
+                              }
+                            }
+                            if (!parser->success) {
+                              break;
+                            }
+                          }
+                          parser->success = true;
+                        }
+                        if (!parser->success) {
+                          RESTORE_POSITION(parser, pos);
+                        }
+                      }
+                    }
+                  }
+
+                  if (!parser->success || before_pos == parser->pos) {
+                    // Break on failure or zero-width match
+                    parser->success = true;
+                    break;
+                  }
+
+                  rep_count += 1;
+                }
+              }
+              if (!parser->success) {
+                RESTORE_POSITION(parser, pos);
+              }
             }
           }
 
           if (parser->success) {
-            parse_ws(parser);
+            int new_stack_size = lua_gettop(parser->L);
+            int items_count = new_stack_size - initial_stack_size;
+            int table_position = -items_count - 1;
 
-            if (!parser->success) {
-              RESTORE_POSITION(parser, pos);
+            lua_createtable(parser->L, items_count, 0);
+
+            lua_insert(parser->L, table_position);
+
+            for (int i = items_count; i >= 1; --i) {
+              lua_rawseti(parser->L, table_position, i);
+              table_position += 1;
             }
           }
         }
-
         if (parser->success) {
-          { // Capture Table
-            int initial_stack_size = lua_gettop(parser->L);
-            { // Sequence
-              REMEMBER_POSITION(parser, pos);
-
-              { // Constant Capture
-                // A constant capture matches the empty string and produces all
-                // given values
-                lua_pushlstring(parser->L, "array", 5);
-              }
-
-              if (parser->success) {
-                { // At most 1 repetitions
-                  size_t rep_count = 0;
-
-                  while (rep_count < 1) {
-                    size_t before_pos = parser->pos;
-
-                    {
-                      { // Sequence
-                        REMEMBER_POSITION(parser, pos);
-
-                        parse_value(parser);
-
-                        if (parser->success) {
-                          { // Zero or more repetitions
-                            while (true) {
-                              { // Sequence
-                                REMEMBER_POSITION(parser, pos);
-
-                                { // Sequence
-                                  REMEMBER_POSITION(parser, pos);
-
-                                  { // Sequence
-                                    REMEMBER_POSITION(parser, pos);
-
-                                    parse_ws(parser);
-
-                                    if (parser->success) {
-                                      { // Match single character ","
-                                        if (parser->pos < parser->input_len &&
-                                            parser->input[parser->pos] == 44) {
-                                          parser->pos++;
-                                        } else {
+          parse_ws(parser);
+          if (parser->success) {
+            { // Match single character "]"
+              if (parser->pos < parser->input_len &&
+                  parser->input[parser->pos] == 93) {
+                parser->pos++;
+              } else {
 #ifdef PGEN_ERRORS
-                                          sprintf(parser->error_message,
-                                                  "Expected character `"
-                                                  ","
-                                                  "` at position %zu",
-                                                  parser->pos);
+                sprintf(parser->error_message,
+                        "Expected character `"
+                        "]"
+                        "` at position %zu",
+                        parser->pos);
 #endif
-                                          parser->success = false;
-                                        }
-                                      }
-
-                                      if (!parser->success) {
-                                        RESTORE_POSITION(parser, pos);
-                                      }
-                                    }
-                                  }
-
-                                  if (parser->success) {
-                                    parse_ws(parser);
-
-                                    if (!parser->success) {
-                                      RESTORE_POSITION(parser, pos);
-                                    }
-                                  }
-                                }
-
-                                if (parser->success) {
-                                  parse_value(parser);
-
-                                  if (!parser->success) {
-                                    RESTORE_POSITION(parser, pos);
-                                  }
-                                }
-                              }
-                              if (!parser->success) {
-                                break;
-                              }
-                            }
-                            parser->success = true;
-                          }
-
-                          if (!parser->success) {
-                            RESTORE_POSITION(parser, pos);
-                          }
-                        }
-                      }
-                    }
-
-                    if (!parser->success || before_pos == parser->pos) {
-                      // Break on failure or zero-width match
-                      parser->success = true;
-                      break;
-                    }
-
-                    rep_count += 1;
-                  }
-                }
-
-                if (!parser->success) {
-                  RESTORE_POSITION(parser, pos);
-                }
-              }
-            }
-
-            if (parser->success) {
-              int new_stack_size = lua_gettop(parser->L);
-              int items_count = new_stack_size - initial_stack_size;
-              int table_position = -items_count - 1;
-
-              lua_createtable(parser->L, items_count, 0);
-
-              lua_insert(parser->L, table_position);
-
-              for (int i = items_count; i >= 1; --i) {
-                lua_rawseti(parser->L, table_position, i);
-                table_position += 1;
+                parser->success = false;
               }
             }
           }
-
-          if (!parser->success) {
-            RESTORE_POSITION(parser, pos);
-          }
         }
       }
-
-      if (parser->success) {
-        parse_ws(parser);
-
-        if (!parser->success) {
-          RESTORE_POSITION(parser, pos);
-        }
-      }
-    }
-
-    if (parser->success) {
-      { // Match single character "]"
-        if (parser->pos < parser->input_len &&
-            parser->input[parser->pos] == 93) {
-          parser->pos++;
-        } else {
-#ifdef PGEN_ERRORS
-          sprintf(parser->error_message,
-                  "Expected character `"
-                  "]"
-                  "` at position %zu",
-                  parser->pos);
-#endif
-          parser->success = false;
-        }
-      }
-
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }
@@ -1941,7 +1671,7 @@ static bool parse_null(Parser *parser) {
           "", "null", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 2 patterns
     REMEMBER_POSITION(parser, pos);
 
     { // Match literal "null"
@@ -1959,7 +1689,6 @@ static bool parse_null(Parser *parser) {
         parser->success = false;
       }
     }
-
     if (parser->success) {
       { // Capture Table
         int initial_stack_size = lua_gettop(parser->L);
@@ -1984,7 +1713,6 @@ static bool parse_null(Parser *parser) {
           }
         }
       }
-
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }
@@ -2016,105 +1744,83 @@ static bool parse_json(Parser *parser) {
           "", "json", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 4 patterns
     REMEMBER_POSITION(parser, pos);
 
-    { // Sequence
-      REMEMBER_POSITION(parser, pos);
+    parse_ws(parser);
+    if (parser->success) {
+      { // Capture Table
+        int initial_stack_size = lua_gettop(parser->L);
+        { // Sequence with 2 patterns
+          REMEMBER_POSITION(parser, pos);
 
-      { // Sequence
-        REMEMBER_POSITION(parser, pos);
-
-        parse_ws(parser);
+          { // Constant Capture
+            // A constant capture matches the empty string and produces all
+            // given values
+            lua_pushlstring(parser->L, "json", 4);
+          }
+          if (parser->success) {
+            parse_value(parser);
+            if (!parser->success) {
+              RESTORE_POSITION(parser, pos);
+            }
+          }
+        }
 
         if (parser->success) {
-          { // Capture Table
-            int initial_stack_size = lua_gettop(parser->L);
-            { // Sequence
-              REMEMBER_POSITION(parser, pos);
+          int new_stack_size = lua_gettop(parser->L);
+          int items_count = new_stack_size - initial_stack_size;
+          int table_position = -items_count - 1;
 
-              { // Constant Capture
-                // A constant capture matches the empty string and produces all
-                // given values
-                lua_pushlstring(parser->L, "json", 4);
-              }
+          lua_createtable(parser->L, items_count, 0);
 
-              if (parser->success) {
-                parse_value(parser);
+          lua_insert(parser->L, table_position);
 
-                if (!parser->success) {
-                  RESTORE_POSITION(parser, pos);
-                }
+          for (int i = items_count; i >= 1; --i) {
+            lua_rawseti(parser->L, table_position, i);
+            table_position += 1;
+          }
+        }
+      }
+      if (parser->success) {
+        parse_ws(parser);
+        if (parser->success) {
+          { // Negate (only match if pattern fails)
+            REMEMBER_POSITION(parser, pos);
+
+            { // Match any 1 characters
+              if (parser->pos + 1 <= parser->input_len) {
+                parser->pos += 1;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message,
+                        "Expected at least 1 more characters at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
               }
             }
 
             if (parser->success) {
-              int new_stack_size = lua_gettop(parser->L);
-              int items_count = new_stack_size - initial_stack_size;
-              int table_position = -items_count - 1;
-
-              lua_createtable(parser->L, items_count, 0);
-
-              lua_insert(parser->L, table_position);
-
-              for (int i = items_count; i >= 1; --i) {
-                lua_rawseti(parser->L, table_position, i);
-                table_position += 1;
-              }
+              // Pattern matched, so negate fails
+              RESTORE_POSITION(parser, pos);
+              parser->success = false;
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message,
+                      "Negated pattern unexpectedly matched at position %zu",
+                      pos.pos);
+#endif
+            } else {
+              // Pattern failed, so negate succeeds
+              parser->success = true;
+              RESTORE_POSITION(parser,
+                               pos); // Restore original position (technically
+                                     // not necessary since failed pattern
+                                     // should make no changes to position)
             }
           }
-
-          if (!parser->success) {
-            RESTORE_POSITION(parser, pos);
-          }
         }
       }
-
-      if (parser->success) {
-        parse_ws(parser);
-
-        if (!parser->success) {
-          RESTORE_POSITION(parser, pos);
-        }
-      }
-    }
-
-    if (parser->success) {
-      { // Negate (only match if pattern fails)
-        REMEMBER_POSITION(parser, pos);
-
-        { // Match any 1 characters
-          if (parser->pos + 1 <= parser->input_len) {
-            parser->pos += 1;
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message,
-                    "Expected at least 1 more characters at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
-          }
-        }
-
-        if (parser->success) {
-          // Pattern matched, so negate fails
-          RESTORE_POSITION(parser, pos);
-          parser->success = false;
-#ifdef PGEN_ERRORS
-          sprintf(parser->error_message,
-                  "Negated pattern unexpectedly matched at position %zu",
-                  pos.pos);
-#endif
-        } else {
-          // Pattern failed, so negate succeeds
-          parser->success = true;
-          RESTORE_POSITION(
-              parser,
-              pos); // Restore original position (technically not necessary
-                    // since failed pattern should make no changes to position)
-        }
-      }
-
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }

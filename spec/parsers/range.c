@@ -76,7 +76,7 @@ static bool parse_1(Parser *parser) {
           "", "1", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 2 patterns
     REMEMBER_POSITION(parser, pos);
 
     { // Capture Table
@@ -106,7 +106,6 @@ static bool parse_1(Parser *parser) {
         }
       }
     }
-
     if (parser->success) {
       { // Negate (only match if pattern fails)
         REMEMBER_POSITION(parser, pos);
@@ -142,7 +141,6 @@ static bool parse_1(Parser *parser) {
                     // since failed pattern should make no changes to position)
         }
       }
-
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }
@@ -174,7 +172,7 @@ static bool parse_item(Parser *parser) {
           "", "item", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 2 patterns
     REMEMBER_POSITION(parser, pos);
 
     { // Capture
@@ -239,7 +237,6 @@ static bool parse_item(Parser *parser) {
         lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
       }
     }
-
     if (parser->success) {
       { // At most 1 repetitions
         size_t rep_count = 0;
@@ -260,7 +257,6 @@ static bool parse_item(Parser *parser) {
           rep_count += 1;
         }
       }
-
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }

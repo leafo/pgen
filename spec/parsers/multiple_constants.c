@@ -74,80 +74,51 @@ static bool parse_main(Parser *parser) {
           "", "main", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 5 patterns
     REMEMBER_POSITION(parser, pos);
 
-    { // Sequence
-      REMEMBER_POSITION(parser, pos);
-
-      { // Sequence
-        REMEMBER_POSITION(parser, pos);
-
-        { // Sequence
-          REMEMBER_POSITION(parser, pos);
-
-          { // Match literal "test"
-            if (parser->pos + 4 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "test", 4) == 0) {
-              parser->pos += 4;
-            } else {
+    { // Match literal "test"
+      if (parser->pos + 4 <= parser->input_len &&
+          memcmp(parser->input + parser->pos, "test", 4) == 0) {
+        parser->pos += 4;
+      } else {
 #ifdef PGEN_ERRORS
-              sprintf(parser->error_message,
-                      "Expected `"
-                      "test"
-                      "` at position %zu",
-                      parser->pos);
+        sprintf(parser->error_message,
+                "Expected `"
+                "test"
+                "` at position %zu",
+                parser->pos);
 #endif
-              parser->success = false;
-            }
-          }
-
-          if (parser->success) {
-            { // Constant Capture
-              // A constant capture matches the empty string and produces all
-              // given values
-              lua_pushnumber(parser->L, 42);
-            }
-
-            if (!parser->success) {
-              RESTORE_POSITION(parser, pos);
-            }
-          }
-        }
-
-        if (parser->success) {
-          { // Constant Capture
-            // A constant capture matches the empty string and produces all
-            // given values
-            lua_pushlstring(parser->L, "test_field", 10);
-          }
-
-          if (!parser->success) {
-            RESTORE_POSITION(parser, pos);
-          }
-        }
-      }
-
-      if (parser->success) {
-        { // Constant Capture
-          // A constant capture matches the empty string and produces all given
-          // values
-          lua_pushnil(parser->L);
-        }
-
-        if (!parser->success) {
-          RESTORE_POSITION(parser, pos);
-        }
+        parser->success = false;
       }
     }
-
     if (parser->success) {
       { // Constant Capture
         // A constant capture matches the empty string and produces all given
         // values
-        lua_pushboolean(parser->L, 1);
+        lua_pushnumber(parser->L, 42);
       }
-
+      if (parser->success) {
+        { // Constant Capture
+          // A constant capture matches the empty string and produces all given
+          // values
+          lua_pushlstring(parser->L, "test_field", 10);
+        }
+        if (parser->success) {
+          { // Constant Capture
+            // A constant capture matches the empty string and produces all
+            // given values
+            lua_pushnil(parser->L);
+          }
+          if (parser->success) {
+            { // Constant Capture
+              // A constant capture matches the empty string and produces all
+              // given values
+              lua_pushboolean(parser->L, 1);
+            }
+          }
+        }
+      }
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }

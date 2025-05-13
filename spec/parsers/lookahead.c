@@ -110,73 +110,59 @@ static bool parse_positive(Parser *parser) {
           "", "positive", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 4 patterns
     REMEMBER_POSITION(parser, pos);
 
-    { // Sequence
-      REMEMBER_POSITION(parser, pos);
-
-      { // Sequence
+    { // Match literal "abc"
+      if (parser->pos + 3 <= parser->input_len &&
+          memcmp(parser->input + parser->pos, "abc", 3) == 0) {
+        parser->pos += 3;
+      } else {
+#ifdef PGEN_ERRORS
+        sprintf(parser->error_message,
+                "Expected `"
+                "abc"
+                "` at position %zu",
+                parser->pos);
+#endif
+        parser->success = false;
+      }
+    }
+    if (parser->success) {
+      { // Lookahead (match without consuming input)
         REMEMBER_POSITION(parser, pos);
 
-        { // Match literal "abc"
-          if (parser->pos + 3 <= parser->input_len &&
-              memcmp(parser->input + parser->pos, "abc", 3) == 0) {
-            parser->pos += 3;
-          } else {
+        { // Capture
+          size_t start_pos = parser->pos;
+          { // Match literal "def"
+            if (parser->pos + 3 <= parser->input_len &&
+                memcmp(parser->input + parser->pos, "def", 3) == 0) {
+              parser->pos += 3;
+            } else {
 #ifdef PGEN_ERRORS
-            sprintf(parser->error_message,
-                    "Expected `"
-                    "abc"
-                    "` at position %zu",
-                    parser->pos);
+              sprintf(parser->error_message,
+                      "Expected `"
+                      "def"
+                      "` at position %zu",
+                      parser->pos);
 #endif
-            parser->success = false;
+              parser->success = false;
+            }
+          }
+
+          if (parser->success) {
+            size_t capture_length = parser->pos - start_pos;
+            // TODO: ensure stack has enough space for push
+            lua_pushlstring(parser->L, parser->input + start_pos,
+                            capture_length);
           }
         }
 
         if (parser->success) {
-          { // Lookahead (match without consuming input)
-            REMEMBER_POSITION(parser, pos);
-
-            { // Capture
-              size_t start_pos = parser->pos;
-              { // Match literal "def"
-                if (parser->pos + 3 <= parser->input_len &&
-                    memcmp(parser->input + parser->pos, "def", 3) == 0) {
-                  parser->pos += 3;
-                } else {
-#ifdef PGEN_ERRORS
-                  sprintf(parser->error_message,
-                          "Expected `"
-                          "def"
-                          "` at position %zu",
-                          parser->pos);
-#endif
-                  parser->success = false;
-                }
-              }
-
-              if (parser->success) {
-                size_t capture_length = parser->pos - start_pos;
-                // TODO: ensure stack has enough space for push
-                lua_pushlstring(parser->L, parser->input + start_pos,
-                                capture_length);
-              }
-            }
-
-            if (parser->success) {
-              // Pattern matched, but we don't consume any input
-              RESTORE_POSITION(parser, pos);
-            }
-          }
-
-          if (!parser->success) {
-            RESTORE_POSITION(parser, pos);
-          }
+          // Pattern matched, but we don't consume any input
+          RESTORE_POSITION(parser, pos);
         }
       }
-
       if (parser->success) {
         { // Match literal "def"
           if (parser->pos + 3 <= parser->input_len &&
@@ -193,49 +179,43 @@ static bool parse_positive(Parser *parser) {
             parser->success = false;
           }
         }
+        if (parser->success) {
+          { // Negate (only match if pattern fails)
+            REMEMBER_POSITION(parser, pos);
 
-        if (!parser->success) {
-          RESTORE_POSITION(parser, pos);
-        }
-      }
-    }
-
-    if (parser->success) {
-      { // Negate (only match if pattern fails)
-        REMEMBER_POSITION(parser, pos);
-
-        { // Match any 1 characters
-          if (parser->pos + 1 <= parser->input_len) {
-            parser->pos += 1;
-          } else {
+            { // Match any 1 characters
+              if (parser->pos + 1 <= parser->input_len) {
+                parser->pos += 1;
+              } else {
 #ifdef PGEN_ERRORS
-            sprintf(parser->error_message,
-                    "Expected at least 1 more characters at position %zu",
-                    parser->pos);
+                sprintf(parser->error_message,
+                        "Expected at least 1 more characters at position %zu",
+                        parser->pos);
 #endif
-            parser->success = false;
+                parser->success = false;
+              }
+            }
+
+            if (parser->success) {
+              // Pattern matched, so negate fails
+              RESTORE_POSITION(parser, pos);
+              parser->success = false;
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message,
+                      "Negated pattern unexpectedly matched at position %zu",
+                      pos.pos);
+#endif
+            } else {
+              // Pattern failed, so negate succeeds
+              parser->success = true;
+              RESTORE_POSITION(parser,
+                               pos); // Restore original position (technically
+                                     // not necessary since failed pattern
+                                     // should make no changes to position)
+            }
           }
         }
-
-        if (parser->success) {
-          // Pattern matched, so negate fails
-          RESTORE_POSITION(parser, pos);
-          parser->success = false;
-#ifdef PGEN_ERRORS
-          sprintf(parser->error_message,
-                  "Negated pattern unexpectedly matched at position %zu",
-                  pos.pos);
-#endif
-        } else {
-          // Pattern failed, so negate succeeds
-          parser->success = true;
-          RESTORE_POSITION(
-              parser,
-              pos); // Restore original position (technically not necessary
-                    // since failed pattern should make no changes to position)
-        }
       }
-
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }
@@ -267,7 +247,7 @@ static bool parse_negative(Parser *parser) {
           "", "negative", start);
 #endif
 
-  { // Sequence
+  { // Sequence with 2 patterns
     REMEMBER_POSITION(parser, pos);
 
     { // Match literal "xyz"
@@ -285,7 +265,6 @@ static bool parse_negative(Parser *parser) {
         parser->success = false;
       }
     }
-
     if (parser->success) {
       { // Lookahead (match without consuming input)
         REMEMBER_POSITION(parser, pos);
@@ -333,7 +312,6 @@ static bool parse_negative(Parser *parser) {
           RESTORE_POSITION(parser, pos);
         }
       }
-
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
       }
