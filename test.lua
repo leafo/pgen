@@ -12,7 +12,7 @@ local gettime = socket.gettime
 
 local lpeg = require "lpeg"
 package.loaded.pgen = lpeg
-local lpeg_parser = lpeg.P(require("examples.calculator"))
+local lpeg_parser = lpeg.P(require("examples.calc_parser"))
 
 local lpeg_time = 0
 local pgen_time = 0
