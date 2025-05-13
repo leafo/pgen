@@ -44,8 +44,10 @@ function pgen.P(val)
 end
 
 -- Create character range pattern
-function pgen.R(start, stop)
-  return pattern(R, {start, stop})
+-- Can handle multiple ranges: R("az", "AZ", "09")
+function pgen.R(...)
+  local ranges = {...}
+  return pattern(R, ranges)
 end
 
 -- Create character set pattern

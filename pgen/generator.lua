@@ -248,12 +248,7 @@ function generator.generate_pattern_code(pattern)
     end
 
   elseif t == 2 then -- R (character range)
-    -- TODO: support multiple range groups
-    assert(not pattern.value[2], "don't support multi-ranges yet")
-
-    local range_left, range_right = pattern.value[1]:match("^(.)(.)")
-    assert(range_left, "range must have two characters")
-    return generator.generate_range_code(range_left, range_right)
+    return generator.generate_range_code(pattern.value)
   elseif t == 3 then -- S (character set)
     local set = pattern.value
     return generator.generate_set_code(set)
@@ -321,25 +316,42 @@ function generator.generate_n_chars_code(n)
   })
 end
 
--- Generate code for a character range match
-function generator.generate_range_code(start, stop)
-  return template_code([[{// Match character range $START$ - $STOP$
+-- Generate code for multiple character ranges
+-- ranges: array of two-character strings representing low and upper bounds characters
+function generator.generate_range_code(ranges)
+  local conditions = {}
+  local error_ranges = {}
+
+  for i, range in ipairs(ranges) do
+    local range_left, range_right = range:match("^(.)(.)")
+    assert(range_left, "range must have two characters: " .. range)
+    assert(range_left <= range_right, "range must be in ascending order: " .. range)
+
+    table.insert(conditions, template_code("(parser->input[parser->pos] >= $LOW$ && parser->input[parser->pos] <= $HIGH$)", {
+      LOW = string.byte(range_left),
+      HIGH = string.byte(range_right)
+    }))
+
+    table.insert(error_ranges, string.format("%s-%s",
+      escape_c_literal(range_left), escape_c_literal(range_right)))
+  end
+
+  local condition_str = table.concat(conditions, " || ")
+  local error_ranges_str = table.concat(error_ranges, ", ")
+
+  return template_code([[{// Match character range: $ERROR_RANGES$
   if (parser->pos < parser->input_len &&
-      parser->input[parser->pos] >= $START_BYTE$ && parser->input[parser->pos] <= $STOP_BYTE$) {
+      ($CONDITION$)) {
     parser->pos++;
   } else {
 #ifdef PGEN_ERRORS
-    sprintf(parser->error_message, "Expected character in range " $START_LIT$ " - " $STOP_LIT$ " at position %zu", parser->pos);
+    sprintf(parser->error_message, "Expected character in ranges [$ERROR_RANGES$] at position %zu", parser->pos);
 #endif
     parser->success = false;
   }
 }]], {
-    START = escape_string(start),
-    STOP = escape_string(stop),
-    START_BYTE = string.byte(start),
-    STOP_BYTE = string.byte(stop),
-    START_LIT = escape_c_literal(start),
-    STOP_LIT = escape_c_literal(stop)
+    CONDITION = condition_str,
+    ERROR_RANGES = error_ranges_str
   })
 end
 
