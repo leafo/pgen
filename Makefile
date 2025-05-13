@@ -1,6 +1,4 @@
-
-
-.PHONY: test busted
+.PHONY: test busted generate-spec-parsers
 
 test: calc_parser.so
 	lua5.1 test.lua
@@ -19,3 +17,10 @@ parser.so: examples/numbers.lua
 %.c: examples/%.lua pgen/generator.lua
 	./pgen_cli.lua -o $@ -n $* $<
 	clang-format -i $@
+
+generate-spec-parsers: $(patsubst spec/parsers/%.lua, spec/parsers/%.c, $(wildcard spec/parsers/*.lua))
+
+spec/parsers/%.c: spec/parsers/%.lua pgen/generator.lua
+	./pgen_cli.lua -o $@ -n $* $<
+	clang-format -i $@
+
