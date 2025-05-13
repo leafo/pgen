@@ -29,7 +29,7 @@ return {
   -- Escape sequences
   escape = P"\\" * (S"\"\\/bfnrt" + V"unicode"),
   unicode = P"u" * V"hex" * V"hex" * V"hex" * V"hex",
-  hex = R("09") + R("af") + R("AF"),
+  hex = R("09", "af", "AF"),
 
   -- Number: int[.frac][e[+-]exp]
   number = Ct(Cc("number") * C(P"-"^-1 * (P"0" + (R"19" * R"09"^0)) * (P"." * R"09"^1)^-1 * (S"eE" * S"+-"^-1 * R"09"^1)^-1)),

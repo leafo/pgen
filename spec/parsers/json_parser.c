@@ -1045,70 +1045,34 @@ static bool parse_hex(Parser *parser) {
           "", "hex", start);
 #endif
 
-  {     // Choice
-    {   // Choice
-      { // Match character range: "09"
-        if (parser->pos < parser->input_len &&
-            ((parser->input[parser->pos] >= 48 &&
-              parser->input[parser->pos] <= 57))) {
-          parser->pos++;
-        } else {
+  { // Match character range: "09,af,AF"
+    if (parser->pos < parser->input_len &&
+        ((parser->input[parser->pos] >= 48 &&
+          parser->input[parser->pos] <= 57) ||
+         (parser->input[parser->pos] >= 97 &&
+          parser->input[parser->pos] <= 102) ||
+         (parser->input[parser->pos] >= 65 &&
+          parser->input[parser->pos] <= 70))) {
+      parser->pos++;
+    } else {
 #ifdef PGEN_ERRORS
-          sprintf(parser->error_message,
-                  "Expected character in ranges ["
-                  "0"
-                  " - "
-                  "9"
-                  "] at position %zu",
-                  parser->pos);
+      sprintf(parser->error_message,
+              "Expected character in ranges ["
+              "0"
+              " - "
+              "9"
+              ", "
+              "a"
+              " - "
+              "f"
+              ", "
+              "A"
+              " - "
+              "F"
+              "] at position %zu",
+              parser->pos);
 #endif
-          parser->success = false;
-        }
-      }
-
-      if (!parser->success) {
-        parser->success = true;
-        { // Match character range: "af"
-          if (parser->pos < parser->input_len &&
-              ((parser->input[parser->pos] >= 97 &&
-                parser->input[parser->pos] <= 102))) {
-            parser->pos++;
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message,
-                    "Expected character in ranges ["
-                    "a"
-                    " - "
-                    "f"
-                    "] at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
-          }
-        }
-      }
-    }
-
-    if (!parser->success) {
-      parser->success = true;
-      { // Match character range: "AF"
-        if (parser->pos < parser->input_len &&
-            ((parser->input[parser->pos] >= 65 &&
-              parser->input[parser->pos] <= 70))) {
-          parser->pos++;
-        } else {
-#ifdef PGEN_ERRORS
-          sprintf(parser->error_message,
-                  "Expected character in ranges ["
-                  "A"
-                  " - "
-                  "F"
-                  "] at position %zu",
-                  parser->pos);
-#endif
-          parser->success = false;
-        }
-      }
+      parser->success = false;
     }
   }
 
