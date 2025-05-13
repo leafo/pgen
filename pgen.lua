@@ -1,7 +1,7 @@
 local pgen = {}
 
 -- Pattern types
-local P, R, S, V, C, Ct, Cp, Cc = 1, 2, 3, 4, 5, 6, 7, 8
+local P, R, S, V, C, Ct, Cp, Cc, L = 1, 2, 3, 4, 5, 6, 7, 8, 9
 
 local mt = {}
 
@@ -26,6 +26,11 @@ local function coerce_pattern(value)
   end
 
   return value
+end
+
+local function assert_pattern(obj)
+  assert(getmetatable(obj) == mt, "Object is not a pattern")
+  return obj
 end
 
 -- Create literal string pattern
@@ -56,12 +61,12 @@ end
 
 -- Capture
 function pgen.C(patt)
-  return pattern(C, patt)
+  return pattern(C, coerce_pattern(patt))
 end
 
 -- Capture table
 function pgen.Ct(patt)
-  return pattern(Ct, patt)
+  return pattern(Ct, assert_pattern(patt))
 end
 
 -- Capture position
@@ -75,6 +80,11 @@ function pgen.Cc(...)
   return pattern(Cc, {..., count = count})
 end
 
+-- Lookahead pattern (matches without consuming input)
+function pgen.L(patt)
+  return pattern(L, coerce_pattern(patt))
+end
+
 function mt.__add(a, b)
   return make{
     type = "choice",
@@ -84,11 +94,6 @@ end
 
 function mt.__sub(a, b)
   return -b * a
-
-  -- return make{
-  --   type = "except",
-  --   coerce_pattern(a), coerce_pattern(b)
-  -- }
 end
 
 function mt.__mul(a, b)
@@ -113,6 +118,11 @@ function mt.__pow(a, n)
     a,
     n
   }
+end
+
+-- Length operator for lookahead pattern (matches without consuming input)
+function mt.__len(a)
+  return pgen.L(a)
 end
 
 -- Compile grammar to C code

@@ -268,6 +268,8 @@ function generator.generate_pattern_code(pattern)
     return generator.generate_position_capture_code()
   elseif t == 8 then -- Cc (constant capture)
     return generator.generate_constant_capture_code(pattern.value)
+  elseif t == 9 then -- L (lookahead)
+    return generator.generate_lookahead_code(pattern.value)
   elseif t == "sequence" then
     return generator.generate_sequence_code(pattern[1], pattern[2])
   elseif t == "choice" then
@@ -578,6 +580,22 @@ function generator.generate_constant_capture_code(values)
 $PUSH_CODE$
 }]], {
     PUSH_CODE = push_code
+  })
+end
+
+-- Generate code for a lookahead pattern (L)
+function generator.generate_lookahead_code(body)
+  return template_code([[{// Lookahead (match without consuming input)
+  REMEMBER_POSITION(parser, pos);
+
+  $BODY$
+
+  if (parser->success) {
+    // Pattern matched, but we don't consume any input
+    RESTORE_POSITION(parser, pos);
+  }
+}]], {
+    BODY = generator.generate_pattern_code(body)
   })
 end
 
