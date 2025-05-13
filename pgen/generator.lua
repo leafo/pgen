@@ -332,14 +332,16 @@ function generator.generate_range_code(ranges)
       HIGH = string.byte(range_right)
     }))
 
-    table.insert(error_ranges, string.format("%s-%s",
-      escape_c_literal(range_left), escape_c_literal(range_right)))
+    table.insert(error_ranges, template_code([[$LEFT$ " - " $RIGHT$]], {
+      LEFT = escape_c_literal(range_left),
+      RIGHT = escape_c_literal(range_right)
+    }))
   end
 
   local condition_str = table.concat(conditions, " || ")
-  local error_ranges_str = table.concat(error_ranges, ", ")
+  local error_ranges_str = table.concat(error_ranges, [[", "]])
 
-  return template_code([[{// Match character range: $ERROR_RANGES$
+  return template_code([[{// Match character range: $RANGES$
   if (parser->pos < parser->input_len &&
       ($CONDITION$)) {
     parser->pos++;
@@ -350,6 +352,7 @@ function generator.generate_range_code(ranges)
     parser->success = false;
   }
 }]], {
+    RANGES = escape_string(table.concat(ranges, ",")),
     CONDITION = condition_str,
     ERROR_RANGES = error_ranges_str
   })
