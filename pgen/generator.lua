@@ -5,7 +5,9 @@ local function escape_string(str)
   return require("cjson").encode(str)
 end
 
-local function escape_c_literal(str)
+local function escape_c_literal(str, delim)
+  delim = delim or '"'
+
   -- Mapping for characters with standard C escape sequences or requiring escaping
   local escapes = {
     [string.char(0)]  = "\\0",  -- Null
@@ -40,7 +42,7 @@ local function escape_c_literal(str)
   end)
 
   -- Enclose the escaped string in double quotes for C literal
-  return '"' .. escaped .. '"'
+  return delim .. escaped .. delim
 end
 
 local function template_code(template, vars)
@@ -287,16 +289,35 @@ end
 
 -- Generate code for a literal string match
 function generator.generate_literal_code(literal)
-  return template_code([[{// Match literal $ESCAPED_LITERAL$
-  if (parser->pos + $LITERAL_LEN$ <= parser->input_len &&
-      memcmp(parser->input + parser->pos, $LITERAL$, $LITERAL_LEN$) == 0) {
-    parser->pos += $LITERAL_LEN$;
+  -- Optimization for single character literals - use direct comparison instead of memcmp
+  if #literal == 1 then
+    return template_code([[{// Match single character $ESCAPED_LITERAL$
+  if (parser->pos < parser->input_len &&
+      parser->input[parser->pos] == $CHAR_CODE$) {
+    parser->pos++;
   } else {
 #ifdef PGEN_ERRORS
-    sprintf(parser->error_message, "Expected `" $LITERAL$ "` at position %zu", parser->pos);
+    sprintf(parser->error_message, "Expected character `" $ERROR_LITERAL$ "` at position %zu", parser->pos);
 #endif
     parser->success = false;
   }
+}]], {
+      ESCAPED_LITERAL = escape_string(literal),
+      ERROR_LITERAL = escape_c_literal(escape_c_literal(literal, "")),
+      CHAR_CODE = string.byte(literal)
+    })
+  end
+
+  return template_code([[{// Match literal $ESCAPED_LITERAL$
+if (parser->pos + $LITERAL_LEN$ <= parser->input_len &&
+    memcmp(parser->input + parser->pos, $LITERAL$, $LITERAL_LEN$) == 0) {
+  parser->pos += $LITERAL_LEN$;
+} else {
+#ifdef PGEN_ERRORS
+  sprintf(parser->error_message, "Expected `" $LITERAL$ "` at position %zu", parser->pos);
+#endif
+  parser->success = false;
+}
 }]], {
     ESCAPED_LITERAL = escape_string(literal),
     LITERAL = escape_c_literal(literal),
@@ -364,27 +385,37 @@ end
 
 -- Generate code for a character set match
 function generator.generate_set_code(set)
-  local cond = {}
+  -- Generate cases for the switch
+  local cases = {}
   for i = 1, #set do
     local c = set:sub(i, i)
-    table.insert(cond, template_code("parser->input[parser->pos] == $BYTE$", {
-      BYTE = tostring(string.byte(c))
+    table.insert(cases, template_code("    case $BYTE$: /* $CHAR$ */", {
+      BYTE = tostring(string.byte(c)),
+      CHAR = escape_c_literal(c)
     }))
   end
 
   return template_code([[{// Match character set $SET$
-  if (parser->pos < parser->input_len &&
-      ($CONDITIONS$)) {
-    parser->pos++;
+  if (parser->pos < parser->input_len) {
+    switch (parser->input[parser->pos]) {
+$CASES$
+      parser->pos++;
+      break;
+    default:
+#ifdef PGEN_ERRORS
+      sprintf(parser->error_message, "Expected one of " $SET_LITERAL$ " at position %zu", parser->pos);
+#endif
+      parser->success = false;
+    }
   } else {
 #ifdef PGEN_ERRORS
-    sprintf(parser->error_message, "Expected one of " $SET_LITERAL$ " at position %zu", parser->pos);
+    sprintf(parser->error_message, "Expected one of " $SET_LITERAL$ " at position %zu but reached end of input", parser->pos);
 #endif
     parser->success = false;
   }
 }]], {
     SET = escape_string(set),
-    CONDITIONS = table.concat(cond, " || "),
+    CASES = table.concat(cases, "\n"),
     SET_LITERAL = escape_c_literal(escape_c_literal(set))
   })
 end
@@ -461,6 +492,21 @@ function generator.generate_repeat_code(a, n)
       BODY = generator.generate_pattern_code(a)
     })
   end
+
+  if n == 0 then
+    return template_code([[{ // Zero or more repetitions
+  while(true) {
+    $BODY$
+    if (!parser->success) {
+      break;
+    }
+  }
+  parser->success = true;
+}]], {
+      BODY = generator.generate_pattern_code(a)
+    })
+  end
+
 
   return template_code([[{ // At least $N$ repetitions
   REMEMBER_POSITION(parser, pos);

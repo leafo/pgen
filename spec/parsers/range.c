@@ -81,29 +81,14 @@ static bool parse_1(Parser *parser) {
 
     { // Capture Table
       int initial_stack_size = lua_gettop(parser->L);
-      { // At least 0 repetitions
-        REMEMBER_POSITION(parser, pos);
-        size_t rep_count = 0;
-
+      { // Zero or more repetitions
         while (true) {
           parse_item(parser);
-
           if (!parser->success) {
             break;
           }
-
-          rep_count += 1;
         }
-
-        if (rep_count >= 0) {
-          parser->success = true;
-        } else {
-          RESTORE_POSITION(parser, pos);
-#ifdef PGEN_ERRORS
-          sprintf(parser->error_message,
-                  "Expected 0 repetitions at position %zu", parser->pos);
-#endif
-        }
+        parser->success = true;
       }
 
       if (parser->success) {
@@ -308,17 +293,30 @@ static bool parse_space(Parser *parser) {
 #endif
 
   { // Match character set " \t\n\r"
-    if (parser->pos < parser->input_len &&
-        (parser->input[parser->pos] == 32 || parser->input[parser->pos] == 9 ||
-         parser->input[parser->pos] == 10 ||
-         parser->input[parser->pos] == 13)) {
-      parser->pos++;
+    if (parser->pos < parser->input_len) {
+      switch (parser->input[parser->pos]) {
+      case 32: /* " " */
+      case 9:  /* "\t" */
+      case 10: /* "\n" */
+      case 13: /* "\r" */
+        parser->pos++;
+        break;
+      default:
+#ifdef PGEN_ERRORS
+        sprintf(parser->error_message,
+                "Expected one of "
+                "\" \\t\\n\\r\""
+                " at position %zu",
+                parser->pos);
+#endif
+        parser->success = false;
+      }
     } else {
 #ifdef PGEN_ERRORS
       sprintf(parser->error_message,
               "Expected one of "
               "\" \\t\\n\\r\""
-              " at position %zu",
+              " at position %zu but reached end of input",
               parser->pos);
 #endif
       parser->success = false;

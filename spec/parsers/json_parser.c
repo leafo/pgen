@@ -118,14 +118,14 @@ static bool parse_number(Parser *parser) {
                     size_t before_pos = parser->pos;
 
                     {
-                      { // Match literal "-"
-                        if (parser->pos + 1 <= parser->input_len &&
-                            memcmp(parser->input + parser->pos, "-", 1) == 0) {
-                          parser->pos += 1;
+                      { // Match single character "-"
+                        if (parser->pos < parser->input_len &&
+                            parser->input[parser->pos] == 45) {
+                          parser->pos++;
                         } else {
 #ifdef PGEN_ERRORS
                           sprintf(parser->error_message,
-                                  "Expected `"
+                                  "Expected character `"
                                   "-"
                                   "` at position %zu",
                                   parser->pos);
@@ -147,14 +147,14 @@ static bool parse_number(Parser *parser) {
 
                 if (parser->success) {
                   {   // Choice
-                    { // Match literal "0"
-                      if (parser->pos + 1 <= parser->input_len &&
-                          memcmp(parser->input + parser->pos, "0", 1) == 0) {
-                        parser->pos += 1;
+                    { // Match single character "0"
+                      if (parser->pos < parser->input_len &&
+                          parser->input[parser->pos] == 48) {
+                        parser->pos++;
                       } else {
 #ifdef PGEN_ERRORS
                         sprintf(parser->error_message,
-                                "Expected `"
+                                "Expected character `"
                                 "0"
                                 "` at position %zu",
                                 parser->pos);
@@ -188,10 +188,7 @@ static bool parse_number(Parser *parser) {
                         }
 
                         if (parser->success) {
-                          { // At least 0 repetitions
-                            REMEMBER_POSITION(parser, pos);
-                            size_t rep_count = 0;
-
+                          { // Zero or more repetitions
                             while (true) {
                               { // Match character range: "09"
                                 if (parser->pos < parser->input_len &&
@@ -211,24 +208,11 @@ static bool parse_number(Parser *parser) {
                                   parser->success = false;
                                 }
                               }
-
                               if (!parser->success) {
                                 break;
                               }
-
-                              rep_count += 1;
                             }
-
-                            if (rep_count >= 0) {
-                              parser->success = true;
-                            } else {
-                              RESTORE_POSITION(parser, pos);
-#ifdef PGEN_ERRORS
-                              sprintf(parser->error_message,
-                                      "Expected 0 repetitions at position %zu",
-                                      parser->pos);
-#endif
-                            }
+                            parser->success = true;
                           }
 
                           if (!parser->success) {
@@ -256,15 +240,14 @@ static bool parse_number(Parser *parser) {
                       { // Sequence
                         REMEMBER_POSITION(parser, pos);
 
-                        { // Match literal "."
-                          if (parser->pos + 1 <= parser->input_len &&
-                              memcmp(parser->input + parser->pos, ".", 1) ==
-                                  0) {
-                            parser->pos += 1;
+                        { // Match single character "."
+                          if (parser->pos < parser->input_len &&
+                              parser->input[parser->pos] == 46) {
+                            parser->pos++;
                           } else {
 #ifdef PGEN_ERRORS
                             sprintf(parser->error_message,
-                                    "Expected `"
+                                    "Expected character `"
                                     "."
                                     "` at position %zu",
                                     parser->pos);
@@ -355,16 +338,28 @@ static bool parse_number(Parser *parser) {
                         REMEMBER_POSITION(parser, pos);
 
                         { // Match character set "eE"
-                          if (parser->pos < parser->input_len &&
-                              (parser->input[parser->pos] == 101 ||
-                               parser->input[parser->pos] == 69)) {
-                            parser->pos++;
+                          if (parser->pos < parser->input_len) {
+                            switch (parser->input[parser->pos]) {
+                            case 101: /* "e" */
+                            case 69:  /* "E" */
+                              parser->pos++;
+                              break;
+                            default:
+#ifdef PGEN_ERRORS
+                              sprintf(parser->error_message,
+                                      "Expected one of "
+                                      "\"eE\""
+                                      " at position %zu",
+                                      parser->pos);
+#endif
+                              parser->success = false;
+                            }
                           } else {
 #ifdef PGEN_ERRORS
                             sprintf(parser->error_message,
                                     "Expected one of "
                                     "\"eE\""
-                                    " at position %zu",
+                                    " at position %zu but reached end of input",
                                     parser->pos);
 #endif
                             parser->success = false;
@@ -380,16 +375,29 @@ static bool parse_number(Parser *parser) {
 
                               {
                                 { // Match character set "+-"
-                                  if (parser->pos < parser->input_len &&
-                                      (parser->input[parser->pos] == 43 ||
-                                       parser->input[parser->pos] == 45)) {
-                                    parser->pos++;
+                                  if (parser->pos < parser->input_len) {
+                                    switch (parser->input[parser->pos]) {
+                                    case 43: /* "+" */
+                                    case 45: /* "-" */
+                                      parser->pos++;
+                                      break;
+                                    default:
+#ifdef PGEN_ERRORS
+                                      sprintf(parser->error_message,
+                                              "Expected one of "
+                                              "\"+-\""
+                                              " at position %zu",
+                                              parser->pos);
+#endif
+                                      parser->success = false;
+                                    }
                                   } else {
 #ifdef PGEN_ERRORS
                                     sprintf(parser->error_message,
                                             "Expected one of "
                                             "\"+-\""
-                                            " at position %zu",
+                                            " at position %zu but reached end "
+                                            "of input",
                                             parser->pos);
 #endif
                                     parser->success = false;
@@ -542,15 +550,15 @@ static bool parse_string(Parser *parser) {
     { // Sequence
       REMEMBER_POSITION(parser, pos);
 
-      { // Match literal "\""
-        if (parser->pos + 1 <= parser->input_len &&
-            memcmp(parser->input + parser->pos, "\"", 1) == 0) {
-          parser->pos += 1;
+      { // Match single character "\""
+        if (parser->pos < parser->input_len &&
+            parser->input[parser->pos] == 34) {
+          parser->pos++;
         } else {
 #ifdef PGEN_ERRORS
           sprintf(parser->error_message,
-                  "Expected `"
-                  "\""
+                  "Expected character `"
+                  "\\\""
                   "` at position %zu",
                   parser->pos);
 #endif
@@ -573,30 +581,14 @@ static bool parse_string(Parser *parser) {
             if (parser->success) {
               { // Capture
                 size_t start_pos = parser->pos;
-                { // At least 0 repetitions
-                  REMEMBER_POSITION(parser, pos);
-                  size_t rep_count = 0;
-
+                { // Zero or more repetitions
                   while (true) {
                     parse_char(parser);
-
                     if (!parser->success) {
                       break;
                     }
-
-                    rep_count += 1;
                   }
-
-                  if (rep_count >= 0) {
-                    parser->success = true;
-                  } else {
-                    RESTORE_POSITION(parser, pos);
-#ifdef PGEN_ERRORS
-                    sprintf(parser->error_message,
-                            "Expected 0 repetitions at position %zu",
-                            parser->pos);
-#endif
-                  }
+                  parser->success = true;
                 }
 
                 if (parser->success) {
@@ -636,15 +628,15 @@ static bool parse_string(Parser *parser) {
     }
 
     if (parser->success) {
-      { // Match literal "\""
-        if (parser->pos + 1 <= parser->input_len &&
-            memcmp(parser->input + parser->pos, "\"", 1) == 0) {
-          parser->pos += 1;
+      { // Match single character "\""
+        if (parser->pos < parser->input_len &&
+            parser->input[parser->pos] == 34) {
+          parser->pos++;
         } else {
 #ifdef PGEN_ERRORS
           sprintf(parser->error_message,
-                  "Expected `"
-                  "\""
+                  "Expected character `"
+                  "\\\""
                   "` at position %zu",
                   parser->pos);
 #endif
@@ -683,46 +675,43 @@ static bool parse_ws(Parser *parser) {
           "", "ws", start);
 #endif
 
-  { // At least 0 repetitions
-    REMEMBER_POSITION(parser, pos);
-    size_t rep_count = 0;
-
+  { // Zero or more repetitions
     while (true) {
       { // Match character set " \t\n\r"
-        if (parser->pos < parser->input_len &&
-            (parser->input[parser->pos] == 32 ||
-             parser->input[parser->pos] == 9 ||
-             parser->input[parser->pos] == 10 ||
-             parser->input[parser->pos] == 13)) {
-          parser->pos++;
+        if (parser->pos < parser->input_len) {
+          switch (parser->input[parser->pos]) {
+          case 32: /* " " */
+          case 9:  /* "\t" */
+          case 10: /* "\n" */
+          case 13: /* "\r" */
+            parser->pos++;
+            break;
+          default:
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message,
+                    "Expected one of "
+                    "\" \\t\\n\\r\""
+                    " at position %zu",
+                    parser->pos);
+#endif
+            parser->success = false;
+          }
         } else {
 #ifdef PGEN_ERRORS
           sprintf(parser->error_message,
                   "Expected one of "
                   "\" \\t\\n\\r\""
-                  " at position %zu",
+                  " at position %zu but reached end of input",
                   parser->pos);
 #endif
           parser->success = false;
         }
       }
-
       if (!parser->success) {
         break;
       }
-
-      rep_count += 1;
     }
-
-    if (rep_count >= 0) {
-      parser->success = true;
-    } else {
-      RESTORE_POSITION(parser, pos);
-#ifdef PGEN_ERRORS
-      sprintf(parser->error_message, "Expected 0 repetitions at position %zu",
-              parser->pos);
-#endif
-    }
+    parser->success = true;
   }
 
 #ifdef PGEN_DEBUG
@@ -753,15 +742,14 @@ static bool parse_escape(Parser *parser) {
   { // Sequence
     REMEMBER_POSITION(parser, pos);
 
-    { // Match literal "\\"
-      if (parser->pos + 1 <= parser->input_len &&
-          memcmp(parser->input + parser->pos, "\\", 1) == 0) {
-        parser->pos += 1;
+    { // Match single character "\\"
+      if (parser->pos < parser->input_len && parser->input[parser->pos] == 92) {
+        parser->pos++;
       } else {
 #ifdef PGEN_ERRORS
         sprintf(parser->error_message,
-                "Expected `"
-                "\\"
+                "Expected character `"
+                "\\\\"
                 "` at position %zu",
                 parser->pos);
 #endif
@@ -772,22 +760,34 @@ static bool parse_escape(Parser *parser) {
     if (parser->success) {
       {   // Choice
         { // Match character set "\"\\\/bfnrt"
-          if (parser->pos < parser->input_len &&
-              (parser->input[parser->pos] == 34 ||
-               parser->input[parser->pos] == 92 ||
-               parser->input[parser->pos] == 47 ||
-               parser->input[parser->pos] == 98 ||
-               parser->input[parser->pos] == 102 ||
-               parser->input[parser->pos] == 110 ||
-               parser->input[parser->pos] == 114 ||
-               parser->input[parser->pos] == 116)) {
-            parser->pos++;
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 34:  /* "\"" */
+            case 92:  /* "\\" */
+            case 47:  /* "/" */
+            case 98:  /* "b" */
+            case 102: /* "f" */
+            case 110: /* "n" */
+            case 114: /* "r" */
+            case 116: /* "t" */
+              parser->pos++;
+              break;
+            default:
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message,
+                      "Expected one of "
+                      "\"\\\"\\\\/bfnrt\""
+                      " at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
           } else {
 #ifdef PGEN_ERRORS
             sprintf(parser->error_message,
                     "Expected one of "
                     "\"\\\"\\\\/bfnrt\""
-                    " at position %zu",
+                    " at position %zu but reached end of input",
                     parser->pos);
 #endif
             parser->success = false;
@@ -964,14 +964,14 @@ static bool parse_member(Parser *parser) {
           }
 
           if (parser->success) {
-            { // Match literal ":"
-              if (parser->pos + 1 <= parser->input_len &&
-                  memcmp(parser->input + parser->pos, ":", 1) == 0) {
-                parser->pos += 1;
+            { // Match single character ":"
+              if (parser->pos < parser->input_len &&
+                  parser->input[parser->pos] == 58) {
+                parser->pos++;
               } else {
 #ifdef PGEN_ERRORS
                 sprintf(parser->error_message,
-                        "Expected `"
+                        "Expected character `"
                         ":"
                         "` at position %zu",
                         parser->pos);
@@ -1148,15 +1148,15 @@ static bool parse_char(Parser *parser) {
         { // Negate (only match if pattern fails)
           REMEMBER_POSITION(parser, pos);
 
-          { // Match literal "\\"
-            if (parser->pos + 1 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "\\", 1) == 0) {
-              parser->pos += 1;
+          { // Match single character "\\"
+            if (parser->pos < parser->input_len &&
+                parser->input[parser->pos] == 92) {
+              parser->pos++;
             } else {
 #ifdef PGEN_ERRORS
               sprintf(parser->error_message,
-                      "Expected `"
-                      "\\"
+                      "Expected character `"
+                      "\\\\"
                       "` at position %zu",
                       parser->pos);
 #endif
@@ -1190,15 +1190,15 @@ static bool parse_char(Parser *parser) {
             { // Negate (only match if pattern fails)
               REMEMBER_POSITION(parser, pos);
 
-              { // Match literal "\""
-                if (parser->pos + 1 <= parser->input_len &&
-                    memcmp(parser->input + parser->pos, "\"", 1) == 0) {
-                  parser->pos += 1;
+              { // Match single character "\""
+                if (parser->pos < parser->input_len &&
+                    parser->input[parser->pos] == 34) {
+                  parser->pos++;
                 } else {
 #ifdef PGEN_ERRORS
                   sprintf(parser->error_message,
-                          "Expected `"
-                          "\""
+                          "Expected character `"
+                          "\\\""
                           "` at position %zu",
                           parser->pos);
 #endif
@@ -1381,14 +1381,14 @@ static bool parse_object(Parser *parser) {
         { // Sequence
           REMEMBER_POSITION(parser, pos);
 
-          { // Match literal "{"
-            if (parser->pos + 1 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "{", 1) == 0) {
-              parser->pos += 1;
+          { // Match single character "{"
+            if (parser->pos < parser->input_len &&
+                parser->input[parser->pos] == 123) {
+              parser->pos++;
             } else {
 #ifdef PGEN_ERRORS
               sprintf(parser->error_message,
-                      "Expected `"
+                      "Expected character `"
                       "{"
                       "` at position %zu",
                       parser->pos);
@@ -1432,10 +1432,7 @@ static bool parse_object(Parser *parser) {
                         parse_member(parser);
 
                         if (parser->success) {
-                          { // At least 0 repetitions
-                            REMEMBER_POSITION(parser, pos);
-                            size_t rep_count = 0;
-
+                          { // Zero or more repetitions
                             while (true) {
                               { // Sequence
                                 REMEMBER_POSITION(parser, pos);
@@ -1449,16 +1446,14 @@ static bool parse_object(Parser *parser) {
                                     parse_ws(parser);
 
                                     if (parser->success) {
-                                      { // Match literal ","
-                                        if (parser->pos + 1 <=
-                                                parser->input_len &&
-                                            memcmp(parser->input + parser->pos,
-                                                   ",", 1) == 0) {
-                                          parser->pos += 1;
+                                      { // Match single character ","
+                                        if (parser->pos < parser->input_len &&
+                                            parser->input[parser->pos] == 44) {
+                                          parser->pos++;
                                         } else {
 #ifdef PGEN_ERRORS
                                           sprintf(parser->error_message,
-                                                  "Expected `"
+                                                  "Expected character `"
                                                   ","
                                                   "` at position %zu",
                                                   parser->pos);
@@ -1490,24 +1485,11 @@ static bool parse_object(Parser *parser) {
                                   }
                                 }
                               }
-
                               if (!parser->success) {
                                 break;
                               }
-
-                              rep_count += 1;
                             }
-
-                            if (rep_count >= 0) {
-                              parser->success = true;
-                            } else {
-                              RESTORE_POSITION(parser, pos);
-#ifdef PGEN_ERRORS
-                              sprintf(parser->error_message,
-                                      "Expected 0 repetitions at position %zu",
-                                      parser->pos);
-#endif
-                            }
+                            parser->success = true;
                           }
 
                           if (!parser->success) {
@@ -1565,14 +1547,14 @@ static bool parse_object(Parser *parser) {
     }
 
     if (parser->success) {
-      { // Match literal "}"
-        if (parser->pos + 1 <= parser->input_len &&
-            memcmp(parser->input + parser->pos, "}", 1) == 0) {
-          parser->pos += 1;
+      { // Match single character "}"
+        if (parser->pos < parser->input_len &&
+            parser->input[parser->pos] == 125) {
+          parser->pos++;
         } else {
 #ifdef PGEN_ERRORS
           sprintf(parser->error_message,
-                  "Expected `"
+                  "Expected character `"
                   "}"
                   "` at position %zu",
                   parser->pos);
@@ -1624,14 +1606,14 @@ static bool parse_unicode(Parser *parser) {
         { // Sequence
           REMEMBER_POSITION(parser, pos);
 
-          { // Match literal "u"
-            if (parser->pos + 1 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "u", 1) == 0) {
-              parser->pos += 1;
+          { // Match single character "u"
+            if (parser->pos < parser->input_len &&
+                parser->input[parser->pos] == 117) {
+              parser->pos++;
             } else {
 #ifdef PGEN_ERRORS
               sprintf(parser->error_message,
-                      "Expected `"
+                      "Expected character `"
                       "u"
                       "` at position %zu",
                       parser->pos);
@@ -1782,14 +1764,14 @@ static bool parse_array(Parser *parser) {
         { // Sequence
           REMEMBER_POSITION(parser, pos);
 
-          { // Match literal "["
-            if (parser->pos + 1 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "[", 1) == 0) {
-              parser->pos += 1;
+          { // Match single character "["
+            if (parser->pos < parser->input_len &&
+                parser->input[parser->pos] == 91) {
+              parser->pos++;
             } else {
 #ifdef PGEN_ERRORS
               sprintf(parser->error_message,
-                      "Expected `"
+                      "Expected character `"
                       "["
                       "` at position %zu",
                       parser->pos);
@@ -1833,10 +1815,7 @@ static bool parse_array(Parser *parser) {
                         parse_value(parser);
 
                         if (parser->success) {
-                          { // At least 0 repetitions
-                            REMEMBER_POSITION(parser, pos);
-                            size_t rep_count = 0;
-
+                          { // Zero or more repetitions
                             while (true) {
                               { // Sequence
                                 REMEMBER_POSITION(parser, pos);
@@ -1850,16 +1829,14 @@ static bool parse_array(Parser *parser) {
                                     parse_ws(parser);
 
                                     if (parser->success) {
-                                      { // Match literal ","
-                                        if (parser->pos + 1 <=
-                                                parser->input_len &&
-                                            memcmp(parser->input + parser->pos,
-                                                   ",", 1) == 0) {
-                                          parser->pos += 1;
+                                      { // Match single character ","
+                                        if (parser->pos < parser->input_len &&
+                                            parser->input[parser->pos] == 44) {
+                                          parser->pos++;
                                         } else {
 #ifdef PGEN_ERRORS
                                           sprintf(parser->error_message,
-                                                  "Expected `"
+                                                  "Expected character `"
                                                   ","
                                                   "` at position %zu",
                                                   parser->pos);
@@ -1891,24 +1868,11 @@ static bool parse_array(Parser *parser) {
                                   }
                                 }
                               }
-
                               if (!parser->success) {
                                 break;
                               }
-
-                              rep_count += 1;
                             }
-
-                            if (rep_count >= 0) {
-                              parser->success = true;
-                            } else {
-                              RESTORE_POSITION(parser, pos);
-#ifdef PGEN_ERRORS
-                              sprintf(parser->error_message,
-                                      "Expected 0 repetitions at position %zu",
-                                      parser->pos);
-#endif
-                            }
+                            parser->success = true;
                           }
 
                           if (!parser->success) {
@@ -1966,14 +1930,14 @@ static bool parse_array(Parser *parser) {
     }
 
     if (parser->success) {
-      { // Match literal "]"
-        if (parser->pos + 1 <= parser->input_len &&
-            memcmp(parser->input + parser->pos, "]", 1) == 0) {
-          parser->pos += 1;
+      { // Match single character "]"
+        if (parser->pos < parser->input_len &&
+            parser->input[parser->pos] == 93) {
+          parser->pos++;
         } else {
 #ifdef PGEN_ERRORS
           sprintf(parser->error_message,
-                  "Expected `"
+                  "Expected character `"
                   "]"
                   "` at position %zu",
                   parser->pos);
