@@ -1,3 +1,4 @@
+#define PGEN_ERRORS 1
 #include <assert.h>
 #include <lauxlib.h>
 #include <lua.h>
@@ -83,19 +84,19 @@ static bool parse_identifier(Parser *parser) {
 
     while (true) {
       {   // Choice
-        { // Match character range "a" - "z"
+        { // Match character range: "az"
           if (parser->pos < parser->input_len &&
-              parser->input[parser->pos] >= 97 &&
-              parser->input[parser->pos] <= 122) {
+              ((parser->input[parser->pos] >= 97 &&
+                parser->input[parser->pos] <= 122))) {
             parser->pos++;
           } else {
 #ifdef PGEN_ERRORS
             sprintf(parser->error_message,
-                    "Expected character in range "
+                    "Expected character in ranges ["
                     "a"
                     " - "
                     "z"
-                    " at position %zu",
+                    "] at position %zu",
                     parser->pos);
 #endif
             parser->success = false;
@@ -104,19 +105,19 @@ static bool parse_identifier(Parser *parser) {
 
         if (!parser->success) {
           parser->success = true;
-          { // Match character range "A" - "Z"
+          { // Match character range: "AZ"
             if (parser->pos < parser->input_len &&
-                parser->input[parser->pos] >= 65 &&
-                parser->input[parser->pos] <= 90) {
+                ((parser->input[parser->pos] >= 65 &&
+                  parser->input[parser->pos] <= 90))) {
               parser->pos++;
             } else {
 #ifdef PGEN_ERRORS
               sprintf(parser->error_message,
-                      "Expected character in range "
+                      "Expected character in ranges ["
                       "A"
                       " - "
                       "Z"
-                      " at position %zu",
+                      "] at position %zu",
                       parser->pos);
 #endif
               parser->success = false;
@@ -621,6 +622,7 @@ int luaopen_position_capture(lua_State *L) {
   return 1;
 }
 #endif
+
 /*
 To compile as a Lua module:
 gcc -shared -o position_capture.so -fPIC position_capture.c `pkg-config --cflags

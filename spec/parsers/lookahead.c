@@ -1,3 +1,4 @@
+#define PGEN_ERRORS 1
 #include <assert.h>
 #include <lauxlib.h>
 #include <lua.h>
@@ -453,6 +454,7 @@ int luaopen_lookahead(lua_State *L) {
   return 1;
 }
 #endif
+
 /*
 To compile as a Lua module:
 gcc -shared -o lookahead.so -fPIC lookahead.c `pkg-config --cflags --libs

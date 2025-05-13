@@ -1,3 +1,4 @@
+#define PGEN_ERRORS 1
 #include <assert.h>
 #include <lauxlib.h>
 #include <lua.h>
@@ -80,14 +81,29 @@ static bool parse_1(Parser *parser) {
 
     { // Capture Table
       int initial_stack_size = lua_gettop(parser->L);
-      { // Zero or more repetitions
+      { // At least 0 repetitions
+        REMEMBER_POSITION(parser, pos);
+        size_t rep_count = 0;
+
         while (true) {
           parse_item(parser);
+
           if (!parser->success) {
             break;
           }
+
+          rep_count += 1;
         }
-        parser->success = true;
+
+        if (rep_count >= 0) {
+          parser->success = true;
+        } else {
+          RESTORE_POSITION(parser, pos);
+#ifdef PGEN_ERRORS
+          sprintf(parser->error_message,
+                  "Expected 0 repetitions at position %zu", parser->pos);
+#endif
+        }
       }
 
       if (parser->success) {
@@ -183,7 +199,7 @@ static bool parse_item(Parser *parser) {
         size_t rep_count = 0;
 
         while (true) {
-          { // Match character range: "0"-"9", "a"-"z", "A"-"Z"
+          { // Match character range: "09,az,AZ"
             if (parser->pos < parser->input_len &&
                 ((parser->input[parser->pos] >= 48 &&
                   parser->input[parser->pos] <= 57) ||
@@ -194,12 +210,21 @@ static bool parse_item(Parser *parser) {
               parser->pos++;
             } else {
 #ifdef PGEN_ERRORS
-              sprintf(
-                  parser->error_message,
-                  "Expected character in ranges [" 0 "-" 9 ", " a "-" z ", " A
-                                                           "-" Z
-                                                           "] at position %zu",
-                  parser->pos);
+              sprintf(parser->error_message,
+                      "Expected character in ranges ["
+                      "0"
+                      " - "
+                      "9"
+                      ", "
+                      "a"
+                      " - "
+                      "z"
+                      ", "
+                      "A"
+                      " - "
+                      "Z"
+                      "] at position %zu",
+                      parser->pos);
 #endif
               parser->success = false;
             }
@@ -283,30 +308,17 @@ static bool parse_space(Parser *parser) {
 #endif
 
   { // Match character set " \t\n\r"
-    if (parser->pos < parser->input_len) {
-      switch (parser->input[parser->pos]) {
-      case 32: /* " " */
-      case 9:  /* "\t" */
-      case 10: /* "\n" */
-      case 13: /* "\r" */
-        parser->pos++;
-        break;
-      default:
-#ifdef PGEN_ERRORS
-        sprintf(parser->error_message,
-                "Expected one of "
-                "\" \\t\\n\\r\""
-                " at position %zu",
-                parser->pos);
-#endif
-        parser->success = false;
-      }
+    if (parser->pos < parser->input_len &&
+        (parser->input[parser->pos] == 32 || parser->input[parser->pos] == 9 ||
+         parser->input[parser->pos] == 10 ||
+         parser->input[parser->pos] == 13)) {
+      parser->pos++;
     } else {
 #ifdef PGEN_ERRORS
       sprintf(parser->error_message,
               "Expected one of "
               "\" \\t\\n\\r\""
-              " at position %zu but reached end of input",
+              " at position %zu",
               parser->pos);
 #endif
       parser->success = false;
@@ -427,6 +439,7 @@ int luaopen_range(lua_State *L) {
   return 1;
 }
 #endif
+
 /*
 To compile as a Lua module:
 gcc -shared -o range.so -fPIC range.c `pkg-config --cflags --libs lua5.1`

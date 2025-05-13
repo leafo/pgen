@@ -22,6 +22,9 @@ parser:option("-n --name", "Parser name")
   :argname("NAME")
   :default("parser")
 
+parser:flag("--pgen-errors", "Generate error messages on failed parse paths (warning: substantial performance penalty)")
+  :default(false)
+
 local args = parser:parse()
 
 local input_file = args.input_file
@@ -49,7 +52,8 @@ end
 
 -- Compile the grammar
 local output, err = pgen.compile(result, {
-  parser_name = args.name
+  parser_name = args.name,
+  pgen_errors = args.pgen_errors
 })
 
 if not output then

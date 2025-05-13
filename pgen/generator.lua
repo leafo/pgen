@@ -108,11 +108,11 @@ local result = $PARSER_NAME$.parse("your input string")
   }
 
   if options.pgen_debug then
-    talbe.insert(c_chunks, 1, "#DEFINE PGEN_DEBUG")
+    talbe.insert(c_chunks, 1, "#define PGEN_DEBUG 1")
   end
 
   if options.pgen_errors then
-    table.insert(c_chunks, 1, "#DEFINE PGEN_ERRORS")
+    table.insert(c_chunks, 1, "#define PGEN_ERRORS 1")
   end
 
   return table.concat(c_chunks, "\n")
@@ -351,7 +351,7 @@ function generator.generate_range_code(ranges)
     parser->pos++;
   } else {
 #ifdef PGEN_ERRORS
-    sprintf(parser->error_message, "Expected character in ranges [$ERROR_RANGES$] at position %zu", parser->pos);
+    sprintf(parser->error_message, "Expected character in ranges [" $ERROR_RANGES$ "] at position %zu", parser->pos);
 #endif
     parser->success = false;
   }

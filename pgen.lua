@@ -133,7 +133,9 @@ function pgen.compile(grammar, options)
   local parser_name = options.parser_name or "parser"
 
   local generator = require("pgen.generator")
-  return generator.generate(grammar, parser_name)
+  return generator.generate(grammar, parser_name, {
+    pgen_errors = options.pgen_errors
+  })
 end
 
 -- this will require a module that returns a grammar, it will compile it to C
