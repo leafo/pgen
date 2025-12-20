@@ -5,16 +5,15 @@ local P, R, S, V, C, Cc, Ct, Cp = pgen.P, pgen.R, pgen.S, pgen.V, pgen.C, pgen.C
 return {
   "chunk", -- initial rule name
 
-  -- A chunk is simply a block
-  chunk = Ct(Cc("chunk") * V"block" * -1),
+  chunk = V"block" * -1,
 
   -- A block is a sequence of statements with an optional return statement
   block = Ct(Cc("block") * V"ws" * V"stat"^0 * V"retstat"^-1 * V"ws"),
 
   -- Statements
   stat = V"ws" * (
-    P";" * Ct(Cc("empty")) +                                           -- empty statement
-    Ct(Cc("assign") * V"varlist" * P"=" * V"explist") +              -- variable assignment
+    P";" * Ct(Cc("empty")) +                                         -- empty statement
+    Ct(Cc("assign") * V"varlist" * V"ws" * P"=" * V"ws" * V"explist") +  -- variable assignment
     V"functioncall" +                                                -- function call
     Ct(Cc("label") * P"::" * V"ws" * V"Name" * V"ws" * P"::") +      -- label
     Ct(Cc("break") * P"break") +                                     -- break
@@ -25,12 +24,12 @@ return {
     Ct(Cc("if") * P"if" * V"ws" * V"exp" * V"ws" * P"then" * V"block" *
       (P"elseif" * V"ws" * V"exp" * V"ws" * P"then" * V"block")^0 *
       (P"else" * V"block")^-1 * P"end") +                            -- if
-    Ct(Cc("for_num") * P"for" * V"ws" * V"Name" * V"ws" * P"=" * V"ws" * V"exp" * P"," * V"ws" * V"exp" * 
+    Ct(Cc("for_num") * P"for" * V"ws" * V"Name" * V"ws" * P"=" * V"ws" * V"exp" * P"," * V"ws" * V"exp" *
       (P"," * V"ws" * V"exp")^-1 * V"ws" * P"do" * V"block" * P"end") + -- numeric for
     Ct(Cc("for_in") * P"for" * V"ws" * V"namelist" * V"ws" * P"in" * V"ws" * V"explist" * V"ws" * P"do" * V"block" * P"end") + -- generic for
     Ct(Cc("function") * P"function" * V"ws" * V"funcname" * V"funcbody") +  -- function definition
     Ct(Cc("local_function") * P"local" * V"ws" * P"function" * V"ws" * V"Name" * V"funcbody") +  -- local function
-    Ct(Cc("local") * P"local" * V"ws" * V"attnamelist" * (P"=" * V"ws" * V"explist")^-1)  -- local variables
+    Ct(Cc("local") * P"local" * V"ws" * V"attnamelist" * (V"ws" * P"=" * V"ws" * V"explist")^-1)  -- local variables
   ) * V"ws",
 
   -- Return statement
@@ -42,19 +41,30 @@ return {
   -- Variable list (used in assignments)
   varlist = Ct(Cc("varlist") * V"var" * (V"ws" * P"," * V"ws" * V"var")^0),
 
-  -- Single variable (name, table index, or field access)
-  var = Ct(Cc("var") * (
-    V"Name" +
-    Ct(Cc("index") * V"prefixexp" * V"ws" * P"[" * V"ws" * V"exp" * V"ws" * P"]") +
-    Ct(Cc("field") * V"prefixexp" * V"ws" * P"." * V"ws" * V"Name")
-  )),
+  -- Single variable: prefixexp that ends with Name, index, or field (not a call)
+  -- For simplicity, we parse as prefixexp and validate semantically if needed
+  var = Ct(Cc("var") * V"prefixexp_inner"),
+
+  -- Primary expression (the base of a prefixexp)
+  primary = V"Name" + Ct(Cc("paren") * P"(" * V"ws" * V"exp" * V"ws" * P")"),
+
+  -- Non-call suffix operations (index and field access)
+  var_suffix =
+    Ct(Cc("index") * V"ws" * P"[" * V"ws" * V"exp" * V"ws" * P"]") +
+    Ct(Cc("field") * V"ws" * P"." * V"ws" * V"Name"),
+
+  -- All suffix operations (including calls)
+  suffix = V"var_suffix" + V"call_suffix",
+
+  -- Inner prefixexp (primary followed by zero or more suffixes)
+  prefixexp_inner = V"primary" * V"suffix"^0,
 
   -- Name list (used in for loops and parameter lists)
   namelist = Ct(Cc("namelist") * V"Name" * (V"ws" * P"," * V"ws" * V"Name")^0),
-  
+
   -- Attributed name list (for local declarations)
   attnamelist = Ct(Cc("attnamelist") * V"Name" * V"attrib"^-1 * (V"ws" * P"," * V"ws" * V"Name" * V"attrib"^-1)^0),
-  
+
   -- Variable attribute
   attrib = V"ws" * Ct(Cc("attrib") * P"<" * V"ws" * V"Name" * V"ws" * P">"),
 
@@ -62,10 +72,10 @@ return {
   explist = Ct(Cc("explist") * V"exp" * (V"ws" * P"," * V"ws" * V"exp")^0),
 
   -- Single expression
-  exp = V"simple_exp" * (V"ws" * V"binop" * V"ws" * V"exp")^-1,
+  exp = Ct(Cc("exp") * V"simple_exp" * (V"ws" * V"binop" * V"ws" * V"simple_exp")^0),
 
   -- Simple expression (without binary operators)
-  simple_exp = 
+  simple_exp =
     P"nil" * Ct(Cc("nil")) +
     P"false" * Ct(Cc("boolean", false)) +
     P"true" * Ct(Cc("boolean", true)) +
@@ -77,20 +87,21 @@ return {
     V"tableconstructor" +
     Ct(Cc("unop") * V"unop" * V"ws" * V"exp"),
 
-  -- Prefix expression (variables, function calls, parenthesized expressions)
-  prefixexp = 
-    V"var" +
-    V"functioncall" +
-    Ct(Cc("paren") * P"(" * V"ws" * V"exp" * V"ws" * P")"),
+  -- Prefix expression (variables, function calls, parenthesized expressions with suffixes)
+  prefixexp = Ct(Cc("prefixexp") * V"prefixexp_inner"),
 
-  -- Function call
-  functioncall = Ct(Cc("call") * 
-    (V"prefixexp" * V"ws" * P":" * V"ws" * V"Name" * V"ws" * V"args" +  -- method call
-     V"prefixexp" * V"ws" * V"args")                                     -- regular call
-  ),
+  -- Function call: prefixexp with at least one call/method suffix at the end
+  -- call_suffix matches only call/method operations (not index/field)
+  call_suffix =
+    Ct(Cc("method") * V"ws" * P":" * V"ws" * V"Name" * V"ws" * V"args") +
+    Ct(Cc("call") * V"ws" * V"args"),
+
+  -- A functioncall as a statement. We're permissive here - any prefixexp is accepted.
+  -- Semantic validation can check that it actually ends with a call.
+  functioncall = Ct(Cc("call") * V"prefixexp_inner"),
 
   -- Function arguments
-  args = 
+  args =
     P"(" * V"ws" * (V"explist")^-1 * V"ws" * P")" +
     V"tableconstructor" +
     V"String",
@@ -102,7 +113,7 @@ return {
   funcbody = Ct(Cc("funcbody") * V"ws" * P"(" * V"ws" * (V"parlist")^-1 * V"ws" * P")" * V"ws" * V"block" * V"ws" * P"end"),
 
   -- Parameter list
-  parlist = Ct(Cc("params") * 
+  parlist = Ct(Cc("params") *
     (V"namelist" * (V"ws" * P"," * V"ws" * P"...")^-1 +  -- names with optional vararg
      P"..." * Ct(Cc("vararg")))                           -- just vararg
   ),
@@ -114,7 +125,7 @@ return {
   fieldlist = Ct(Cc("fields") * V"field" * (V"fieldsep" * V"field")^0 * V"fieldsep"^-1),
 
   -- Individual field in a table constructor
-  field = 
+  field =
     Ct(Cc("index_field") * P"[" * V"ws" * V"exp" * V"ws" * P"]" * V"ws" * P"=" * V"ws" * V"exp") +
     Ct(Cc("name_field") * V"Name" * V"ws" * P"=" * V"ws" * V"exp") +
     Ct(Cc("exp_field") * V"exp"),
@@ -123,30 +134,31 @@ return {
   fieldsep = V"ws" * (P"," + P";") * V"ws",
 
   -- Binary operators (with appropriate precedence handled by the grammar)
-  binop = Ct(Cc("binop") * (
+  -- Note: longer operators must come before shorter ones (e.g., <= before <)
+  binop = Ct(Cc("binop") * C(
     P"or" +                                -- logical or
     P"and" +                               -- logical and
-    P"<" +                                 -- less than
-    P">" +                                 -- greater than
     P"<=" +                                -- less than or equal
     P">=" +                                -- greater than or equal
+    P"<<" +                                -- bitwise left shift
+    P">>" +                                -- bitwise right shift
+    P"<" +                                 -- less than
+    P">" +                                 -- greater than
     P"~=" +                                -- not equal
     P"==" +                                -- equal
     P"|" +                                 -- bitwise or
     P"~" +                                 -- bitwise exclusive or
     P"&" +                                 -- bitwise and
-    P"<<" +                                -- bitwise left shift
-    P">>" +                                -- bitwise right shift
     P".." +                                -- string concatenation
+    P"//" +                                -- floor division
+    P"/" +                                 -- float division
     P"+" +                                 -- addition
     P"-" +                                 -- subtraction
     P"*" +                                 -- multiplication
-    P"/" +                                 -- float division
-    P"//" +                                -- floor division
     P"%" +                                 -- modulo
     P"^"                                   -- exponentiation
-  ) * C(P(0))),
-  
+  )),
+
   -- Unary operators
   unop = C(P"-" + P"not" + P"#" + P"~"),
 
@@ -156,8 +168,20 @@ return {
   -- Whitespace (including comments)
   ws = (S" \t\n\r" + V"comment")^0,
 
-  -- Name (identifier)
-  Name = Ct(Cc("name") * C(R("az", "AZ", "__") * R("az", "AZ", "09", "__")^0)),
+  -- Identifier pattern (raw)
+  ident = R("az", "AZ", "__") * R("az", "AZ", "09", "__")^0,
+
+  -- Reserved keywords (must be followed by non-identifier character)
+  -- Note: longer keywords must come before shorter prefixes (elseif before else)
+  keyword = (
+    P"and" + P"break" + P"do" + P"elseif" + P"else" + P"end" +
+    P"false" + P"for" + P"function" + P"goto" + P"if" + P"in" +
+    P"local" + P"nil" + P"not" + P"or" + P"repeat" + P"return" +
+    P"then" + P"true" + P"until" + P"while"
+  ) * -R("az", "AZ", "09", "__"),
+
+  -- Name (identifier that is not a keyword)
+  Name = Ct(Cc("name") * C(V"ident" - V"keyword")),
 
   -- Number literals
   Number = Ct(Cc("number") * C(
