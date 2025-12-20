@@ -1,4 +1,5 @@
 .PHONY: test busted generate-spec-parsers
+.SECONDARY:
 
 test: calc_parser.so
 	lua5.1 test.lua
