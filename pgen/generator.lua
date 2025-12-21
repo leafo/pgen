@@ -45,35 +45,15 @@ local function escape_c_literal(str, delim)
   return delim .. escaped .. delim
 end
 
--- Recursively collect all Cg (capture group) names from a pattern
-local function collect_cg_names_from_pattern(pattern, names)
-  if not pattern or type(pattern) ~= "table" then
-    return
-  end
-
-  local t = pattern.type
-  if t == 10 then -- Cg
-    names[pattern.name] = true
-    collect_cg_names_from_pattern(pattern.value, names)
-  elseif t == 5 or t == 6 or t == 9 then -- C, Ct, L (patterns with single child in value)
-    collect_cg_names_from_pattern(pattern.value, names)
-  elseif t == "sequence" or t == "choice" then
-    for _, child in ipairs(pattern) do
-      collect_cg_names_from_pattern(child, names)
-    end
-  elseif t == "repeat" or t == "negate" then
-    collect_cg_names_from_pattern(pattern[1], names)
-  end
-end
-
 -- Collect all Cg names from a grammar
 local function collect_cg_names(grammar)
+  local pgen = require("pgen")
   local names = {}
-  for name, pattern in pairs(grammar) do
-    if type(pattern) == "table" then
-      collect_cg_names_from_pattern(pattern, names)
+  pgen.visit_grammar(grammar, function(node)
+    if node.type == 10 then -- Cg
+      names[node.name] = true
     end
-  end
+  end)
   -- Convert to sorted array for deterministic output
   local result = {}
   for name in pairs(names) do

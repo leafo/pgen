@@ -153,6 +153,35 @@ function mt.__len(a)
   return pgen.L(a)
 end
 
+-- Visit every node in a pattern tree, calling visitor on each
+function pgen.visit_pattern(pattern, visitor)
+  if not pattern or type(pattern) ~= "table" then
+    return
+  end
+
+  visitor(pattern)
+
+  local t = pattern.type
+  if t == C or t == Ct or t == L or t == Cg then
+    pgen.visit_pattern(pattern.value, visitor)
+  elseif t == "sequence" or t == "choice" then
+    for _, child in ipairs(pattern) do
+      pgen.visit_pattern(child, visitor)
+    end
+  elseif t == "repeat" or t == "negate" then
+    pgen.visit_pattern(pattern[1], visitor)
+  end
+end
+
+-- Visit every node across all rules in a grammar
+function pgen.visit_grammar(grammar, visitor)
+  for _, pattern in pairs(grammar) do
+    if type(pattern) == "table" then
+      pgen.visit_pattern(pattern, visitor)
+    end
+  end
+end
+
 -- Compile grammar to C code
 function pgen.compile(grammar, options)
   options = options or {}
