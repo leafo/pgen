@@ -46,6 +46,12 @@ local function escape_c_literal(str, delim)
   return delim .. escaped .. delim
 end
 
+local function assert_valid_c_identifier(name)
+  if not name:match("^[A-Za-z_][A-Za-z0-9_]*$") then
+    error("Invalid capture name for C identifier: " .. escape_string(name))
+  end
+end
+
 -- Collect all Cg and Cmb names from a grammar (both use sentinels)
 local function collect_cg_names(grammar)
   local visitor = require("pgen.visitor")
@@ -131,6 +137,9 @@ function generator.generate(grammar, parser_name, options)
 
   -- Collect all Cg (capture group) names for sentinel generation
   local cg_names = collect_cg_names(grammar)
+  for _, name in ipairs(cg_names) do
+    assert_valid_c_identifier(name)
+  end
 
   -- Generate the C code
   local c_chunks = {
