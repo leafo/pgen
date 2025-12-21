@@ -75,6 +75,10 @@ parser.parse("input string")
 - `Cg(patt, name)` - Capture group (creates named field in parent Ct)
 - `Cn(patt, n)` - Numbered capture (select nth capture from inner pattern)
 
+If you are adding a new type, please ensure that **pgen/visitor.lua** knows how
+to traverse it. Additionally, it might be worth scanning **pgen/optimize.lua**
+to ensure the new type doesn't interfere with any optimizers.
+
 ### Operators
 
 - `a * b` - Sequence: match a followed by b
