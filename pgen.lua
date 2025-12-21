@@ -267,6 +267,7 @@ end
 function pgen.require(module_name, options)
   options = options or {}
   local show_timing = options.show_timing
+  local parser_name = options.parser_name or "parser"
 
   local socket
   if show_timing then
@@ -284,7 +285,6 @@ function pgen.require(module_name, options)
   local grammar = require(module_name)
   log_time("Loading grammar module", start_time)
 
-  local parser_name = "parser"
 
   -- Check if the result is a table (grammar)
   if type(grammar) ~= "table" then
@@ -298,7 +298,7 @@ function pgen.require(module_name, options)
     parser_name = parser_name,
     optimize = options.optimize
   })
-  log_time("Compiling grammar to C code", start_time)
+  log_time("Compiling grammar to C code (" .. tostring(#output) .. " bytes)", start_time)
 
   if not output then
     error("Error generating parser: " .. (err or "unknown error"))
