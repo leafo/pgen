@@ -1,7 +1,7 @@
 local pgen = {}
 
 -- Pattern types
-local P, R, S, V, C, Ct, Cp, Cc, L, Cg, Cn = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+local types = require("pgen.types")
 
 local mt = {}
 
@@ -39,60 +39,60 @@ end
 function pgen.P(val)
   -- if it's negative number, conver it to -pgen.P(-n)
   if type(val) == "number" and val < 0 then
-    return -pattern(P, -val)
+    return -pattern(types.P, -val)
   end
 
-  return pattern(P, val)
+  return pattern(types.P, val)
 end
 
 -- Create character range pattern
 -- Can handle multiple ranges: R("az", "AZ", "09")
 function pgen.R(...)
   local ranges = {...}
-  return pattern(R, ranges)
+  return pattern(types.R, ranges)
 end
 
 -- Create character set pattern
 function pgen.S(set)
-  return pattern(S, set)
+  return pattern(types.S, set)
 end
 
 -- Reference to a named pattern
 function pgen.V(name)
-  return pattern(V, name)
+  return pattern(types.V, name)
 end
 
 
 -- Capture
 function pgen.C(patt)
-  return pattern(C, coerce_pattern(patt))
+  return pattern(types.C, coerce_pattern(patt))
 end
 
 -- Capture table
 function pgen.Ct(patt)
-  return pattern(Ct, assert_pattern(patt))
+  return pattern(types.Ct, assert_pattern(patt))
 end
 
 -- Capture position
 function pgen.Cp()
-  return pattern(Cp)
+  return pattern(types.Cp)
 end
 
 -- Constant capture
 function pgen.Cc(...)
   local count = select("#", ...)
-  return pattern(Cc, {..., count = count})
+  return pattern(types.Cc, {..., count = count})
 end
 
 -- Lookahead pattern (matches without consuming input)
 function pgen.L(patt)
-  return pattern(L, coerce_pattern(patt))
+  return pattern(types.L, coerce_pattern(patt))
 end
 
 -- Capture group (named capture for back-reference or named table fields)
 function pgen.Cg(patt, name)
   assert(type(name) == "string", "Cg requires a string name")
-  return pattern(Cg, coerce_pattern(patt), name)
+  return pattern(types.Cg, coerce_pattern(patt), name)
 end
 
 -- Numbered capture (select nth capture from inner pattern)
@@ -100,7 +100,7 @@ function pgen.Cn(patt, n)
   assert(type(n) == "number", "Cn requires a number index")
   assert(n >= 0, "Cn index must be non-negative")
   assert(math.floor(n) == n, "Cn index must be an integer")
-  return pattern(Cn, coerce_pattern(patt), n)
+  return pattern(types.Cn, coerce_pattern(patt), n)
 end
 
 function mt.__add(a, b)
@@ -194,7 +194,7 @@ function pgen.visit_pattern(pattern, visitor)
 
   -- Visit children and rebuild if any changed
   local t = pattern.type
-  if t == C or t == Ct or t == L or t == Cg or t == Cn then
+  if t == types.C or t == types.Ct or t == types.L or t == types.Cg or t == types.Cn then
     local new_value = pgen.visit_pattern(pattern.value, visitor)
     if new_value ~= pattern.value then
       return make{type = t, value = new_value, name = pattern.name}

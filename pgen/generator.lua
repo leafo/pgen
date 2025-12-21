@@ -1,4 +1,5 @@
 local generator = {}
+local types = require("pgen.types")
 
 -- human readable version of the string that can be embeded into comments
 local function escape_string(str)
@@ -50,7 +51,7 @@ local function collect_cg_names(grammar)
   local pgen = require("pgen")
   local names = {}
   pgen.visit_grammar(grammar, function(node)
-    if node.type == 10 then -- Cg
+    if node.type == types.Cg then -- Cg
       names[node.name] = true
     end
   end)
@@ -333,7 +334,7 @@ end
 function generator.generate_pattern_code(pattern)
   local t = pattern.type
 
-  if t == 1 then -- P (literal string)
+  if t == types.P then -- P (literal string)
     local literal = pattern.value
     if type(literal) == "number" then
       return generator.generate_n_chars_code(literal)
@@ -341,27 +342,27 @@ function generator.generate_pattern_code(pattern)
       return generator.generate_literal_code(literal)
     end
 
-  elseif t == 2 then -- R (character range)
+  elseif t == types.R then -- R (character range)
     return generator.generate_range_code(pattern.value)
-  elseif t == 3 then -- S (character set)
+  elseif t == types.S then -- S (character set)
     local set = pattern.value
     return generator.generate_set_code(set)
-  elseif t == 4 then -- V (reference to another rule)
+  elseif t == types.V then -- V (reference to another rule)
     local rule_name = pattern.value
     return generator.generate_rule_call_code(rule_name)
-  elseif t == 5 then -- C (capture)
+  elseif t == types.C then -- C (capture)
     return generator.generate_capture_code(pattern.value)
-  elseif t == 6 then -- Ct (capture table)
+  elseif t == types.Ct then -- Ct (capture table)
     return generator.generate_capture_table_code(pattern.value, pattern.array_only)
-  elseif t == 7 then -- Cp (capture position)
+  elseif t == types.Cp then -- Cp (capture position)
     return generator.generate_position_capture_code()
-  elseif t == 8 then -- Cc (constant capture)
+  elseif t == types.Cc then -- Cc (constant capture)
     return generator.generate_constant_capture_code(pattern.value)
-  elseif t == 9 then -- L (lookahead)
+  elseif t == types.L then -- L (lookahead)
     return generator.generate_lookahead_code(pattern.value)
-  elseif t == 10 then -- Cg (capture group)
+  elseif t == types.Cg then -- Cg (capture group)
     return generator.generate_capture_group_code(pattern.value, pattern.name)
-  elseif t == 11 then -- Cn (numbered capture)
+  elseif t == types.Cn then -- Cn (numbered capture)
     return generator.generate_numbered_capture_code(pattern.value, pattern.name)
   elseif t == "sequence" then
     return generator.generate_sequence_code(unpack(pattern))

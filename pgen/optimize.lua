@@ -1,4 +1,5 @@
 local optimize = {}
+local types = require("pgen.types")
 
 -- Flatten nested choices: choice(choice(a,b), c) → {a, b, c}
 local function flatten_choices(pattern)
@@ -25,8 +26,8 @@ local function is_trie_eligible(alternatives)
 
   local strings = {}
   for i, alt in ipairs(alternatives) do
-    -- Must be P node (type == 1) with string value
-    if alt.type ~= 1 then return false end
+    -- Must be P node (type == types.P) with string value
+    if alt.type ~= types.P then return false end
     if type(alt.value) ~= "string" then return false end
     if #alt.value == 0 then return false end
     strings[i] = alt.value
@@ -57,11 +58,11 @@ local function contains_cg_in_pattern(pattern, rules, memo, visiting)
   end
 
   local t = pattern.type
-  if t == 10 then
+  if t == types.Cg then
     return true
   end
 
-  if t == 4 then
+  if t == types.V then
     local name = pattern.value
     if memo[name] ~= nil then
       return memo[name]
@@ -84,7 +85,7 @@ local function contains_cg_in_pattern(pattern, rules, memo, visiting)
     return result
   end
 
-  if t == 5 or t == 6 or t == 9 or t == 10 or t == 11 then
+  if t == types.C or t == types.Ct or t == types.L or t == types.Cg or t == types.Cn then
     return contains_cg_in_pattern(pattern.value, rules, memo, visiting)
   end
 
@@ -111,12 +112,12 @@ function optimize.capture_table_optimization(grammar)
   local visiting = {}
 
   return pgen.visit_grammar(grammar, function(node, replace)
-    if node.type ~= 6 then return end
+    if node.type ~= types.Ct then return end
     if node.array_only then return end
     if contains_cg_in_pattern(node.value, grammar, memo, visiting) then return end
 
     replace(pgen._make({
-      type = 6,
+      type = types.Ct,
       value = node.value,
       array_only = true
     }))
@@ -125,7 +126,7 @@ end
 
 -- Build trie data structure from list of strings
 -- Returns: {children = {char -> node}, is_terminal = bool, word = string|nil}
-function optimize.build_trie(strings)
+local function build_trie(strings)
   local root = {children = {}, is_terminal = false}
 
   for _, str in ipairs(strings) do
@@ -145,11 +146,11 @@ function optimize.build_trie(strings)
 end
 
 -- Create trie AST node from list of strings
-function optimize.create_trie_node(strings)
+local function create_trie_node(strings)
   local pgen = require("pgen")
   return pgen._make({
     type = "literal_trie",
-    trie = optimize.build_trie(strings),
+    trie = build_trie(strings),
     strings = strings  -- keep for debugging/comments
   })
 end
@@ -157,7 +158,6 @@ end
 -- Trie optimization pass - replaces choice of literals with trie node
 function optimize.trie_optimization(grammar)
   local pgen = require("pgen")
-
   return pgen.visit_grammar(grammar, function(node, replace)
     if node.type ~= "choice" then return end
 
@@ -170,7 +170,7 @@ function optimize.trie_optimization(grammar)
       table.insert(strings, alt.value)
     end
 
-    replace(optimize.create_trie_node(strings))
+    replace(create_trie_node(strings))
   end)
 end
 
