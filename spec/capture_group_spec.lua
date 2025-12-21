@@ -31,10 +31,10 @@ describe("capture group (Cg) parser", function()
     }, result)
   end)
 
-  it("works with Cp position captures", function()
+  it("works with Cc constant capture as Cg pattern", function()
     local result = parser.parse("4:hello")
     assert.same({
-      pos = 3, -- position after "4:"
+      const_field = "constant_value",
       "hello"
     }, result)
   end)

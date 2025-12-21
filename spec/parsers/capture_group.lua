@@ -22,8 +22,8 @@ return {
   -- Test 3: Mixed named and positional captures
   test3 = Ct(C(P"x") * Cg(P"y", "named") * C(P"z")),
 
-  -- Test 4: Cg with Cp (position capture)
-  test4 = Ct(Cg(Cp(), "pos") * C(P"hello")),
+  -- Test 4: Cg with Cc (constant capture) as the pattern
+  test4 = Ct(Cg(Cc("constant_value"), "const_field") * C(P"hello")),
 
   -- Test 5: Cg with Cc (constant capture)
   test5 = Ct(Cc("type") * Cg(P"value", "data")),

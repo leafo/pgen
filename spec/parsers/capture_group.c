@@ -62,20 +62,20 @@ static void dumpstack(lua_State *L) {
 #endif
 
 // Named capture group sentinels
+static const char __cg_sentinel_const_field[] = "const_field";
 static const char __cg_sentinel_data[] = "data";
 static const char __cg_sentinel_first[] = "first";
 static const char __cg_sentinel_greeting[] = "greeting";
 static const char __cg_sentinel_named[] = "named";
-static const char __cg_sentinel_pos[] = "pos";
 static const char __cg_sentinel_second[] = "second";
 
 // Registry of all known sentinels (for validation)
 static const void *__cg_sentinel_registry[] = {
+    (void *)__cg_sentinel_const_field,
     (void *)__cg_sentinel_data,
     (void *)__cg_sentinel_first,
     (void *)__cg_sentinel_greeting,
     (void *)__cg_sentinel_named,
-    (void *)__cg_sentinel_pos,
     (void *)__cg_sentinel_second,
     NULL // terminator
 };
@@ -805,12 +805,12 @@ static bool parse_test4(Parser *parser) {
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
 
-      { // Capture Group "pos"
+      { // Capture Group "const_field"
         int cg_stack_start = lua_gettop(parser->L);
         size_t start_pos = parser->pos;
-        { // Position Capture
-          // Push current position + 1 (Lua uses 1-based indexing)
-          lua_pushinteger(parser->L, parser->pos + 1);
+        { // Constant Capture
+          // A constant capture matches the empty string and produces all given values
+          lua_pushlstring(parser->L, "constant_value", 14);
         }
 
         if (parser->success) {
@@ -819,8 +819,8 @@ static bool parse_test4(Parser *parser) {
 
           if (captures_produced > 0) {
             // Inner pattern produced captures - use the first one
-            // Push sentinel (identifies this as named capture "pos")
-            lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_pos);
+            // Push sentinel (identifies this as named capture "const_field")
+            lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_const_field);
             // Move sentinel before the first capture
             lua_insert(parser->L, cg_stack_start + 1);
             // Now stack is: sentinel, first_capture, [other_captures...]
@@ -829,8 +829,8 @@ static bool parse_test4(Parser *parser) {
           } else {
             // No captures - capture the matched text span
             size_t capture_len = parser->pos - start_pos;
-            // Push sentinel (identifies this as named capture "pos")
-            lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_pos);
+            // Push sentinel (identifies this as named capture "const_field")
+            lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_const_field);
             // Push captured value
             lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
           }
