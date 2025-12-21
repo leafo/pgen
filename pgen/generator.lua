@@ -48,9 +48,9 @@ end
 
 -- Collect all Cg names from a grammar
 local function collect_cg_names(grammar)
-  local pgen = require("pgen")
+  local visitor = require("pgen.visitor")
   local names = {}
-  pgen.visit_grammar(grammar, function(node)
+  visitor.visit_grammar(grammar, function(node)
     if node.type == types.Cg then -- Cg
       names[node.name] = true
     end

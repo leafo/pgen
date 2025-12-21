@@ -108,10 +108,11 @@ end
 -- Mark Ct nodes that don't contain any Cg nodes
 function optimize.capture_table_optimization(grammar)
   local pgen = require("pgen")
+  local visitor = require("pgen.visitor")
   local memo = {}
   local visiting = {}
 
-  return pgen.visit_grammar(grammar, function(node, replace)
+  return visitor.visit_grammar(grammar, function(node, replace)
     if node.type ~= types.Ct then return end
     if node.array_only then return end
     if contains_cg_in_pattern(node.value, grammar, memo, visiting) then return end
@@ -158,7 +159,8 @@ end
 -- Trie optimization pass - replaces choice of literals with trie node
 function optimize.trie_optimization(grammar)
   local pgen = require("pgen")
-  return pgen.visit_grammar(grammar, function(node, replace)
+  local visitor = require("pgen.visitor")
+  return visitor.visit_grammar(grammar, function(node, replace)
     if node.type ~= "choice" then return end
 
     local alternatives = flatten_choices(node)
