@@ -16,6 +16,8 @@ typedef struct {
   size_t pos;
   bool success;
   char error_message[256];
+  const char *throw_label; // Label from T() or NULL for ordinary failure
+  size_t throw_pos;        // Position where T() was thrown
   size_t depth;
   lua_State *L;
 } Parser;
@@ -166,31 +168,53 @@ static bool parse_json(Parser *parser) {
       if (parser->success) {
         parse_ws(parser);
         if (parser->success) {
-          { // Negate (only match if pattern fails)
-            REMEMBER_POSITION(parser, pos);
+          {   // Choice
+            { // Negate (only match if pattern fails)
+              REMEMBER_POSITION(parser, pos);
 
-            { // Match any 1 characters
-              if (parser->pos + 1 <= parser->input_len) {
-                parser->pos += 1;
-              } else {
+              { // Match any 1 characters
+                if (parser->pos + 1 <= parser->input_len) {
+                  parser->pos += 1;
+                } else {
 #ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
+                  sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
 #endif
+                  parser->success = false;
+                }
+              }
+
+              if (parser->success) {
+                // Pattern matched, so negate fails
+                RESTORE_POSITION(parser, pos);
                 parser->success = false;
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
+#endif
+              } else {
+                // Pattern failed, so negate succeeds
+                parser->success = true;
+                // Swallow labeled failures inside predicates (LPegLabel behavior)
+                if (parser->throw_label) {
+                  parser->throw_label = NULL;
+                  parser->throw_pos = 0;
+                }
+                RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
               }
             }
 
-            if (parser->success) {
-              // Pattern matched, so negate fails
-              RESTORE_POSITION(parser, pos);
-              parser->success = false;
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
-#endif
-            } else {
-              // Pattern failed, so negate succeeds
+            // Only try alternative if ordinary failure (not labeled failure from T())
+            if (!parser->success && !parser->throw_label) {
               parser->success = true;
-              RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+              { // Throw labeled failure: expected_eof
+                parser->success = false;
+                parser->throw_label = "expected_eof";
+                parser->throw_pos = parser->pos;
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "expected_eof"
+                                               " at position %zu",
+                        parser->pos + 1);
+#endif
+              }
             }
           }
         }
@@ -288,7 +312,24 @@ static bool parse_array(Parser *parser) {
                                 if (parser->success) {
                                   parse_ws(parser);
                                   if (parser->success) {
-                                    parse_value(parser);
+                                    { // Choice
+                                      parse_value(parser);
+
+                                      // Only try alternative if ordinary failure (not labeled failure from T())
+                                      if (!parser->success && !parser->throw_label) {
+                                        parser->success = true;
+                                        { // Throw labeled failure: expected_array_element
+                                          parser->success = false;
+                                          parser->throw_label = "expected_array_element";
+                                          parser->throw_pos = parser->pos;
+#ifdef PGEN_ERRORS
+                                          sprintf(parser->error_message, "expected_array_element"
+                                                                         " at position %zu",
+                                                  parser->pos + 1);
+#endif
+                                        }
+                                      }
+                                    }
                                   }
                                 }
                                 if (!parser->success) {
@@ -300,7 +341,10 @@ static bool parse_array(Parser *parser) {
                               break;
                             }
                           }
-                          parser->success = true;
+                          // Only recover from ordinary failure, not labeled failure from T()
+                          if (!parser->throw_label) {
+                            parser->success = true;
+                          }
                         }
                         if (!parser->success) {
                           RESTORE_POSITION(parser, pos);
@@ -311,7 +355,10 @@ static bool parse_array(Parser *parser) {
 
                   if (!parser->success || before_pos == parser->pos) {
                     // Break on failure or zero-width match
-                    parser->success = true;
+                    // Only recover from ordinary failure, not labeled failure from T()
+                    if (!parser->throw_label) {
+                      parser->success = true;
+                    }
                     break;
                   }
 
@@ -375,18 +422,35 @@ static bool parse_array(Parser *parser) {
         if (parser->success) {
           parse_ws(parser);
           if (parser->success) {
-            { // Match single character "]"
-              if (parser->pos < parser->input_len &&
-                  parser->input[parser->pos] == 93) {
-                parser->pos++;
-              } else {
+            {   // Choice
+              { // Match single character "]"
+                if (parser->pos < parser->input_len &&
+                    parser->input[parser->pos] == 93) {
+                  parser->pos++;
+                } else {
 #ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected character `"
-                                               "]"
-                                               "` at position %zu",
-                        parser->pos);
+                  sprintf(parser->error_message, "Expected character `"
+                                                 "]"
+                                                 "` at position %zu",
+                          parser->pos);
 #endif
-                parser->success = false;
+                  parser->success = false;
+                }
+              }
+
+              // Only try alternative if ordinary failure (not labeled failure from T())
+              if (!parser->success && !parser->throw_label) {
+                parser->success = true;
+                { // Throw labeled failure: expected_closing_bracket
+                  parser->success = false;
+                  parser->throw_label = "expected_closing_bracket";
+                  parser->throw_pos = parser->pos;
+#ifdef PGEN_ERRORS
+                  sprintf(parser->error_message, "expected_closing_bracket"
+                                                 " at position %zu",
+                          parser->pos + 1);
+#endif
+                }
               }
             }
           }
@@ -422,7 +486,8 @@ static bool parse_char(Parser *parser) {
   { // Choice
     parse_escape(parser);
 
-    if (!parser->success) {
+    // Only try alternative if ordinary failure (not labeled failure from T())
+    if (!parser->success && !parser->throw_label) {
       parser->success = true;
       { // Sequence with 2 patterns
         REMEMBER_POSITION(parser, pos);
@@ -467,6 +532,11 @@ static bool parse_char(Parser *parser) {
           } else {
             // Pattern failed, so negate succeeds
             parser->success = true;
+            // Swallow labeled failures inside predicates (LPegLabel behavior)
+            if (parser->throw_label) {
+              parser->throw_label = NULL;
+              parser->throw_pos = 0;
+            }
             RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
           }
         }
@@ -528,43 +598,61 @@ static bool parse_escape(Parser *parser) {
       }
     }
     if (parser->success) {
-      {   // Choice
-        { // Match character set "\"\\\/bfnrt"
-          if (parser->pos < parser->input_len) {
-            switch (parser->input[parser->pos]) {
-            case 34:  /* "\"" */
-            case 92:  /* "\\" */
-            case 47:  /* "/" */
-            case 98:  /* "b" */
-            case 102: /* "f" */
-            case 110: /* "n" */
-            case 114: /* "r" */
-            case 116: /* "t" */
-              parser->pos++;
-              break;
-            default:
+      {     // Choice
+        {   // Choice
+          { // Match character set "\"\\\/bfnrt"
+            if (parser->pos < parser->input_len) {
+              switch (parser->input[parser->pos]) {
+              case 34:  /* "\"" */
+              case 92:  /* "\\" */
+              case 47:  /* "/" */
+              case 98:  /* "b" */
+              case 102: /* "f" */
+              case 110: /* "n" */
+              case 114: /* "r" */
+              case 116: /* "t" */
+                parser->pos++;
+                break;
+              default:
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected one of "
+                                               "\"\\\"\\\\/bfnrt\""
+                                               " at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            } else {
 #ifdef PGEN_ERRORS
               sprintf(parser->error_message, "Expected one of "
                                              "\"\\\"\\\\/bfnrt\""
-                                             " at position %zu",
+                                             " at position %zu but reached end of input",
                       parser->pos);
 #endif
               parser->success = false;
             }
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected one of "
-                                           "\"\\\"\\\\/bfnrt\""
-                                           " at position %zu but reached end of input",
-                    parser->pos);
-#endif
-            parser->success = false;
+          }
+
+          // Only try alternative if ordinary failure (not labeled failure from T())
+          if (!parser->success && !parser->throw_label) {
+            parser->success = true;
+            parse_unicode(parser);
           }
         }
 
-        if (!parser->success) {
+        // Only try alternative if ordinary failure (not labeled failure from T())
+        if (!parser->success && !parser->throw_label) {
           parser->success = true;
-          parse_unicode(parser);
+          { // Throw labeled failure: invalid_escape_sequence
+            parser->success = false;
+            parser->throw_label = "invalid_escape_sequence";
+            parser->throw_pos = parser->pos;
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "invalid_escape_sequence"
+                                           " at position %zu",
+                    parser->pos + 1);
+#endif
+          }
         }
       }
       if (!parser->success) {
@@ -740,24 +828,58 @@ static bool parse_member(Parser *parser) {
         if (parser->success) {
           parse_ws(parser);
           if (parser->success) {
-            { // Match single character ":"
-              if (parser->pos < parser->input_len &&
-                  parser->input[parser->pos] == 58) {
-                parser->pos++;
-              } else {
+            {   // Choice
+              { // Match single character ":"
+                if (parser->pos < parser->input_len &&
+                    parser->input[parser->pos] == 58) {
+                  parser->pos++;
+                } else {
 #ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected character `"
-                                               ":"
-                                               "` at position %zu",
-                        parser->pos);
+                  sprintf(parser->error_message, "Expected character `"
+                                                 ":"
+                                                 "` at position %zu",
+                          parser->pos);
 #endif
-                parser->success = false;
+                  parser->success = false;
+                }
+              }
+
+              // Only try alternative if ordinary failure (not labeled failure from T())
+              if (!parser->success && !parser->throw_label) {
+                parser->success = true;
+                { // Throw labeled failure: expected_colon
+                  parser->success = false;
+                  parser->throw_label = "expected_colon";
+                  parser->throw_pos = parser->pos;
+#ifdef PGEN_ERRORS
+                  sprintf(parser->error_message, "expected_colon"
+                                                 " at position %zu",
+                          parser->pos + 1);
+#endif
+                }
               }
             }
             if (parser->success) {
               parse_ws(parser);
               if (parser->success) {
-                parse_value(parser);
+                { // Choice
+                  parse_value(parser);
+
+                  // Only try alternative if ordinary failure (not labeled failure from T())
+                  if (!parser->success && !parser->throw_label) {
+                    parser->success = true;
+                    { // Throw labeled failure: expected_value
+                      parser->success = false;
+                      parser->throw_label = "expected_value";
+                      parser->throw_pos = parser->pos;
+#ifdef PGEN_ERRORS
+                      sprintf(parser->error_message, "expected_value"
+                                                     " at position %zu",
+                              parser->pos + 1);
+#endif
+                    }
+                  }
+                }
               }
             }
           }
@@ -951,7 +1073,10 @@ static bool parse_number(Parser *parser) {
 
                 if (!parser->success || before_pos == parser->pos) {
                   // Break on failure or zero-width match
-                  parser->success = true;
+                  // Only recover from ordinary failure, not labeled failure from T()
+                  if (!parser->throw_label) {
+                    parser->success = true;
+                  }
                   break;
                 }
 
@@ -975,7 +1100,8 @@ static bool parse_number(Parser *parser) {
                   }
                 }
 
-                if (!parser->success) {
+                // Only try alternative if ordinary failure (not labeled failure from T())
+                if (!parser->success && !parser->throw_label) {
                   parser->success = true;
                   { // Sequence with 2 patterns
                     REMEMBER_POSITION(parser, pos);
@@ -1019,7 +1145,10 @@ static bool parse_number(Parser *parser) {
                             break;
                           }
                         }
-                        parser->success = true;
+                        // Only recover from ordinary failure, not labeled failure from T()
+                        if (!parser->throw_label) {
+                          parser->success = true;
+                        }
                       }
                       if (!parser->success) {
                         RESTORE_POSITION(parser, pos);
@@ -1083,7 +1212,10 @@ static bool parse_number(Parser *parser) {
                               rep_count += 1;
                             }
 
-                            if (rep_count >= 1) {
+                            // Don't recover if labeled failure was thrown
+                            if (parser->throw_label) {
+                              // Keep failure state, propagate labeled failure
+                            } else if (rep_count >= 1) {
                               parser->success = true;
                             } else {
                               RESTORE_POSITION(parser, pos);
@@ -1101,7 +1233,10 @@ static bool parse_number(Parser *parser) {
 
                     if (!parser->success || before_pos == parser->pos) {
                       // Break on failure or zero-width match
-                      parser->success = true;
+                      // Only recover from ordinary failure, not labeled failure from T()
+                      if (!parser->throw_label) {
+                        parser->success = true;
+                      }
                       break;
                     }
 
@@ -1183,7 +1318,10 @@ static bool parse_number(Parser *parser) {
 
                                 if (!parser->success || before_pos == parser->pos) {
                                   // Break on failure or zero-width match
-                                  parser->success = true;
+                                  // Only recover from ordinary failure, not labeled failure from T()
+                                  if (!parser->throw_label) {
+                                    parser->success = true;
+                                  }
                                   break;
                                 }
 
@@ -1220,7 +1358,10 @@ static bool parse_number(Parser *parser) {
                                   rep_count += 1;
                                 }
 
-                                if (rep_count >= 1) {
+                                // Don't recover if labeled failure was thrown
+                                if (parser->throw_label) {
+                                  // Keep failure state, propagate labeled failure
+                                } else if (rep_count >= 1) {
                                   parser->success = true;
                                 } else {
                                   RESTORE_POSITION(parser, pos);
@@ -1239,7 +1380,10 @@ static bool parse_number(Parser *parser) {
 
                       if (!parser->success || before_pos == parser->pos) {
                         // Break on failure or zero-width match
-                        parser->success = true;
+                        // Only recover from ordinary failure, not labeled failure from T()
+                        if (!parser->throw_label) {
+                          parser->success = true;
+                        }
                         break;
                       }
 
@@ -1375,7 +1519,24 @@ static bool parse_object(Parser *parser) {
                                 if (parser->success) {
                                   parse_ws(parser);
                                   if (parser->success) {
-                                    parse_member(parser);
+                                    { // Choice
+                                      parse_member(parser);
+
+                                      // Only try alternative if ordinary failure (not labeled failure from T())
+                                      if (!parser->success && !parser->throw_label) {
+                                        parser->success = true;
+                                        { // Throw labeled failure: expected_member
+                                          parser->success = false;
+                                          parser->throw_label = "expected_member";
+                                          parser->throw_pos = parser->pos;
+#ifdef PGEN_ERRORS
+                                          sprintf(parser->error_message, "expected_member"
+                                                                         " at position %zu",
+                                                  parser->pos + 1);
+#endif
+                                        }
+                                      }
+                                    }
                                   }
                                 }
                                 if (!parser->success) {
@@ -1387,7 +1548,10 @@ static bool parse_object(Parser *parser) {
                               break;
                             }
                           }
-                          parser->success = true;
+                          // Only recover from ordinary failure, not labeled failure from T()
+                          if (!parser->throw_label) {
+                            parser->success = true;
+                          }
                         }
                         if (!parser->success) {
                           RESTORE_POSITION(parser, pos);
@@ -1398,7 +1562,10 @@ static bool parse_object(Parser *parser) {
 
                   if (!parser->success || before_pos == parser->pos) {
                     // Break on failure or zero-width match
-                    parser->success = true;
+                    // Only recover from ordinary failure, not labeled failure from T()
+                    if (!parser->throw_label) {
+                      parser->success = true;
+                    }
                     break;
                   }
 
@@ -1462,18 +1629,35 @@ static bool parse_object(Parser *parser) {
         if (parser->success) {
           parse_ws(parser);
           if (parser->success) {
-            { // Match single character "}"
-              if (parser->pos < parser->input_len &&
-                  parser->input[parser->pos] == 125) {
-                parser->pos++;
-              } else {
+            {   // Choice
+              { // Match single character "}"
+                if (parser->pos < parser->input_len &&
+                    parser->input[parser->pos] == 125) {
+                  parser->pos++;
+                } else {
 #ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected character `"
-                                               "}"
-                                               "` at position %zu",
-                        parser->pos);
+                  sprintf(parser->error_message, "Expected character `"
+                                                 "}"
+                                                 "` at position %zu",
+                          parser->pos);
 #endif
-                parser->success = false;
+                  parser->success = false;
+                }
+              }
+
+              // Only try alternative if ordinary failure (not labeled failure from T())
+              if (!parser->success && !parser->throw_label) {
+                parser->success = true;
+                { // Throw labeled failure: expected_closing_brace
+                  parser->success = false;
+                  parser->throw_label = "expected_closing_brace";
+                  parser->throw_pos = parser->pos;
+#ifdef PGEN_ERRORS
+                  sprintf(parser->error_message, "expected_closing_brace"
+                                                 " at position %zu",
+                          parser->pos + 1);
+#endif
+                }
               }
             }
           }
@@ -1543,7 +1727,10 @@ static bool parse_string(Parser *parser) {
                     break;
                   }
                 }
-                parser->success = true;
+                // Only recover from ordinary failure, not labeled failure from T()
+                if (!parser->throw_label) {
+                  parser->success = true;
+                }
               }
 
               if (parser->success) {
@@ -1580,18 +1767,35 @@ static bool parse_string(Parser *parser) {
         }
       }
       if (parser->success) {
-        { // Match single character "\""
-          if (parser->pos < parser->input_len &&
-              parser->input[parser->pos] == 34) {
-            parser->pos++;
-          } else {
+        {   // Choice
+          { // Match single character "\""
+            if (parser->pos < parser->input_len &&
+                parser->input[parser->pos] == 34) {
+              parser->pos++;
+            } else {
 #ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected character `"
-                                           "\\\""
-                                           "` at position %zu",
-                    parser->pos);
+              sprintf(parser->error_message, "Expected character `"
+                                             "\\\""
+                                             "` at position %zu",
+                      parser->pos);
 #endif
-            parser->success = false;
+              parser->success = false;
+            }
+          }
+
+          // Only try alternative if ordinary failure (not labeled failure from T())
+          if (!parser->success && !parser->throw_label) {
+            parser->success = true;
+            { // Throw labeled failure: expected_closing_quote
+              parser->success = false;
+              parser->throw_label = "expected_closing_quote";
+              parser->throw_pos = parser->pos;
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "expected_closing_quote"
+                                             " at position %zu",
+                      parser->pos + 1);
+#endif
+            }
           }
         }
       }
@@ -1771,37 +1975,43 @@ static bool parse_value(Parser *parser) {
             { // Choice
               parse_object(parser);
 
-              if (!parser->success) {
+              // Only try alternative if ordinary failure (not labeled failure from T())
+              if (!parser->success && !parser->throw_label) {
                 parser->success = true;
                 parse_array(parser);
               }
             }
 
-            if (!parser->success) {
+            // Only try alternative if ordinary failure (not labeled failure from T())
+            if (!parser->success && !parser->throw_label) {
               parser->success = true;
               parse_string(parser);
             }
           }
 
-          if (!parser->success) {
+          // Only try alternative if ordinary failure (not labeled failure from T())
+          if (!parser->success && !parser->throw_label) {
             parser->success = true;
             parse_number(parser);
           }
         }
 
-        if (!parser->success) {
+        // Only try alternative if ordinary failure (not labeled failure from T())
+        if (!parser->success && !parser->throw_label) {
           parser->success = true;
           parse_true(parser);
         }
       }
 
-      if (!parser->success) {
+      // Only try alternative if ordinary failure (not labeled failure from T())
+      if (!parser->success && !parser->throw_label) {
         parser->success = true;
         parse_false(parser);
       }
     }
 
-    if (!parser->success) {
+    // Only try alternative if ordinary failure (not labeled failure from T())
+    if (!parser->success && !parser->throw_label) {
       parser->success = true;
       parse_null(parser);
     }
@@ -1862,7 +2072,10 @@ static bool parse_ws(Parser *parser) {
         break;
       }
     }
-    parser->success = true;
+    // Only recover from ordinary failure, not labeled failure from T()
+    if (!parser->throw_label) {
+      parser->success = true;
+    }
   }
 
 #ifdef PGEN_DEBUG
@@ -1891,6 +2104,8 @@ static Parser *json_parser_init(const char *input, lua_State *L) {
   parser->depth = 0;
   parser->success = true;
   parser->error_message[0] = '\0';
+  parser->throw_label = NULL;
+  parser->throw_pos = 0;
   parser->L = L;
   return parser;
 }
@@ -1931,13 +2146,22 @@ static int l_json_parser_parse(lua_State *L) {
 
   int final_stack_size = lua_gettop(parser->L);
 
-  // Return nil and error message on failure, true on success
+  // Return nil and error info on failure
   if (!parser->success) {
     assert(final_stack_size == initial_stack_size && "Unexpected stack size change on parse failure.");
     lua_pushnil(L);
-    lua_pushstring(L, parser->error_message);
-    json_parser_free(parser);
-    return 2; // Return nil and error message
+    if (parser->throw_label) {
+      // Labeled failure: return nil, label, position
+      lua_pushstring(L, parser->throw_label);
+      lua_pushinteger(L, parser->throw_pos + 1); // 1-indexed for Lua
+      json_parser_free(parser);
+      return 3;
+    } else {
+      // Ordinary failure: return nil, error_message
+      lua_pushstring(L, parser->error_message);
+      json_parser_free(parser);
+      return 2;
+    }
   }
 
   // Strip Cg sentinel+value pairs from stack (they only matter inside Ct)
