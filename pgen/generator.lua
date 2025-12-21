@@ -96,12 +96,7 @@ local function collect_cmt_codes(grammar)
       end
 
       -- Create a copy of the node with cmt_id assigned (possibly shared)
-      replace(pgen._make({
-        type = types.Cmt,
-        value = node.value,
-        code = code,
-        cmt_id = id
-      }))
+      replace(visitor.copy_node(node, {cmt_id = id}))
     end
   end)
 

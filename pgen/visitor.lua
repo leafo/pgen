@@ -1,6 +1,19 @@
 local visitor = {}
 local types = require("pgen.types")
 
+function visitor.copy_node(node, overrides)
+  local new_node = setmetatable({}, getmetatable(node))
+  for k, v in pairs(node) do
+    new_node[k] = v
+  end
+  if overrides then
+    for k, v in pairs(overrides) do
+      new_node[k] = v
+    end
+  end
+  return new_node
+end
+
 -- Visit every node in a pattern tree, calling visitor on each
 -- visitor(node, replace) - call replace(new_node) to replace current node
 -- Returns the (possibly replaced) pattern
@@ -27,7 +40,7 @@ function visitor.visit_pattern(pattern, visitor_fn)
   if t == types.C or t == types.Ct or t == types.L or t == types.Cg or t == types.Cn or t == types.Cmt then
     local new_value = visitor.visit_pattern(pattern.value, visitor_fn)
     if new_value ~= pattern.value then
-      return setmetatable({type = t, value = new_value, name = pattern.name, code = pattern.code}, getmetatable(pattern))
+      return visitor.copy_node(pattern, {value = new_value})
     end
   elseif t == "sequence" or t == "choice" then
     local changed = false
@@ -38,7 +51,7 @@ function visitor.visit_pattern(pattern, visitor_fn)
       if new_child ~= child then changed = true end
     end
     if changed then
-      local new_pattern = setmetatable({type = t}, getmetatable(pattern))
+      local new_pattern = visitor.copy_node(pattern)
       for i, child in ipairs(new_children) do
         new_pattern[i] = child
       end
@@ -47,7 +60,7 @@ function visitor.visit_pattern(pattern, visitor_fn)
   elseif t == "repeat" or t == "negate" then
     local new_child = visitor.visit_pattern(pattern[1], visitor_fn)
     if new_child ~= pattern[1] then
-      return setmetatable({type = t, new_child, pattern[2]}, getmetatable(pattern))
+      return visitor.copy_node(pattern, {[1] = new_child})
     end
   end
 

@@ -118,11 +118,7 @@ function optimize.capture_table_optimization(grammar)
     if node.array_only then return end
     if contains_cg_in_pattern(node.value, grammar, memo, visiting) then return end
 
-    replace(pgen._make({
-      type = types.Ct,
-      value = node.value,
-      array_only = true
-    }))
+    replace(visitor.copy_node(node, {array_only = true}))
   end)
 end
 
