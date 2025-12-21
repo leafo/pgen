@@ -1,7 +1,7 @@
 local pgen = {}
 
 -- Pattern types
-local P, R, S, V, C, Ct, Cp, Cc, L = 1, 2, 3, 4, 5, 6, 7, 8, 9
+local P, R, S, V, C, Ct, Cp, Cc, L, Cg = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 
 local mt = {}
 
@@ -85,6 +85,12 @@ end
 -- Lookahead pattern (matches without consuming input)
 function pgen.L(patt)
   return pattern(L, coerce_pattern(patt))
+end
+
+-- Capture group (named capture for back-reference or named table fields)
+function pgen.Cg(patt, name)
+  assert(type(name) == "string", "Cg requires a string name")
+  return pattern(Cg, coerce_pattern(patt), name)
 end
 
 function mt.__add(a, b)

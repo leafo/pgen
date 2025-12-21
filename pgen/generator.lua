@@ -45,6 +45,44 @@ local function escape_c_literal(str, delim)
   return delim .. escaped .. delim
 end
 
+-- Recursively collect all Cg (capture group) names from a pattern
+local function collect_cg_names_from_pattern(pattern, names)
+  if not pattern or type(pattern) ~= "table" then
+    return
+  end
+
+  local t = pattern.type
+  if t == 10 then -- Cg
+    names[pattern.name] = true
+    collect_cg_names_from_pattern(pattern.value, names)
+  elseif t == 5 or t == 6 or t == 9 then -- C, Ct, L (patterns with single child in value)
+    collect_cg_names_from_pattern(pattern.value, names)
+  elseif t == "sequence" or t == "choice" then
+    for _, child in ipairs(pattern) do
+      collect_cg_names_from_pattern(child, names)
+    end
+  elseif t == "repeat" or t == "negate" then
+    collect_cg_names_from_pattern(pattern[1], names)
+  end
+end
+
+-- Collect all Cg names from a grammar
+local function collect_cg_names(grammar)
+  local names = {}
+  for name, pattern in pairs(grammar) do
+    if type(pattern) == "table" then
+      collect_cg_names_from_pattern(pattern, names)
+    end
+  end
+  -- Convert to sorted array for deterministic output
+  local result = {}
+  for name in pairs(names) do
+    table.insert(result, name)
+  end
+  table.sort(result)
+  return result
+end
+
 local function template_code(template, vars)
   -- Use gsub to find placeholders like $VARNAME
   -- The pattern matches '$' followed by UPPER_CASE letters
@@ -91,9 +129,12 @@ function generator.generate(grammar, parser_name, options)
     error("Grammar does not contain a starting rule")
   end
 
+  -- Collect all Cg (capture group) names for sentinel generation
+  local cg_names = collect_cg_names(grammar)
+
   -- Generate the C code
   local c_chunks = {
-    generator.generate_parser_header(parser_name),
+    generator.generate_parser_header(parser_name, cg_names),
     generator.generate_forward_declarations(rules),
     generator.generate_rule_functions(rules),
     generator.generate_parser_main(parser_name, start_rule),
@@ -120,8 +161,56 @@ local result = $PARSER_NAME$.parse("your input string")
   return table.concat(c_chunks, "\n")
 end
 
+-- Generate sentinel declarations for Cg names
+-- Always generates is_cg_sentinel function (returns false if no sentinels)
+local function generate_cg_sentinels(cg_names)
+  local lines = {}
+
+  if #cg_names > 0 then
+    table.insert(lines, "// Named capture group sentinels")
+
+    -- Generate sentinel declarations
+    for _, name in ipairs(cg_names) do
+      table.insert(lines, template_code(
+        "static const char __cg_sentinel_$NAME$[] = $NAME_STR$;",
+        {NAME = name, NAME_STR = escape_c_literal(name)}
+      ))
+    end
+
+    -- Generate registry array
+    table.insert(lines, "")
+    table.insert(lines, "// Registry of all known sentinels (for validation)")
+    table.insert(lines, "static const void* __cg_sentinel_registry[] = {")
+    for _, name in ipairs(cg_names) do
+      table.insert(lines, template_code("  (void*)__cg_sentinel_$NAME$,", {NAME = name}))
+    end
+    table.insert(lines, "  NULL  // terminator")
+    table.insert(lines, "};")
+
+    -- Generate validation function that checks the registry
+    table.insert(lines, "")
+    table.insert(lines, [[// Check if a pointer is one of our Cg sentinels
+static bool is_cg_sentinel(void* ptr) {
+  for (int i = 0; __cg_sentinel_registry[i] != NULL; i++) {
+    if (ptr == __cg_sentinel_registry[i]) return true;
+  }
+  return false;
+}]])
+  else
+    -- No Cg names - generate a stub function that always returns false
+    table.insert(lines, [[// No Cg sentinels defined - stub function
+static bool is_cg_sentinel(void* ptr) {
+  (void)ptr; // unused
+  return false;
+}]])
+  end
+
+  return table.concat(lines, "\n") .. "\n"
+end
+
 -- Generate parser header
-function generator.generate_parser_header(parser_name)
+function generator.generate_parser_header(parser_name, cg_names)
+  cg_names = cg_names or {}
   return template_code([[#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -185,7 +274,7 @@ static void dumpstack (lua_State *L) {
 }
 #endif
 
-]], {PARSER_NAME = parser_name})
+]], {PARSER_NAME = parser_name}) .. generate_cg_sentinels(cg_names)
 end
 
 -- Generate forward declarations for all rules
@@ -271,6 +360,8 @@ function generator.generate_pattern_code(pattern)
     return generator.generate_constant_capture_code(pattern.value)
   elseif t == 9 then -- L (lookahead)
     return generator.generate_lookahead_code(pattern.value)
+  elseif t == 10 then -- Cg (capture group)
+    return generator.generate_capture_group_code(pattern.value, pattern.name)
   elseif t == "sequence" then
     return generator.generate_sequence_code(unpack(pattern))
   elseif t == "choice" then
@@ -593,6 +684,7 @@ function generator.generate_capture_code(body)
 end
 
 -- Generate code for a capture table (Ct)
+-- Handles both regular captures (array part) and named captures via Cg (hash part)
 function generator.generate_capture_table_code(body)
   return template_code([[{ // Capture Table
   int initial_stack_size = lua_gettop(parser->L);
@@ -600,16 +692,49 @@ function generator.generate_capture_table_code(body)
 
   if (parser->success) {
     int new_stack_size = lua_gettop(parser->L);
-    int items_count = new_stack_size - initial_stack_size;
-    int table_position = -items_count - 1;
+    int items_start = initial_stack_size + 1;
 
-    lua_createtable(parser->L, items_count, 0);
+    // Count array items and named items separately
+    // Named captures are sentinel (light userdata) + value pairs
+    int array_count = 0;
+    int named_count = 0;
+    for (int i = items_start; i <= new_stack_size; i++) {
+      if (lua_islightuserdata(parser->L, i) &&
+          is_cg_sentinel(lua_touserdata(parser->L, i))) {
+        named_count++;
+        i++; // skip the value that follows the sentinel
+      } else {
+        array_count++;
+      }
+    }
 
-    lua_insert(parser->L, table_position);
+    lua_createtable(parser->L, array_count, named_count);
+    int table_idx = lua_gettop(parser->L);
 
-    for (int i = items_count; i >= 1; --i) {
-      lua_rawseti(parser->L, table_position, i);
-      table_position += 1;
+    int array_idx = 1;
+    for (int i = items_start; i < table_idx; i++) {
+      if (lua_islightuserdata(parser->L, i)) {
+        void* ptr = lua_touserdata(parser->L, i);
+        if (is_cg_sentinel(ptr)) {
+          // Named capture: sentinel at i, value at i+1
+          const char* name = (const char*)ptr;
+          lua_pushstring(parser->L, name);
+          lua_pushvalue(parser->L, i + 1);
+          lua_rawset(parser->L, table_idx);
+          i++; // skip value
+          continue;
+        }
+      }
+      // Regular capture (including non-sentinel light userdata): add to array part
+      lua_pushvalue(parser->L, i);
+      lua_rawseti(parser->L, table_idx, array_idx++);
+    }
+
+    // Remove all items except table, move table to correct position
+    // Only needed if there were items to remove (items_start <= new_stack_size)
+    if (items_start <= new_stack_size) {
+      lua_replace(parser->L, items_start);
+      lua_settop(parser->L, items_start);
     }
   }
 }]], {
@@ -680,6 +805,25 @@ function generator.generate_lookahead_code(body)
   })
 end
 
+-- Generate code for a capture group (Cg)
+-- Pushes two values to the stack: a sentinel (light userdata) and the captured string
+function generator.generate_capture_group_code(body, name)
+  return template_code([[{ // Capture Group "$NAME$"
+  size_t start_pos = parser->pos;
+  $BODY$
+
+  if (parser->success) {
+    size_t capture_len = parser->pos - start_pos;
+    // Push sentinel (identifies this as named capture "$NAME$")
+    lua_pushlightuserdata(parser->L, (void*)__cg_sentinel_$NAME$);
+    // Push captured value
+    lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+  }
+}]], {
+    BODY = generator.generate_pattern_code(body),
+    NAME = name
+  })
+end
 
 -- Assuming 'generator' is a table used to organize functions
 generator = generator or {}

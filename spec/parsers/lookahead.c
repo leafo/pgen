@@ -61,6 +61,12 @@ static void dumpstack(lua_State *L) {
 }
 #endif
 
+// No Cg sentinels defined - stub function
+static bool is_cg_sentinel(void *ptr) {
+  (void)ptr; // unused
+  return false;
+}
+
 // Forward declarations
 static bool parse_1(Parser *parser);
 static bool parse_positive(Parser *parser);
