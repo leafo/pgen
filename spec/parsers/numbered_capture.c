@@ -61,15 +61,33 @@ static void dumpstack(lua_State *L) {
 }
 #endif
 
-// No Cg sentinels defined - stub function
+// Named capture group sentinels
+static const char __cg_sentinel_a[] = "a";
+static const char __cg_sentinel_b[] = "b";
+static const char __cg_sentinel_name[] = "name";
+
+// Registry of all known sentinels (for validation)
+static const void *__cg_sentinel_registry[] = {
+    (void *)__cg_sentinel_a,
+    (void *)__cg_sentinel_b,
+    (void *)__cg_sentinel_name,
+    NULL // terminator
+};
+
+// Check if a pointer is one of our Cg sentinels
 static bool is_cg_sentinel(void *ptr) {
-  (void)ptr; // unused
+  for (int i = 0; __cg_sentinel_registry[i] != NULL; i++) {
+    if (ptr == __cg_sentinel_registry[i])
+      return true;
+  }
   return false;
 }
 
 // Forward declarations
 static bool parse_test(Parser *parser);
 static bool parse_test1(Parser *parser);
+static bool parse_test10(Parser *parser);
+static bool parse_test11(Parser *parser);
 static bool parse_test2(Parser *parser);
 static bool parse_test3(Parser *parser);
 static bool parse_test4(Parser *parser);
@@ -77,6 +95,7 @@ static bool parse_test5(Parser *parser);
 static bool parse_test6(Parser *parser);
 static bool parse_test7(Parser *parser);
 static bool parse_test8(Parser *parser);
+static bool parse_test9(Parser *parser);
 
 // Rule functions
 static bool parse_test(Parser *parser) {
@@ -87,34 +106,124 @@ static bool parse_test(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test", start);
 #endif
 
-  {               // Choice
-    {             // Choice
-      {           // Choice
-        {         // Choice
-          {       // Choice
-            {     // Choice
-              {   // Choice
-                { // Sequence with 2 patterns
-                  REMEMBER_POSITION(parser, pos);
+  {                     // Choice
+    {                   // Choice
+      {                 // Choice
+        {               // Choice
+          {             // Choice
+            {           // Choice
+              {         // Choice
+                {       // Choice
+                  {     // Choice
+                    {   // Choice
+                      { // Sequence with 2 patterns
+                        REMEMBER_POSITION(parser, pos);
 
-                  { // Match literal "1:"
-                    if (parser->pos + 2 <= parser->input_len &&
-                        memcmp(parser->input + parser->pos, "1:", 2) == 0) {
-                      parser->pos += 2;
-                    } else {
+                        { // Match literal "1:"
+                          if (parser->pos + 2 <= parser->input_len &&
+                              memcmp(parser->input + parser->pos, "1:", 2) == 0) {
+                            parser->pos += 2;
+                          } else {
 #ifdef PGEN_ERRORS
-                      sprintf(parser->error_message, "Expected `"
-                                                     "1:"
-                                                     "` at position %zu",
-                              parser->pos);
+                            sprintf(parser->error_message, "Expected `"
+                                                           "1:"
+                                                           "` at position %zu",
+                                    parser->pos);
 #endif
-                      parser->success = false;
+                            parser->success = false;
+                          }
+                        }
+                        if (parser->success) {
+                          parse_test1(parser);
+                          if (!parser->success) {
+                            RESTORE_POSITION(parser, pos);
+                          }
+                        }
+                      }
+
+                      if (!parser->success) {
+                        parser->success = true;
+                        { // Sequence with 2 patterns
+                          REMEMBER_POSITION(parser, pos);
+
+                          { // Match literal "2:"
+                            if (parser->pos + 2 <= parser->input_len &&
+                                memcmp(parser->input + parser->pos, "2:", 2) == 0) {
+                              parser->pos += 2;
+                            } else {
+#ifdef PGEN_ERRORS
+                              sprintf(parser->error_message, "Expected `"
+                                                             "2:"
+                                                             "` at position %zu",
+                                      parser->pos);
+#endif
+                              parser->success = false;
+                            }
+                          }
+                          if (parser->success) {
+                            parse_test2(parser);
+                            if (!parser->success) {
+                              RESTORE_POSITION(parser, pos);
+                            }
+                          }
+                        }
+                      }
+                    }
+
+                    if (!parser->success) {
+                      parser->success = true;
+                      { // Sequence with 2 patterns
+                        REMEMBER_POSITION(parser, pos);
+
+                        { // Match literal "3:"
+                          if (parser->pos + 2 <= parser->input_len &&
+                              memcmp(parser->input + parser->pos, "3:", 2) == 0) {
+                            parser->pos += 2;
+                          } else {
+#ifdef PGEN_ERRORS
+                            sprintf(parser->error_message, "Expected `"
+                                                           "3:"
+                                                           "` at position %zu",
+                                    parser->pos);
+#endif
+                            parser->success = false;
+                          }
+                        }
+                        if (parser->success) {
+                          parse_test3(parser);
+                          if (!parser->success) {
+                            RESTORE_POSITION(parser, pos);
+                          }
+                        }
+                      }
                     }
                   }
-                  if (parser->success) {
-                    parse_test1(parser);
-                    if (!parser->success) {
-                      RESTORE_POSITION(parser, pos);
+
+                  if (!parser->success) {
+                    parser->success = true;
+                    { // Sequence with 2 patterns
+                      REMEMBER_POSITION(parser, pos);
+
+                      { // Match literal "4:"
+                        if (parser->pos + 2 <= parser->input_len &&
+                            memcmp(parser->input + parser->pos, "4:", 2) == 0) {
+                          parser->pos += 2;
+                        } else {
+#ifdef PGEN_ERRORS
+                          sprintf(parser->error_message, "Expected `"
+                                                         "4:"
+                                                         "` at position %zu",
+                                  parser->pos);
+#endif
+                          parser->success = false;
+                        }
+                      }
+                      if (parser->success) {
+                        parse_test4(parser);
+                        if (!parser->success) {
+                          RESTORE_POSITION(parser, pos);
+                        }
+                      }
                     }
                   }
                 }
@@ -124,14 +233,14 @@ static bool parse_test(Parser *parser) {
                   { // Sequence with 2 patterns
                     REMEMBER_POSITION(parser, pos);
 
-                    { // Match literal "2:"
+                    { // Match literal "5:"
                       if (parser->pos + 2 <= parser->input_len &&
-                          memcmp(parser->input + parser->pos, "2:", 2) == 0) {
+                          memcmp(parser->input + parser->pos, "5:", 2) == 0) {
                         parser->pos += 2;
                       } else {
 #ifdef PGEN_ERRORS
                         sprintf(parser->error_message, "Expected `"
-                                                       "2:"
+                                                       "5:"
                                                        "` at position %zu",
                                 parser->pos);
 #endif
@@ -139,7 +248,7 @@ static bool parse_test(Parser *parser) {
                       }
                     }
                     if (parser->success) {
-                      parse_test2(parser);
+                      parse_test5(parser);
                       if (!parser->success) {
                         RESTORE_POSITION(parser, pos);
                       }
@@ -153,14 +262,14 @@ static bool parse_test(Parser *parser) {
                 { // Sequence with 2 patterns
                   REMEMBER_POSITION(parser, pos);
 
-                  { // Match literal "3:"
+                  { // Match literal "6:"
                     if (parser->pos + 2 <= parser->input_len &&
-                        memcmp(parser->input + parser->pos, "3:", 2) == 0) {
+                        memcmp(parser->input + parser->pos, "6:", 2) == 0) {
                       parser->pos += 2;
                     } else {
 #ifdef PGEN_ERRORS
                       sprintf(parser->error_message, "Expected `"
-                                                     "3:"
+                                                     "6:"
                                                      "` at position %zu",
                               parser->pos);
 #endif
@@ -168,7 +277,7 @@ static bool parse_test(Parser *parser) {
                     }
                   }
                   if (parser->success) {
-                    parse_test3(parser);
+                    parse_test6(parser);
                     if (!parser->success) {
                       RESTORE_POSITION(parser, pos);
                     }
@@ -182,14 +291,14 @@ static bool parse_test(Parser *parser) {
               { // Sequence with 2 patterns
                 REMEMBER_POSITION(parser, pos);
 
-                { // Match literal "4:"
+                { // Match literal "7:"
                   if (parser->pos + 2 <= parser->input_len &&
-                      memcmp(parser->input + parser->pos, "4:", 2) == 0) {
+                      memcmp(parser->input + parser->pos, "7:", 2) == 0) {
                     parser->pos += 2;
                   } else {
 #ifdef PGEN_ERRORS
                     sprintf(parser->error_message, "Expected `"
-                                                   "4:"
+                                                   "7:"
                                                    "` at position %zu",
                             parser->pos);
 #endif
@@ -197,7 +306,7 @@ static bool parse_test(Parser *parser) {
                   }
                 }
                 if (parser->success) {
-                  parse_test4(parser);
+                  parse_test7(parser);
                   if (!parser->success) {
                     RESTORE_POSITION(parser, pos);
                   }
@@ -211,14 +320,14 @@ static bool parse_test(Parser *parser) {
             { // Sequence with 2 patterns
               REMEMBER_POSITION(parser, pos);
 
-              { // Match literal "5:"
+              { // Match literal "8:"
                 if (parser->pos + 2 <= parser->input_len &&
-                    memcmp(parser->input + parser->pos, "5:", 2) == 0) {
+                    memcmp(parser->input + parser->pos, "8:", 2) == 0) {
                   parser->pos += 2;
                 } else {
 #ifdef PGEN_ERRORS
                   sprintf(parser->error_message, "Expected `"
-                                                 "5:"
+                                                 "8:"
                                                  "` at position %zu",
                           parser->pos);
 #endif
@@ -226,7 +335,7 @@ static bool parse_test(Parser *parser) {
                 }
               }
               if (parser->success) {
-                parse_test5(parser);
+                parse_test8(parser);
                 if (!parser->success) {
                   RESTORE_POSITION(parser, pos);
                 }
@@ -240,14 +349,14 @@ static bool parse_test(Parser *parser) {
           { // Sequence with 2 patterns
             REMEMBER_POSITION(parser, pos);
 
-            { // Match literal "6:"
+            { // Match literal "9:"
               if (parser->pos + 2 <= parser->input_len &&
-                  memcmp(parser->input + parser->pos, "6:", 2) == 0) {
+                  memcmp(parser->input + parser->pos, "9:", 2) == 0) {
                 parser->pos += 2;
               } else {
 #ifdef PGEN_ERRORS
                 sprintf(parser->error_message, "Expected `"
-                                               "6:"
+                                               "9:"
                                                "` at position %zu",
                         parser->pos);
 #endif
@@ -255,7 +364,7 @@ static bool parse_test(Parser *parser) {
               }
             }
             if (parser->success) {
-              parse_test6(parser);
+              parse_test9(parser);
               if (!parser->success) {
                 RESTORE_POSITION(parser, pos);
               }
@@ -269,14 +378,14 @@ static bool parse_test(Parser *parser) {
         { // Sequence with 2 patterns
           REMEMBER_POSITION(parser, pos);
 
-          { // Match literal "7:"
-            if (parser->pos + 2 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "7:", 2) == 0) {
-              parser->pos += 2;
+          { // Match literal "10:"
+            if (parser->pos + 3 <= parser->input_len &&
+                memcmp(parser->input + parser->pos, "10:", 3) == 0) {
+              parser->pos += 3;
             } else {
 #ifdef PGEN_ERRORS
               sprintf(parser->error_message, "Expected `"
-                                             "7:"
+                                             "10:"
                                              "` at position %zu",
                       parser->pos);
 #endif
@@ -284,7 +393,7 @@ static bool parse_test(Parser *parser) {
             }
           }
           if (parser->success) {
-            parse_test7(parser);
+            parse_test10(parser);
             if (!parser->success) {
               RESTORE_POSITION(parser, pos);
             }
@@ -298,14 +407,14 @@ static bool parse_test(Parser *parser) {
       { // Sequence with 2 patterns
         REMEMBER_POSITION(parser, pos);
 
-        { // Match literal "8:"
-          if (parser->pos + 2 <= parser->input_len &&
-              memcmp(parser->input + parser->pos, "8:", 2) == 0) {
-            parser->pos += 2;
+        { // Match literal "11:"
+          if (parser->pos + 3 <= parser->input_len &&
+              memcmp(parser->input + parser->pos, "11:", 3) == 0) {
+            parser->pos += 3;
           } else {
 #ifdef PGEN_ERRORS
             sprintf(parser->error_message, "Expected `"
-                                           "8:"
+                                           "11:"
                                            "` at position %zu",
                     parser->pos);
 #endif
@@ -313,7 +422,7 @@ static bool parse_test(Parser *parser) {
           }
         }
         if (parser->success) {
-          parse_test8(parser);
+          parse_test11(parser);
           if (!parser->success) {
             RESTORE_POSITION(parser, pos);
           }
@@ -427,10 +536,25 @@ static bool parse_test1(Parser *parser) {
     }
 
     if (parser->success) {
-      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+      int final_stack = lua_gettop(parser->L);
 
-      if (1 <= captures_produced) {
-        lua_pushvalue(parser->L, cn_stack_start + 1);
+      // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
+      int count = 0;
+      int target_idx = 0;
+      for (int i = cn_stack_start + 1; i <= final_stack; i++) {
+        if (lua_islightuserdata(parser->L, i) && is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          i++; // skip sentinel's value too
+          continue;
+        }
+        count++;
+        if (count == 1) {
+          target_idx = i;
+          break;
+        }
+      }
+
+      if (target_idx > 0) {
+        lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
         lua_settop(parser->L, cn_stack_start + 1);
       } else {
@@ -446,6 +570,296 @@ static bool parse_test1(Parser *parser) {
     fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test1", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_test10(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test10", start);
+#endif
+
+  { // Numbered Capture (select 2)
+    int cn_stack_start = lua_gettop(parser->L);
+    { // Sequence with 3 patterns
+      REMEMBER_POSITION(parser, pos);
+
+      { // Capture Group "a"
+        int cg_stack_start = lua_gettop(parser->L);
+        size_t start_pos = parser->pos;
+        { // Constant Capture
+          // A constant capture matches the empty string and produces all given values
+          lua_pushlstring(parser->L, "one", 3);
+        }
+
+        if (parser->success) {
+          int cg_stack_end = lua_gettop(parser->L);
+          int captures_produced = cg_stack_end - cg_stack_start;
+
+          if (captures_produced > 0) {
+            // Inner pattern produced captures - use the first one
+            // Push sentinel (identifies this as named capture "a")
+            lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_a);
+            // Move sentinel before the first capture
+            lua_insert(parser->L, cg_stack_start + 1);
+            // Now stack is: sentinel, first_capture, [other_captures...]
+            // Remove any extra captures (keep only sentinel + first capture)
+            lua_settop(parser->L, cg_stack_start + 2);
+          } else {
+            // No captures - capture the matched text span
+            size_t capture_len = parser->pos - start_pos;
+            // Push sentinel (identifies this as named capture "a")
+            lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_a);
+            // Push captured value
+            lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+          }
+        }
+      }
+      if (parser->success) {
+        { // Constant Capture
+          // A constant capture matches the empty string and produces all given values
+          lua_pushlstring(parser->L, "two", 3);
+        }
+        if (parser->success) {
+          { // Capture Group "b"
+            int cg_stack_start = lua_gettop(parser->L);
+            size_t start_pos = parser->pos;
+            { // Constant Capture
+              // A constant capture matches the empty string and produces all given values
+              lua_pushlstring(parser->L, "three", 5);
+            }
+
+            if (parser->success) {
+              int cg_stack_end = lua_gettop(parser->L);
+              int captures_produced = cg_stack_end - cg_stack_start;
+
+              if (captures_produced > 0) {
+                // Inner pattern produced captures - use the first one
+                // Push sentinel (identifies this as named capture "b")
+                lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_b);
+                // Move sentinel before the first capture
+                lua_insert(parser->L, cg_stack_start + 1);
+                // Now stack is: sentinel, first_capture, [other_captures...]
+                // Remove any extra captures (keep only sentinel + first capture)
+                lua_settop(parser->L, cg_stack_start + 2);
+              } else {
+                // No captures - capture the matched text span
+                size_t capture_len = parser->pos - start_pos;
+                // Push sentinel (identifies this as named capture "b")
+                lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_b);
+                // Push captured value
+                lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+              }
+            }
+          }
+        }
+        if (!parser->success) {
+          RESTORE_POSITION(parser, pos);
+        }
+      }
+    }
+
+    if (parser->success) {
+      int final_stack = lua_gettop(parser->L);
+
+      // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
+      int count = 0;
+      int target_idx = 0;
+      for (int i = cn_stack_start + 1; i <= final_stack; i++) {
+        if (lua_islightuserdata(parser->L, i) && is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          i++; // skip sentinel's value too
+          continue;
+        }
+        count++;
+        if (count == 2) {
+          target_idx = i;
+          break;
+        }
+      }
+
+      if (target_idx > 0) {
+        lua_pushvalue(parser->L, target_idx);
+        lua_replace(parser->L, cn_stack_start + 1);
+        lua_settop(parser->L, cn_stack_start + 1);
+      } else {
+        lua_settop(parser->L, cn_stack_start);
+        lua_pushnil(parser->L);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test10", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test10", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_test11(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test11", start);
+#endif
+
+  { // Numbered Capture (select 2)
+    int cn_stack_start = lua_gettop(parser->L);
+    { // Sequence with 3 patterns
+      REMEMBER_POSITION(parser, pos);
+
+      { // Capture
+        size_t start_pos = parser->pos;
+        { // Match single character "x"
+          if (parser->pos < parser->input_len &&
+              parser->input[parser->pos] == 120) {
+            parser->pos++;
+          } else {
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Expected character `"
+                                           "x"
+                                           "` at position %zu",
+                    parser->pos);
+#endif
+            parser->success = false;
+          }
+        }
+
+        if (parser->success) {
+          size_t capture_length = parser->pos - start_pos;
+          // TODO: ensure stack has enough space for push
+          lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+        }
+      }
+      if (parser->success) {
+        { // Capture Group "name"
+          int cg_stack_start = lua_gettop(parser->L);
+          size_t start_pos = parser->pos;
+          { // Capture
+            size_t start_pos = parser->pos;
+            { // Match single character "y"
+              if (parser->pos < parser->input_len &&
+                  parser->input[parser->pos] == 121) {
+                parser->pos++;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected character `"
+                                               "y"
+                                               "` at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            }
+
+            if (parser->success) {
+              size_t capture_length = parser->pos - start_pos;
+              // TODO: ensure stack has enough space for push
+              lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            }
+          }
+
+          if (parser->success) {
+            int cg_stack_end = lua_gettop(parser->L);
+            int captures_produced = cg_stack_end - cg_stack_start;
+
+            if (captures_produced > 0) {
+              // Inner pattern produced captures - use the first one
+              // Push sentinel (identifies this as named capture "name")
+              lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_name);
+              // Move sentinel before the first capture
+              lua_insert(parser->L, cg_stack_start + 1);
+              // Now stack is: sentinel, first_capture, [other_captures...]
+              // Remove any extra captures (keep only sentinel + first capture)
+              lua_settop(parser->L, cg_stack_start + 2);
+            } else {
+              // No captures - capture the matched text span
+              size_t capture_len = parser->pos - start_pos;
+              // Push sentinel (identifies this as named capture "name")
+              lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_name);
+              // Push captured value
+              lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+            }
+          }
+        }
+        if (parser->success) {
+          { // Capture
+            size_t start_pos = parser->pos;
+            { // Match single character "z"
+              if (parser->pos < parser->input_len &&
+                  parser->input[parser->pos] == 122) {
+                parser->pos++;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected character `"
+                                               "z"
+                                               "` at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            }
+
+            if (parser->success) {
+              size_t capture_length = parser->pos - start_pos;
+              // TODO: ensure stack has enough space for push
+              lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            }
+          }
+        }
+        if (!parser->success) {
+          RESTORE_POSITION(parser, pos);
+        }
+      }
+    }
+
+    if (parser->success) {
+      int final_stack = lua_gettop(parser->L);
+
+      // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
+      int count = 0;
+      int target_idx = 0;
+      for (int i = cn_stack_start + 1; i <= final_stack; i++) {
+        if (lua_islightuserdata(parser->L, i) && is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          i++; // skip sentinel's value too
+          continue;
+        }
+        count++;
+        if (count == 2) {
+          target_idx = i;
+          break;
+        }
+      }
+
+      if (target_idx > 0) {
+        lua_pushvalue(parser->L, target_idx);
+        lua_replace(parser->L, cn_stack_start + 1);
+        lua_settop(parser->L, cn_stack_start + 1);
+      } else {
+        lua_settop(parser->L, cn_stack_start);
+        lua_pushnil(parser->L);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test11", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test11", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -545,10 +959,25 @@ static bool parse_test2(Parser *parser) {
     }
 
     if (parser->success) {
-      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+      int final_stack = lua_gettop(parser->L);
 
-      if (2 <= captures_produced) {
-        lua_pushvalue(parser->L, cn_stack_start + 2);
+      // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
+      int count = 0;
+      int target_idx = 0;
+      for (int i = cn_stack_start + 1; i <= final_stack; i++) {
+        if (lua_islightuserdata(parser->L, i) && is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          i++; // skip sentinel's value too
+          continue;
+        }
+        count++;
+        if (count == 2) {
+          target_idx = i;
+          break;
+        }
+      }
+
+      if (target_idx > 0) {
+        lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
         lua_settop(parser->L, cn_stack_start + 1);
       } else {
@@ -663,10 +1092,25 @@ static bool parse_test3(Parser *parser) {
     }
 
     if (parser->success) {
-      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+      int final_stack = lua_gettop(parser->L);
 
-      if (3 <= captures_produced) {
-        lua_pushvalue(parser->L, cn_stack_start + 3);
+      // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
+      int count = 0;
+      int target_idx = 0;
+      for (int i = cn_stack_start + 1; i <= final_stack; i++) {
+        if (lua_islightuserdata(parser->L, i) && is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          i++; // skip sentinel's value too
+          continue;
+        }
+        count++;
+        if (count == 3) {
+          target_idx = i;
+          break;
+        }
+      }
+
+      if (target_idx > 0) {
+        lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
         lua_settop(parser->L, cn_stack_start + 1);
       } else {
@@ -865,10 +1309,25 @@ static bool parse_test5(Parser *parser) {
     }
 
     if (parser->success) {
-      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+      int final_stack = lua_gettop(parser->L);
 
-      if (5 <= captures_produced) {
-        lua_pushvalue(parser->L, cn_stack_start + 5);
+      // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
+      int count = 0;
+      int target_idx = 0;
+      for (int i = cn_stack_start + 1; i <= final_stack; i++) {
+        if (lua_islightuserdata(parser->L, i) && is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          i++; // skip sentinel's value too
+          continue;
+        }
+        count++;
+        if (count == 5) {
+          target_idx = i;
+          break;
+        }
+      }
+
+      if (target_idx > 0) {
+        lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
         lua_settop(parser->L, cn_stack_start + 1);
       } else {
@@ -926,10 +1385,25 @@ static bool parse_test6(Parser *parser) {
     }
 
     if (parser->success) {
-      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+      int final_stack = lua_gettop(parser->L);
 
-      if (1 <= captures_produced) {
-        lua_pushvalue(parser->L, cn_stack_start + 1);
+      // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
+      int count = 0;
+      int target_idx = 0;
+      for (int i = cn_stack_start + 1; i <= final_stack; i++) {
+        if (lua_islightuserdata(parser->L, i) && is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          i++; // skip sentinel's value too
+          continue;
+        }
+        count++;
+        if (count == 1) {
+          target_idx = i;
+          break;
+        }
+      }
+
+      if (target_idx > 0) {
+        lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
         lua_settop(parser->L, cn_stack_start + 1);
       } else {
@@ -1048,10 +1522,25 @@ static bool parse_test7(Parser *parser) {
           }
 
           if (parser->success) {
-            int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+            int final_stack = lua_gettop(parser->L);
 
-            if (2 <= captures_produced) {
-              lua_pushvalue(parser->L, cn_stack_start + 2);
+            // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
+            int count = 0;
+            int target_idx = 0;
+            for (int i = cn_stack_start + 1; i <= final_stack; i++) {
+              if (lua_islightuserdata(parser->L, i) && is_cg_sentinel(lua_touserdata(parser->L, i))) {
+                i++; // skip sentinel's value too
+                continue;
+              }
+              count++;
+              if (count == 2) {
+                target_idx = i;
+                break;
+              }
+            }
+
+            if (target_idx > 0) {
+              lua_pushvalue(parser->L, target_idx);
               lua_replace(parser->L, cn_stack_start + 1);
               lua_settop(parser->L, cn_stack_start + 1);
             } else {
@@ -1195,10 +1684,25 @@ static bool parse_test8(Parser *parser) {
       }
 
       if (parser->success) {
-        int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+        int final_stack = lua_gettop(parser->L);
 
-        if (2 <= captures_produced) {
-          lua_pushvalue(parser->L, cn_stack_start + 2);
+        // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
+        int count = 0;
+        int target_idx = 0;
+        for (int i = cn_stack_start + 1; i <= final_stack; i++) {
+          if (lua_islightuserdata(parser->L, i) && is_cg_sentinel(lua_touserdata(parser->L, i))) {
+            i++; // skip sentinel's value too
+            continue;
+          }
+          count++;
+          if (count == 2) {
+            target_idx = i;
+            break;
+          }
+        }
+
+        if (target_idx > 0) {
+          lua_pushvalue(parser->L, target_idx);
           lua_replace(parser->L, cn_stack_start + 1);
           lua_settop(parser->L, cn_stack_start + 1);
         } else {
@@ -1209,10 +1713,25 @@ static bool parse_test8(Parser *parser) {
     }
 
     if (parser->success) {
-      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+      int final_stack = lua_gettop(parser->L);
 
-      if (1 <= captures_produced) {
-        lua_pushvalue(parser->L, cn_stack_start + 1);
+      // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
+      int count = 0;
+      int target_idx = 0;
+      for (int i = cn_stack_start + 1; i <= final_stack; i++) {
+        if (lua_islightuserdata(parser->L, i) && is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          i++; // skip sentinel's value too
+          continue;
+        }
+        count++;
+        if (count == 1) {
+          target_idx = i;
+          break;
+        }
+      }
+
+      if (target_idx > 0) {
+        lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
         lua_settop(parser->L, cn_stack_start + 1);
       } else {
@@ -1228,6 +1747,136 @@ static bool parse_test8(Parser *parser) {
     fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test8", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_test9(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test9", start);
+#endif
+
+  { // Numbered Capture (select 1)
+    int cn_stack_start = lua_gettop(parser->L);
+    { // Sequence with 3 patterns
+      REMEMBER_POSITION(parser, pos);
+
+      { // Capture Group "a"
+        int cg_stack_start = lua_gettop(parser->L);
+        size_t start_pos = parser->pos;
+        { // Constant Capture
+          // A constant capture matches the empty string and produces all given values
+          lua_pushlstring(parser->L, "one", 3);
+        }
+
+        if (parser->success) {
+          int cg_stack_end = lua_gettop(parser->L);
+          int captures_produced = cg_stack_end - cg_stack_start;
+
+          if (captures_produced > 0) {
+            // Inner pattern produced captures - use the first one
+            // Push sentinel (identifies this as named capture "a")
+            lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_a);
+            // Move sentinel before the first capture
+            lua_insert(parser->L, cg_stack_start + 1);
+            // Now stack is: sentinel, first_capture, [other_captures...]
+            // Remove any extra captures (keep only sentinel + first capture)
+            lua_settop(parser->L, cg_stack_start + 2);
+          } else {
+            // No captures - capture the matched text span
+            size_t capture_len = parser->pos - start_pos;
+            // Push sentinel (identifies this as named capture "a")
+            lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_a);
+            // Push captured value
+            lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+          }
+        }
+      }
+      if (parser->success) {
+        { // Constant Capture
+          // A constant capture matches the empty string and produces all given values
+          lua_pushlstring(parser->L, "two", 3);
+        }
+        if (parser->success) {
+          { // Capture Group "b"
+            int cg_stack_start = lua_gettop(parser->L);
+            size_t start_pos = parser->pos;
+            { // Constant Capture
+              // A constant capture matches the empty string and produces all given values
+              lua_pushlstring(parser->L, "three", 5);
+            }
+
+            if (parser->success) {
+              int cg_stack_end = lua_gettop(parser->L);
+              int captures_produced = cg_stack_end - cg_stack_start;
+
+              if (captures_produced > 0) {
+                // Inner pattern produced captures - use the first one
+                // Push sentinel (identifies this as named capture "b")
+                lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_b);
+                // Move sentinel before the first capture
+                lua_insert(parser->L, cg_stack_start + 1);
+                // Now stack is: sentinel, first_capture, [other_captures...]
+                // Remove any extra captures (keep only sentinel + first capture)
+                lua_settop(parser->L, cg_stack_start + 2);
+              } else {
+                // No captures - capture the matched text span
+                size_t capture_len = parser->pos - start_pos;
+                // Push sentinel (identifies this as named capture "b")
+                lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_b);
+                // Push captured value
+                lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+              }
+            }
+          }
+        }
+        if (!parser->success) {
+          RESTORE_POSITION(parser, pos);
+        }
+      }
+    }
+
+    if (parser->success) {
+      int final_stack = lua_gettop(parser->L);
+
+      // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
+      int count = 0;
+      int target_idx = 0;
+      for (int i = cn_stack_start + 1; i <= final_stack; i++) {
+        if (lua_islightuserdata(parser->L, i) && is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          i++; // skip sentinel's value too
+          continue;
+        }
+        count++;
+        if (count == 1) {
+          target_idx = i;
+          break;
+        }
+      }
+
+      if (target_idx > 0) {
+        lua_pushvalue(parser->L, target_idx);
+        lua_replace(parser->L, cn_stack_start + 1);
+        lua_settop(parser->L, cn_stack_start + 1);
+      } else {
+        lua_settop(parser->L, cn_stack_start);
+        lua_pushnil(parser->L);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test9", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test9", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -1295,6 +1944,27 @@ static int l_numbered_capture_parse(lua_State *L) {
     lua_pushstring(L, parser->error_message);
     numbered_capture_free(parser);
     return 2; // Return nil and error message
+  }
+
+  // Strip Cg sentinel+value pairs from stack (they only matter inside Ct)
+  if (final_stack_size > initial_stack_size) {
+    int read_idx = initial_stack_size + 1;
+    int write_idx = initial_stack_size + 1;
+    while (read_idx <= final_stack_size) {
+      if (lua_islightuserdata(L, read_idx) && is_cg_sentinel(lua_touserdata(L, read_idx))) {
+        // Skip sentinel and its value
+        read_idx += 2;
+      } else {
+        if (read_idx != write_idx) {
+          lua_pushvalue(L, read_idx);
+          lua_replace(L, write_idx);
+        }
+        read_idx++;
+        write_idx++;
+      }
+    }
+    lua_settop(L, write_idx - 1);
+    final_stack_size = lua_gettop(L);
   }
 
   // If stack size has changed, use new items as return values
