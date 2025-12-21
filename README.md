@@ -104,9 +104,25 @@ the grammar to a shared library in `/tmp/` and then load it immediately with
 ahead of time and build shared modules with your build system to avoid
 expensive start-up time.
 
+
+```lua
+-- path/to/grammar.lua
+
+local pgen = require "pgen"
+local P = pgen.P
+
+-- Define grammar and return it
+return {
+  "strings", -- initial rule name
+
+  strings = P"hello" + P"world"
+}
+```
+
+
 ```lua
 local pgen = require "pgen"
 local parser = pgen.require("path.to.grammar") -- uses same search path as require()
-local result = parser.parse("input string")
+local result = parser.parse("hello")
 ```
 
