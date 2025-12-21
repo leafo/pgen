@@ -217,15 +217,15 @@ typedef struct {
   int stack_size;
 } ParserPosition;
 
-#define REMEMBER_POSITION(parser, pos) \
-  ParserPosition pos; \
-  (pos).pos = (parser)->pos; \
-  (pos).stack_size = lua_gettop((parser)->L);
+#define REMEMBER_POSITION(parser, pp) \
+  ParserPosition pp; \
+  (pp).pos = (parser)->pos; \
+  (pp).stack_size = lua_gettop((parser)->L);
 
 // Restore parser position
-#define RESTORE_POSITION(parser, pos) \
-  (parser)->pos = (pos).pos; \
-  lua_settop((parser)->L, (pos).stack_size);
+#define RESTORE_POSITION(parser, pp) \
+  (parser)->pos = (pp).pos; \
+  lua_settop((parser)->L, (pp).stack_size);
 
 
 #ifdef PGEN_DEBUG
@@ -355,6 +355,8 @@ function generator.generate_pattern_code(pattern)
     return generator.generate_repeat_code(pattern[1], pattern[2])
   elseif t == "negate" then
     return generator.generate_negate_code(pattern[1])
+  elseif t == "literal_trie" then
+    return generator.generate_trie_code(pattern.trie, pattern.strings)
   else
     error("Unknown pattern type: " .. tostring(t))
   end
@@ -987,6 +989,104 @@ function generator.generate_parser_main(parser_name, start_rule)
   local lua_module_code = generator.generate_lua_module_code(parser_name, start_rule)
 
   return c_core_code .. "\n" .. lua_module_code
+end
+
+-- Generate C code for trie-based literal matching
+function generator.generate_trie_code(trie, strings)
+  local code = generator.generate_trie_node_code(trie, 0)
+  local display_strings = {}
+  for i, str in ipairs(strings) do
+    display_strings[i] = escape_string(str)
+  end
+
+  return template_code([[{// Trie match for: $STRINGS$
+REMEMBER_POSITION(parser, trie_start);
+size_t last_terminal_pos = 0;
+int has_terminal = 0;
+$TRIE_CODE$
+if (!parser->success) {
+  RESTORE_POSITION(parser, trie_start);
+}
+}]], {
+    STRINGS = table.concat(display_strings, ", "),
+    TRIE_CODE = code
+  })
+end
+
+-- Recursively generate switch statements for trie traversal
+function generator.generate_trie_node_code(node, depth)
+  local preamble = ""
+  if node.is_terminal then
+    preamble = [[if (!has_terminal || parser->pos > last_terminal_pos) {
+  last_terminal_pos = parser->pos;
+  has_terminal = 1;
+}]]
+  end
+
+  -- Collect and sort cases for deterministic output
+  local chars = {}
+  for char in pairs(node.children) do
+    table.insert(chars, char)
+  end
+  table.sort(chars)
+
+  local cases = {}
+  for _, char in ipairs(chars) do
+    local child = node.children[char]
+    local case_body
+
+    if child.is_terminal and not next(child.children) then
+      -- Leaf node: just advance and succeed
+      case_body = "parser->pos++;"
+    elseif child.is_terminal then
+      -- Terminal with more children: try to continue, but partial match is OK
+      case_body = template_code([[parser->pos++;
+$CHILD_CODE$
+if (!parser->success) {
+  // Partial match is valid: "$WORD$"
+  parser->success = true;
+}]], {
+        CHILD_CODE = generator.generate_trie_node_code(child, depth + 1),
+        WORD = child.word
+      })
+    else
+      -- Non-terminal: must continue matching
+      case_body = template_code([[parser->pos++;
+$CHILD_CODE$]], {
+        CHILD_CODE = generator.generate_trie_node_code(child, depth + 1)
+      })
+    end
+
+    table.insert(cases, template_code([[  case $BYTE$: // $CHAR$
+    $BODY$
+    break;]], {
+      BYTE = string.byte(char),
+      CHAR = escape_c_literal(char),
+      BODY = case_body
+    }))
+  end
+
+  return template_code([[$PREAMBLE$
+if (parser->pos < parser->input_len) {
+  switch (parser->input[parser->pos]) {
+$CASES$
+  default:
+    parser->success = false;
+    if (has_terminal) {
+      parser->pos = last_terminal_pos;
+      parser->success = true;
+    }
+  }
+} else {
+  parser->success = false;
+  if (has_terminal) {
+    parser->pos = last_terminal_pos;
+    parser->success = true;
+  }
+}]], {
+    PREAMBLE = preamble,
+    CASES = table.concat(cases, "\n")
+  })
 end
 
 return generator

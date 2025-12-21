@@ -25,6 +25,9 @@ parser:option("-n --name", "Parser name")
 parser:flag("--pgen-errors", "Generate error messages on failed parse paths (warning: substantial performance penalty)")
   :default(false)
 
+parser:flag("--no-optimize", "Disable grammar optimization passes")
+  :default(false)
+
 local args = parser:parse()
 
 local input_file = args.input_file
@@ -53,7 +56,8 @@ end
 -- Compile the grammar
 local output, err = pgen.compile(result, {
   parser_name = args.name,
-  pgen_errors = args.pgen_errors
+  pgen_errors = args.pgen_errors,
+  optimize = not args.no_optimize
 })
 
 if not output then

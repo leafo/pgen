@@ -9,6 +9,8 @@ local function make(t)
   return setmetatable(t, mt)
 end
 
+pgen._make = make
+
 -- Helper to create a pattern object
 local function pattern(type, value, name)
   return make{
@@ -170,38 +172,87 @@ function mt.__div(a, b)
 end
 
 -- Visit every node in a pattern tree, calling visitor on each
+-- visitor(node, replace) - call replace(new_node) to replace current node
+-- Returns the (possibly replaced) pattern
 function pgen.visit_pattern(pattern, visitor)
   if not pattern or type(pattern) ~= "table" then
-    return
+    return pattern
   end
 
-  visitor(pattern)
+  -- Allow visitor to replace this node
+  local replacement = nil
+  local function replace(new_node)
+    replacement = new_node
+  end
 
+  visitor(pattern, replace)
+
+  -- If replaced, visit the replacement instead
+  if replacement then
+    return pgen.visit_pattern(replacement, visitor)
+  end
+
+  -- Visit children and rebuild if any changed
   local t = pattern.type
   if t == C or t == Ct or t == L or t == Cg or t == Cn then
-    pgen.visit_pattern(pattern.value, visitor)
+    local new_value = pgen.visit_pattern(pattern.value, visitor)
+    if new_value ~= pattern.value then
+      return make{type = t, value = new_value, name = pattern.name}
+    end
   elseif t == "sequence" or t == "choice" then
-    for _, child in ipairs(pattern) do
-      pgen.visit_pattern(child, visitor)
+    local changed = false
+    local new_children = {}
+    for i, child in ipairs(pattern) do
+      local new_child = pgen.visit_pattern(child, visitor)
+      new_children[i] = new_child
+      if new_child ~= child then changed = true end
+    end
+    if changed then
+      local new_pattern = make{type = t}
+      for i, child in ipairs(new_children) do
+        new_pattern[i] = child
+      end
+      return new_pattern
     end
   elseif t == "repeat" or t == "negate" then
-    pgen.visit_pattern(pattern[1], visitor)
+    local new_child = pgen.visit_pattern(pattern[1], visitor)
+    if new_child ~= pattern[1] then
+      return make{type = t, new_child, pattern[2]}
+    end
   end
+
+  return pattern
 end
 
 -- Visit every node across all rules in a grammar
+-- Returns new grammar with any replacements applied
 function pgen.visit_grammar(grammar, visitor)
-  for _, pattern in pairs(grammar) do
+  local new_grammar = {}
+  local changed = false
+
+  for name, pattern in pairs(grammar) do
     if type(pattern) == "table" then
-      pgen.visit_pattern(pattern, visitor)
+      local new_pattern = pgen.visit_pattern(pattern, visitor)
+      new_grammar[name] = new_pattern
+      if new_pattern ~= pattern then changed = true end
+    else
+      new_grammar[name] = pattern
     end
   end
+
+  return changed and new_grammar or grammar
 end
 
 -- Compile grammar to C code
 function pgen.compile(grammar, options)
   options = options or {}
   local parser_name = options.parser_name or "parser"
+
+  -- Apply optimizations before generation (unless disabled)
+  if options.optimize ~= false then
+    local optimize = require("pgen.optimize")
+    grammar = optimize.optimize_grammar(grammar)
+  end
 
   local generator = require("pgen.generator")
   return generator.generate(grammar, parser_name, {
@@ -244,7 +295,8 @@ function pgen.require(module_name, options)
   start_time = show_timing and socket.gettime()
   local output, err = pgen.compile(grammar, {
     -- TODO: generate non-conflicting parser name
-    parser_name = parser_name
+    parser_name = parser_name,
+    optimize = options.optimize
   })
   log_time("Compiling grammar to C code", start_time)
 
