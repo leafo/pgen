@@ -28,6 +28,9 @@ parser:flag("--pgen-errors", "Generate error messages on failed parse paths (war
 parser:flag("--no-optimize", "Disable grammar optimization passes")
   :default(false)
 
+parser:flag("--json", "Output grammar as JSON instead of generating C code")
+  :default(false)
+
 local args = parser:parse()
 
 local input_file = args.input_file
@@ -51,6 +54,21 @@ end
 if type(result) ~= "table" then
   print("Error: Input file must return a grammar table")
   os.exit(1)
+end
+
+-- Output grammar as JSON if requested
+if args.json then
+  local grammar = result
+
+  -- Apply optimization unless disabled
+  if not args.no_optimize then
+    local optimize = require("pgen.optimize")
+    grammar = optimize.optimize_grammar(grammar)
+  end
+
+  local cjson = require("cjson")
+  print(cjson.encode(grammar))
+  return
 end
 
 -- Compile the grammar
