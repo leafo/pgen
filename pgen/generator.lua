@@ -314,6 +314,8 @@ typedef struct {
   size_t pos;
   bool success;
   char error_message[256];
+  const char *throw_label;  // Label from T() or NULL for ordinary failure
+  size_t throw_pos;         // Position where T() was thrown
   size_t depth;
   lua_State *L;
 } Parser;
@@ -454,6 +456,8 @@ function generator.generate_pattern_code(pattern)
     return generator.generate_capture_match_back_code(pattern.name)
   elseif t == types.Cmt then -- Cmt (match-time capture)
     return generator.generate_cmt_code(pattern.value, pattern.cmt_id)
+  elseif t == types.T then -- T (labeled failure)
+    return generator.generate_labeled_failure_code(pattern.value)
   elseif t == "sequence" then
     return generator.generate_sequence_code(unpack(pattern))
   elseif t == "choice" then
@@ -653,7 +657,8 @@ function generator.generate_choice_code(a, b)
   return template_code([[{ // Choice
   $A$
 
-  if (!parser->success) {
+  // Only try alternative if ordinary failure (not labeled failure from T())
+  if (!parser->success && !parser->throw_label) {
     parser->success = true;
     $B$
   }
@@ -682,7 +687,10 @@ function generator.generate_repeat_code(a, n)
 
     if (!parser->success || before_pos == parser->pos) {
       // Break on failure or zero-width match
-      parser->success = true;
+      // Only recover from ordinary failure, not labeled failure from T()
+      if (!parser->throw_label) {
+        parser->success = true;
+      }
       break;
     }
 
@@ -702,7 +710,10 @@ function generator.generate_repeat_code(a, n)
       break;
     }
   }
-  parser->success = true;
+  // Only recover from ordinary failure, not labeled failure from T()
+  if (!parser->throw_label) {
+    parser->success = true;
+  }
 }]], {
       BODY = generator.generate_pattern_code(a)
     })
@@ -723,7 +734,10 @@ function generator.generate_repeat_code(a, n)
     rep_count += 1;
   }
 
-  if (rep_count >= $N$) {
+  // Don't recover if labeled failure was thrown
+  if (parser->throw_label) {
+    // Keep failure state, propagate labeled failure
+  } else if (rep_count >= $N$) {
     parser->success = true;
   } else {
     RESTORE_POSITION(parser, pos);
@@ -754,6 +768,11 @@ function generator.generate_negate_code(a)
   } else {
     // Pattern failed, so negate succeeds
     parser->success = true;
+    // Swallow labeled failures inside predicates (LPegLabel behavior)
+    if (parser->throw_label) {
+      parser->throw_label = NULL;
+      parser->throw_pos = 0;
+    }
     RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
   }
 }]], {
@@ -1137,6 +1156,24 @@ function generator.generate_cmt_code(inner_pattern, cmt_id)
   })
 end
 
+-- Generate code for labeled failure throw
+function generator.generate_labeled_failure_code(label)
+  local escaped_label = escape_c_literal(label)
+
+  return template_code([[
+{// Throw labeled failure: $LABEL$
+  parser->success = false;
+  parser->throw_label = $ESCAPED_LABEL$;
+  parser->throw_pos = parser->pos;
+#ifdef PGEN_ERRORS
+  sprintf(parser->error_message, $ESCAPED_LABEL$ " at position %zu", parser->pos + 1);
+#endif
+}]], {
+    LABEL = label,
+    ESCAPED_LABEL = escaped_label
+  })
+end
+
 -- Generate core C parser functions (_init, _free, _parse)
 function generator.generate_c_core_functions(parser_name, start_rule)
   return template_code([[
@@ -1153,6 +1190,8 @@ static Parser* $PARSER_NAME$_init(const char *input, lua_State *L) {
   parser->depth = 0;
   parser->success = true;
   parser->error_message[0] = '\0';
+  parser->throw_label = NULL;
+  parser->throw_pos = 0;
   parser->L = L;
   return parser;
 }
@@ -1205,13 +1244,22 @@ static int l_$PARSER_NAME$_parse(lua_State *L) {
 
   int final_stack_size = lua_gettop(parser->L);
 
-  // Return nil and error message on failure, true on success
+  // Return nil and error info on failure
   if (!parser->success) {
     assert(final_stack_size == initial_stack_size && "Unexpected stack size change on parse failure.");
     lua_pushnil(L);
-    lua_pushstring(L, parser->error_message);
-    $PARSER_NAME$_free(parser);
-    return 2; // Return nil and error message
+    if (parser->throw_label) {
+      // Labeled failure: return nil, label, position
+      lua_pushstring(L, parser->throw_label);
+      lua_pushinteger(L, parser->throw_pos + 1);  // 1-indexed for Lua
+      $PARSER_NAME$_free(parser);
+      return 3;
+    } else {
+      // Ordinary failure: return nil, error_message
+      lua_pushstring(L, parser->error_message);
+      $PARSER_NAME$_free(parser);
+      return 2;
+    }
   }
 
   // Strip Cg sentinel+value pairs from stack (they only matter inside Ct)

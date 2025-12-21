@@ -119,6 +119,12 @@ function pgen.Cmt(patt, code)
   }
 end
 
+-- Throw labeled failure
+function pgen.T(label)
+  assert(type(label) == "string", "T requires a string label")
+  return pattern(types.T, label)
+end
+
 function mt.__add(a, b)
   return make{
     type = "choice",
