@@ -24,10 +24,10 @@ function visitor.visit_pattern(pattern, visitor_fn)
 
   -- Visit children and rebuild if any changed
   local t = pattern.type
-  if t == types.C or t == types.Ct or t == types.L or t == types.Cg or t == types.Cn then
+  if t == types.C or t == types.Ct or t == types.L or t == types.Cg or t == types.Cn or t == types.Cmt then
     local new_value = visitor.visit_pattern(pattern.value, visitor_fn)
     if new_value ~= pattern.value then
-      return setmetatable({type = t, value = new_value, name = pattern.name}, getmetatable(pattern))
+      return setmetatable({type = t, value = new_value, name = pattern.name, code = pattern.code}, getmetatable(pattern))
     end
   elseif t == "sequence" or t == "choice" then
     local changed = false

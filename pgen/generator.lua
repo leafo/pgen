@@ -70,6 +70,33 @@ local function collect_cg_names(grammar)
   return result
 end
 
+-- Collect all Cmt nodes from a grammar, assigning each a unique ID
+-- Returns array of {id, code} and a new grammar with cmt_id fields set
+local function collect_cmt_codes(grammar)
+  local visitor = require("pgen.visitor")
+  local pgen = require("pgen")
+  local codes = {}
+  local id = 0
+
+  local new_grammar = visitor.visit_grammar(grammar, function(node, replace)
+    -- Only replace Cmt nodes that don't already have an ID assigned
+    -- (avoids infinite loop since replacement is also visited)
+    if node.type == types.Cmt and node.cmt_id == nil then
+      -- Create a copy of the node with cmt_id assigned
+      replace(pgen._make({
+        type = types.Cmt,
+        value = node.value,
+        code = node.code,
+        cmt_id = id
+      }))
+      table.insert(codes, {id = id, code = node.code})
+      id = id + 1
+    end
+  end)
+
+  return codes, new_grammar
+end
+
 local function template_code(template, vars)
   -- Use gsub to find placeholders like $VARNAME
   -- The pattern matches '$' followed by UPPER_CASE letters
@@ -112,11 +139,14 @@ end
 function generator.generate(grammar, parser_name, options)
   options = options or {}
 
+  -- Collect Cmt codes and get transformed grammar with cmt_id assigned
+  local cmt_codes, transformed_grammar = collect_cmt_codes(grammar)
+
   local rules = {}
   local start_rule = nil
 
-  -- Extract rules from grammar
-  for name, pattern in pairs(grammar) do
+  -- Extract rules from transformed grammar (which has cmt_id on Cmt nodes)
+  for name, pattern in pairs(transformed_grammar) do
     local skip = false
     if not start_rule then
       if type(pattern) == "string" and name == 1 then
@@ -136,17 +166,17 @@ function generator.generate(grammar, parser_name, options)
   end
 
   -- Collect all Cg (capture group) names for sentinel generation
-  local cg_names = collect_cg_names(grammar)
+  local cg_names = collect_cg_names(transformed_grammar)
   for _, name in ipairs(cg_names) do
     assert_valid_c_identifier(name)
   end
 
   -- Generate the C code
   local c_chunks = {
-    generator.generate_parser_header(parser_name, cg_names),
+    generator.generate_parser_header(parser_name, cg_names, cmt_codes),
     generator.generate_forward_declarations(rules, start_rule),
     generator.generate_rule_functions(rules, start_rule),
-    generator.generate_parser_main(parser_name, start_rule),
+    generator.generate_parser_main(parser_name, start_rule, cmt_codes),
     -- Add compilation instructions as a comment
     template_code([[/*
 To compile as a Lua module:
@@ -217,8 +247,49 @@ static bool is_cg_sentinel(void* ptr) {
   return table.concat(lines, "\n") .. "\n"
 end
 
+-- Generate Cmt (match-time capture) infrastructure
+-- Returns C code for: static code strings, ref array, and init function
+local function generate_cmt_infrastructure(cmt_codes)
+  if #cmt_codes == 0 then
+    return ""
+  end
+
+  local lines = {}
+  table.insert(lines, "// Match-time capture (Cmt) infrastructure")
+  table.insert(lines, "")
+
+  -- Generate static code strings
+  for _, cmt in ipairs(cmt_codes) do
+    table.insert(lines, template_code(
+      "static const char __cmt_code_$ID$[] = $CODE_STR$;",
+      {ID = cmt.id, CODE_STR = escape_c_literal(cmt.code)}
+    ))
+  end
+
+  -- Generate refs array
+  table.insert(lines, "")
+  table.insert(lines, template_code("static int __cmt_refs[$COUNT$];", {COUNT = #cmt_codes}))
+
+  -- Generate init function
+  table.insert(lines, "")
+  table.insert(lines, [[// Initialize Cmt callbacks by loading their Lua code
+static void __cmt_init(lua_State *L) {]])
+
+  for _, cmt in ipairs(cmt_codes) do
+    table.insert(lines, template_code([[  if (luaL_loadstring(L, __cmt_code_$ID$) != 0) {
+    luaL_error(L, "Failed to load Cmt callback $ID$: %s", lua_tostring(L, -1));
+  }
+  __cmt_refs[$ID$] = luaL_ref(L, LUA_REGISTRYINDEX);]], {ID = cmt.id}))
+  end
+
+  table.insert(lines, "}")
+  table.insert(lines, "")
+
+  return table.concat(lines, "\n")
+end
+
 -- Generate parser header
-function generator.generate_parser_header(parser_name, cg_names)
+function generator.generate_parser_header(parser_name, cg_names, cmt_codes)
   cg_names = cg_names or {}
   return template_code([[#include <stdio.h>
 #include <stdlib.h>
@@ -283,7 +354,7 @@ static void dumpstack (lua_State *L) {
 }
 #endif
 
-]], {PARSER_NAME = parser_name}) .. generate_cg_sentinels(cg_names)
+]], {PARSER_NAME = parser_name}) .. generate_cg_sentinels(cg_names) .. generate_cmt_infrastructure(cmt_codes or {})
 end
 
 -- Generate forward declarations for all rules
@@ -375,6 +446,8 @@ function generator.generate_pattern_code(pattern)
     return generator.generate_numbered_capture_code(pattern.value, pattern.name)
   elseif t == types.Cmb then -- Cmb (capture match back)
     return generator.generate_capture_match_back_code(pattern.name)
+  elseif t == types.Cmt then -- Cmt (match-time capture)
+    return generator.generate_cmt_code(pattern.value, pattern.cmt_id)
   elseif t == "sequence" then
     return generator.generate_sequence_code(unpack(pattern))
   elseif t == "choice" then
@@ -977,8 +1050,86 @@ function generator.generate_capture_match_back_code(name)
   })
 end
 
--- Assuming 'generator' is a table used to organize functions
-generator = generator or {}
+-- Generate code for match-time capture (Cmt)
+-- Calls a Lua callback during parsing with (subject, position, ...captures)
+function generator.generate_cmt_code(inner_pattern, cmt_id)
+  return template_code([[{ // Match-time capture (Cmt id=$ID$)
+  int cmt_stack_base = lua_gettop(parser->L);
+  size_t cmt_start_pos = parser->pos;
+
+  $INNER_PATTERN_CODE$
+
+  if (parser->success) {
+    size_t pos_after_inner = parser->pos;
+    int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+
+    // Get the callback function from registry
+    lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[$ID$]);
+
+    // Push arguments: subject, position (after inner pattern)
+    lua_pushlstring(parser->L, parser->input, parser->input_len);
+    lua_pushinteger(parser->L, (lua_Integer)(pos_after_inner + 1));  // 1-based
+
+    // Copy captures as additional arguments
+    for (int i = 0; i < captures_count; i++) {
+      lua_pushvalue(parser->L, cmt_stack_base + 1 + i);
+    }
+
+    // Remove original captures from stack before calling
+    // Stack: [captures...][func][subject][pos][captures_copy...]
+    for (int i = 0; i < captures_count; i++) {
+      lua_remove(parser->L, cmt_stack_base + 1);
+    }
+    // Stack now: [func][subject][pos][captures...]
+
+    // Call function: 2 + captures_count args, LUA_MULTRET returns
+    // lua_call propagates errors (aborts parse on Lua error)
+    lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
+
+    int returns_count = lua_gettop(parser->L) - cmt_stack_base;
+
+    if (returns_count == 0) {
+      // No return value = match fails
+      parser->success = false;
+      parser->pos = cmt_start_pos;
+    } else {
+      int first_type = lua_type(parser->L, cmt_stack_base + 1);
+
+      if (first_type == LUA_TNUMBER) {
+        // Number = new position (1-based from Lua)
+        lua_Integer new_pos = lua_tointeger(parser->L, cmt_stack_base + 1);
+        new_pos--;  // Convert to 0-based
+        // Per lpeg: must be in range [pos_after_inner, input_len]
+        if (new_pos >= (lua_Integer)pos_after_inner && new_pos <= (lua_Integer)parser->input_len) {
+          parser->pos = (size_t)new_pos;
+          parser->success = true;
+        } else {
+          parser->success = false;
+          parser->pos = cmt_start_pos;
+        }
+      } else if (first_type == LUA_TBOOLEAN && lua_toboolean(parser->L, cmt_stack_base + 1)) {
+        // true = succeed without consuming (position stays at pos_after_inner)
+        parser->success = true;
+      } else {
+        // false, nil, or other = fail
+        parser->success = false;
+        parser->pos = cmt_start_pos;
+      }
+    }
+
+    // Handle captures: remove first return value, keep extras as captures
+    if (parser->success && returns_count > 1) {
+      lua_remove(parser->L, cmt_stack_base + 1);  // Remove first return value
+      // Remaining values are the new captures
+    } else {
+      lua_settop(parser->L, cmt_stack_base);  // Clear all returns
+    }
+  }
+}]], {
+    ID = cmt_id,
+    INNER_PATTERN_CODE = generator.generate_pattern_code(inner_pattern)
+  })
+end
 
 -- Generate core C parser functions (_init, _free, _parse)
 function generator.generate_c_core_functions(parser_name, start_rule)
@@ -1015,7 +1166,10 @@ static void $PARSER_NAME$_free(Parser *parser) {
 end
 
 -- Generate C code for the Lua module interface
-function generator.generate_lua_module_code(parser_name, start_rule)
+function generator.generate_lua_module_code(parser_name, start_rule, cmt_codes)
+  cmt_codes = cmt_codes or {}
+  local cmt_init = #cmt_codes > 0 and "__cmt_init(L);" or ""
+
   return template_code([[
 // --- Lua Module Interface ---
 
@@ -1098,28 +1252,31 @@ static const struct luaL_Reg $PARSER_NAME$_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
   // Lua 5.2+ uses luaL_setfuncs
   int luaopen_$PARSER_NAME$(lua_State *L) {
+    $CMT_INIT$
     luaL_newlib(L, $PARSER_NAME$_module); // Creates table and registers functions
     return 1;
   }
 #else
   // Lua 5.1 uses luaL_register
   int luaopen_$PARSER_NAME$(lua_State *L) {
+    $CMT_INIT$
     luaL_register(L, "$PARSER_NAME$", $PARSER_NAME$_module); // Registers functions in global table (or package table)
     return 1;
   }
 #endif
 ]], {
   PARSER_NAME = parser_name,
-  START_RULE = start_rule
+  START_RULE = start_rule,
+  CMT_INIT = cmt_init
 })
 end
 
 -- Generate the final combined parser main C code
-function generator.generate_parser_main(parser_name, start_rule)
+function generator.generate_parser_main(parser_name, start_rule, cmt_codes)
   -- core C functions
   local c_core_code = generator.generate_c_core_functions(parser_name, start_rule)
   -- Lua module interface
-  local lua_module_code = generator.generate_lua_module_code(parser_name, start_rule)
+  local lua_module_code = generator.generate_lua_module_code(parser_name, start_rule, cmt_codes)
 
   return c_core_code .. "\n" .. lua_module_code
 end

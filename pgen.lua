@@ -109,6 +109,16 @@ function pgen.Cmb(name)
   return pattern(types.Cmb, nil, name)
 end
 
+-- Match-time capture (evaluates Lua code during matching)
+function pgen.Cmt(patt, code)
+  assert(type(code) == "string", "Cmt requires a string of Lua code")
+  return make{
+    type = types.Cmt,
+    value = coerce_pattern(patt),
+    code = code
+  }
+end
+
 function mt.__add(a, b)
   return make{
     type = "choice",

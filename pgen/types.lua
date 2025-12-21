@@ -10,7 +10,8 @@ local types = {
   L = 9,
   Cg = 10,
   Cn = 11,
-  Cmb = 12
+  Cmb = 12,
+  Cmt = 13
 }
 
 return types
