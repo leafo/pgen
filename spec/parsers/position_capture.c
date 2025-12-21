@@ -25,15 +25,15 @@ typedef struct {
   int stack_size;
 } ParserPosition;
 
-#define REMEMBER_POSITION(parser, pos) \
-  ParserPosition pos;                  \
-  (pos).pos = (parser)->pos;           \
-  (pos).stack_size = lua_gettop((parser)->L);
+#define REMEMBER_POSITION(parser, pp) \
+  ParserPosition pp;                  \
+  (pp).pos = (parser)->pos;           \
+  (pp).stack_size = lua_gettop((parser)->L);
 
 // Restore parser position
-#define RESTORE_POSITION(parser, pos) \
-  (parser)->pos = (pos).pos;          \
-  lua_settop((parser)->L, (pos).stack_size);
+#define RESTORE_POSITION(parser, pp) \
+  (parser)->pos = (pp).pos;          \
+  lua_settop((parser)->L, (pp).stack_size);
 
 #ifdef PGEN_DEBUG
 static void dumpstack(lua_State *L) {
@@ -68,127 +68,13 @@ static bool is_cg_sentinel(void *ptr) {
 }
 
 // Forward declarations
+static bool parse_list(Parser *parser);
 static bool parse_identifier(Parser *parser);
 static bool parse_item(Parser *parser);
-static bool parse_list(Parser *parser);
 static bool parse_item_with_pos(Parser *parser);
 static bool parse_ws(Parser *parser);
 
 // Rule functions
-static bool parse_identifier(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "identifier", start);
-#endif
-
-  { // At least 1 repetitions
-    REMEMBER_POSITION(parser, pos);
-    size_t rep_count = 0;
-
-    while (true) {
-      {   // Choice
-        { // Match character range: "az"
-          if (parser->pos < parser->input_len &&
-              ((parser->input[parser->pos] >= 97 && parser->input[parser->pos] <= 122))) {
-            parser->pos++;
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected character in ranges ["
-                                           "a"
-                                           " - "
-                                           "z"
-                                           "] at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
-          }
-        }
-
-        if (!parser->success) {
-          parser->success = true;
-          { // Match character range: "AZ"
-            if (parser->pos < parser->input_len &&
-                ((parser->input[parser->pos] >= 65 && parser->input[parser->pos] <= 90))) {
-              parser->pos++;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected character in ranges ["
-                                             "A"
-                                             " - "
-                                             "Z"
-                                             "] at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
-        }
-      }
-
-      if (!parser->success) {
-        break;
-      }
-
-      rep_count += 1;
-    }
-
-    if (rep_count >= 1) {
-      parser->success = true;
-    } else {
-      RESTORE_POSITION(parser, pos);
-#ifdef PGEN_ERRORS
-      sprintf(parser->error_message, "Expected 1 repetitions at position %zu", parser->pos);
-#endif
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "identifier", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "identifier", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_item(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "item", start);
-#endif
-
-  { // Capture
-    size_t start_pos = parser->pos;
-    parse_identifier(parser);
-
-    if (parser->success) {
-      size_t capture_length = parser->pos - start_pos;
-      // TODO: ensure stack has enough space for push
-      lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "item", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "item", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
 static bool parse_list(Parser *parser) {
   size_t start = parser->pos;
 
@@ -306,6 +192,120 @@ static bool parse_list(Parser *parser) {
     fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "list", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_identifier(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "identifier", start);
+#endif
+
+  { // At least 1 repetitions
+    REMEMBER_POSITION(parser, pos);
+    size_t rep_count = 0;
+
+    while (true) {
+      {   // Choice
+        { // Match character range: "az"
+          if (parser->pos < parser->input_len &&
+              ((parser->input[parser->pos] >= 97 && parser->input[parser->pos] <= 122))) {
+            parser->pos++;
+          } else {
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Expected character in ranges ["
+                                           "a"
+                                           " - "
+                                           "z"
+                                           "] at position %zu",
+                    parser->pos);
+#endif
+            parser->success = false;
+          }
+        }
+
+        if (!parser->success) {
+          parser->success = true;
+          { // Match character range: "AZ"
+            if (parser->pos < parser->input_len &&
+                ((parser->input[parser->pos] >= 65 && parser->input[parser->pos] <= 90))) {
+              parser->pos++;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected character in ranges ["
+                                             "A"
+                                             " - "
+                                             "Z"
+                                             "] at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+        }
+      }
+
+      if (!parser->success) {
+        break;
+      }
+
+      rep_count += 1;
+    }
+
+    if (rep_count >= 1) {
+      parser->success = true;
+    } else {
+      RESTORE_POSITION(parser, pos);
+#ifdef PGEN_ERRORS
+      sprintf(parser->error_message, "Expected 1 repetitions at position %zu", parser->pos);
+#endif
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "identifier", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "identifier", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_item(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "item", start);
+#endif
+
+  { // Capture
+    size_t start_pos = parser->pos;
+    parse_identifier(parser);
+
+    if (parser->success) {
+      size_t capture_length = parser->pos - start_pos;
+      // TODO: ensure stack has enough space for push
+      lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "item", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "item", parser->pos);
   }
   parser->depth -= 1;
 #endif

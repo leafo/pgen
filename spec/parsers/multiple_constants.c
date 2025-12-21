@@ -25,15 +25,15 @@ typedef struct {
   int stack_size;
 } ParserPosition;
 
-#define REMEMBER_POSITION(parser, pos) \
-  ParserPosition pos;                  \
-  (pos).pos = (parser)->pos;           \
-  (pos).stack_size = lua_gettop((parser)->L);
+#define REMEMBER_POSITION(parser, pp) \
+  ParserPosition pp;                  \
+  (pp).pos = (parser)->pos;           \
+  (pp).stack_size = lua_gettop((parser)->L);
 
 // Restore parser position
-#define RESTORE_POSITION(parser, pos) \
-  (parser)->pos = (pos).pos;          \
-  lua_settop((parser)->L, (pos).stack_size);
+#define RESTORE_POSITION(parser, pp) \
+  (parser)->pos = (pp).pos;          \
+  lua_settop((parser)->L, (pp).stack_size);
 
 #ifdef PGEN_DEBUG
 static void dumpstack(lua_State *L) {

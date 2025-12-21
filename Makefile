@@ -1,7 +1,8 @@
-.PHONY: test busted generate-spec-parsers
+.PHONY: test busted generate-spec-parsers clean-spec-parsers
 .SECONDARY:
 
 CLANG_FORMAT_ARGS = -style="{ColumnLimit: 0}"
+PGEN_LUA_FILES = pgen.lua $(wildcard pgen/*.lua)
 
 test: calc_parser.so
 	lua5.1 test.lua
@@ -23,8 +24,11 @@ parser.so: examples/numbers.lua
 
 generate-spec-parsers: $(patsubst spec/parsers/%.lua, spec/parsers/%.so, $(wildcard spec/parsers/*.lua))
 
-spec/parsers/%.c: spec/parsers/%.lua pgen/generator.lua
-	./pgen_cli.lua -o $@ -n $* $< --pgen-errors
+clean-spec-parsers:
+	rm spec/parsers/*.{c,so}
+
+spec/parsers/%.c: spec/parsers/%.lua $(PGEN_LUA_FILES)
+	./pgen_cli.lua --no-optimize -o $@ -n $* $< --pgen-errors
 	clang-format $(CLANG_FORMAT_ARGS) -i $@
 
 spec/parsers/%.so: spec/parsers/%.c

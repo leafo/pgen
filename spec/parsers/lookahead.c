@@ -25,15 +25,15 @@ typedef struct {
   int stack_size;
 } ParserPosition;
 
-#define REMEMBER_POSITION(parser, pos) \
-  ParserPosition pos;                  \
-  (pos).pos = (parser)->pos;           \
-  (pos).stack_size = lua_gettop((parser)->L);
+#define REMEMBER_POSITION(parser, pp) \
+  ParserPosition pp;                  \
+  (pp).pos = (parser)->pos;           \
+  (pp).stack_size = lua_gettop((parser)->L);
 
 // Restore parser position
-#define RESTORE_POSITION(parser, pos) \
-  (parser)->pos = (pos).pos;          \
-  lua_settop((parser)->L, (pos).stack_size);
+#define RESTORE_POSITION(parser, pp) \
+  (parser)->pos = (pp).pos;          \
+  lua_settop((parser)->L, (pp).stack_size);
 
 #ifdef PGEN_DEBUG
 static void dumpstack(lua_State *L) {
@@ -69,8 +69,8 @@ static bool is_cg_sentinel(void *ptr) {
 
 // Forward declarations
 static bool parse_1(Parser *parser);
-static bool parse_positive(Parser *parser);
 static bool parse_negative(Parser *parser);
+static bool parse_positive(Parser *parser);
 
 // Rule functions
 static bool parse_1(Parser *parser) {
@@ -96,6 +96,91 @@ static bool parse_1(Parser *parser) {
     fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "1", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_negative(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "negative", start);
+#endif
+
+  { // Sequence with 2 patterns
+    REMEMBER_POSITION(parser, pos);
+
+    { // Match literal "xyz"
+      if (parser->pos + 3 <= parser->input_len &&
+          memcmp(parser->input + parser->pos, "xyz", 3) == 0) {
+        parser->pos += 3;
+      } else {
+#ifdef PGEN_ERRORS
+        sprintf(parser->error_message, "Expected `"
+                                       "xyz"
+                                       "` at position %zu",
+                parser->pos);
+#endif
+        parser->success = false;
+      }
+    }
+    if (parser->success) {
+      { // Lookahead (match without consuming input)
+        REMEMBER_POSITION(parser, pos);
+
+        { // Negate (only match if pattern fails)
+          REMEMBER_POSITION(parser, pos);
+
+          { // Match literal "def"
+            if (parser->pos + 3 <= parser->input_len &&
+                memcmp(parser->input + parser->pos, "def", 3) == 0) {
+              parser->pos += 3;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected `"
+                                             "def"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+
+          if (parser->success) {
+            // Pattern matched, so negate fails
+            RESTORE_POSITION(parser, pos);
+            parser->success = false;
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
+#endif
+          } else {
+            // Pattern failed, so negate succeeds
+            parser->success = true;
+            RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+          }
+        }
+
+        if (parser->success) {
+          // Pattern matched, but we don't consume any input
+          RESTORE_POSITION(parser, pos);
+        }
+      }
+      if (!parser->success) {
+        RESTORE_POSITION(parser, pos);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "negative", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "negative", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -218,91 +303,6 @@ static bool parse_positive(Parser *parser) {
     fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "positive", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_negative(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "negative", start);
-#endif
-
-  { // Sequence with 2 patterns
-    REMEMBER_POSITION(parser, pos);
-
-    { // Match literal "xyz"
-      if (parser->pos + 3 <= parser->input_len &&
-          memcmp(parser->input + parser->pos, "xyz", 3) == 0) {
-        parser->pos += 3;
-      } else {
-#ifdef PGEN_ERRORS
-        sprintf(parser->error_message, "Expected `"
-                                       "xyz"
-                                       "` at position %zu",
-                parser->pos);
-#endif
-        parser->success = false;
-      }
-    }
-    if (parser->success) {
-      { // Lookahead (match without consuming input)
-        REMEMBER_POSITION(parser, pos);
-
-        { // Negate (only match if pattern fails)
-          REMEMBER_POSITION(parser, pos);
-
-          { // Match literal "def"
-            if (parser->pos + 3 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "def", 3) == 0) {
-              parser->pos += 3;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected `"
-                                             "def"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
-
-          if (parser->success) {
-            // Pattern matched, so negate fails
-            RESTORE_POSITION(parser, pos);
-            parser->success = false;
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
-#endif
-          } else {
-            // Pattern failed, so negate succeeds
-            parser->success = true;
-            RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
-          }
-        }
-
-        if (parser->success) {
-          // Pattern matched, but we don't consume any input
-          RESTORE_POSITION(parser, pos);
-        }
-      }
-      if (!parser->success) {
-        RESTORE_POSITION(parser, pos);
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "negative", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "negative", parser->pos);
   }
   parser->depth -= 1;
 #endif

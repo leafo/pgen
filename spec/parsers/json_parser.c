@@ -25,15 +25,15 @@ typedef struct {
   int stack_size;
 } ParserPosition;
 
-#define REMEMBER_POSITION(parser, pos) \
-  ParserPosition pos;                  \
-  (pos).pos = (parser)->pos;           \
-  (pos).stack_size = lua_gettop((parser)->L);
+#define REMEMBER_POSITION(parser, pp) \
+  ParserPosition pp;                  \
+  (pp).pos = (parser)->pos;           \
+  (pp).stack_size = lua_gettop((parser)->L);
 
 // Restore parser position
-#define RESTORE_POSITION(parser, pos) \
-  (parser)->pos = (pos).pos;          \
-  lua_settop((parser)->L, (pos).stack_size);
+#define RESTORE_POSITION(parser, pp) \
+  (parser)->pos = (pp).pos;          \
+  lua_settop((parser)->L, (pp).stack_size);
 
 #ifdef PGEN_DEBUG
 static void dumpstack(lua_State *L) {
@@ -68,23 +68,895 @@ static bool is_cg_sentinel(void *ptr) {
 }
 
 // Forward declarations
-static bool parse_number(Parser *parser);
-static bool parse_string(Parser *parser);
-static bool parse_ws(Parser *parser);
+static bool parse_json(Parser *parser);
+static bool parse_array(Parser *parser);
+static bool parse_char(Parser *parser);
 static bool parse_escape(Parser *parser);
 static bool parse_false(Parser *parser);
-static bool parse_member(Parser *parser);
 static bool parse_hex(Parser *parser);
-static bool parse_char(Parser *parser);
-static bool parse_true(Parser *parser);
+static bool parse_member(Parser *parser);
+static bool parse_null(Parser *parser);
+static bool parse_number(Parser *parser);
 static bool parse_object(Parser *parser);
+static bool parse_string(Parser *parser);
+static bool parse_true(Parser *parser);
 static bool parse_unicode(Parser *parser);
 static bool parse_value(Parser *parser);
-static bool parse_array(Parser *parser);
-static bool parse_null(Parser *parser);
-static bool parse_json(Parser *parser);
+static bool parse_ws(Parser *parser);
 
 // Rule functions
+static bool parse_json(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "json", start);
+#endif
+
+  { // Sequence with 4 patterns
+    REMEMBER_POSITION(parser, pos);
+
+    parse_ws(parser);
+    if (parser->success) {
+      { // Capture Table
+        int initial_stack_size = lua_gettop(parser->L);
+        { // Sequence with 2 patterns
+          REMEMBER_POSITION(parser, pos);
+
+          { // Constant Capture
+            // A constant capture matches the empty string and produces all given values
+            lua_pushlstring(parser->L, "json", 4);
+          }
+          if (parser->success) {
+            parse_value(parser);
+            if (!parser->success) {
+              RESTORE_POSITION(parser, pos);
+            }
+          }
+        }
+
+        if (parser->success) {
+          int new_stack_size = lua_gettop(parser->L);
+          int items_start = initial_stack_size + 1;
+
+          // Count array items and named items separately
+          // Named captures are sentinel (light userdata) + value pairs
+          int array_count = 0;
+          int named_count = 0;
+          for (int i = items_start; i <= new_stack_size; i++) {
+            if (lua_islightuserdata(parser->L, i) &&
+                is_cg_sentinel(lua_touserdata(parser->L, i))) {
+              named_count++;
+              i++; // skip the value that follows the sentinel
+            } else {
+              array_count++;
+            }
+          }
+
+          lua_createtable(parser->L, array_count, named_count);
+          int table_idx = lua_gettop(parser->L);
+
+          int array_idx = 1;
+          for (int i = items_start; i < table_idx; i++) {
+            if (lua_islightuserdata(parser->L, i)) {
+              void *ptr = lua_touserdata(parser->L, i);
+              if (is_cg_sentinel(ptr)) {
+                // Named capture: sentinel at i, value at i+1
+                const char *name = (const char *)ptr;
+                lua_pushstring(parser->L, name);
+                lua_pushvalue(parser->L, i + 1);
+                lua_rawset(parser->L, table_idx);
+                i++; // skip value
+                continue;
+              }
+            }
+            // Regular capture (including non-sentinel light userdata): add to array part
+            lua_pushvalue(parser->L, i);
+            lua_rawseti(parser->L, table_idx, array_idx++);
+          }
+
+          // Remove all items except table, move table to correct position
+          // Only needed if there were items to remove (items_start <= new_stack_size)
+          if (items_start <= new_stack_size) {
+            lua_replace(parser->L, items_start);
+            lua_settop(parser->L, items_start);
+          }
+        }
+      }
+      if (parser->success) {
+        parse_ws(parser);
+        if (parser->success) {
+          { // Negate (only match if pattern fails)
+            REMEMBER_POSITION(parser, pos);
+
+            { // Match any 1 characters
+              if (parser->pos + 1 <= parser->input_len) {
+                parser->pos += 1;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
+#endif
+                parser->success = false;
+              }
+            }
+
+            if (parser->success) {
+              // Pattern matched, so negate fails
+              RESTORE_POSITION(parser, pos);
+              parser->success = false;
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
+#endif
+            } else {
+              // Pattern failed, so negate succeeds
+              parser->success = true;
+              RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+            }
+          }
+        }
+      }
+      if (!parser->success) {
+        RESTORE_POSITION(parser, pos);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "json", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "json", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_array(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "array", start);
+#endif
+
+  { // Sequence with 5 patterns
+    REMEMBER_POSITION(parser, pos);
+
+    { // Match single character "["
+      if (parser->pos < parser->input_len &&
+          parser->input[parser->pos] == 91) {
+        parser->pos++;
+      } else {
+#ifdef PGEN_ERRORS
+        sprintf(parser->error_message, "Expected character `"
+                                       "["
+                                       "` at position %zu",
+                parser->pos);
+#endif
+        parser->success = false;
+      }
+    }
+    if (parser->success) {
+      parse_ws(parser);
+      if (parser->success) {
+        { // Capture Table
+          int initial_stack_size = lua_gettop(parser->L);
+          { // Sequence with 2 patterns
+            REMEMBER_POSITION(parser, pos);
+
+            { // Constant Capture
+              // A constant capture matches the empty string and produces all given values
+              lua_pushlstring(parser->L, "array", 5);
+            }
+            if (parser->success) {
+              { // At most 1 repetitions
+                size_t rep_count = 0;
+
+                while (rep_count < 1) {
+                  size_t before_pos = parser->pos;
+
+                  {
+                    { // Sequence with 2 patterns
+                      REMEMBER_POSITION(parser, pos);
+
+                      parse_value(parser);
+                      if (parser->success) {
+                        { // Zero or more repetitions
+                          while (true) {
+                            { // Sequence with 4 patterns
+                              REMEMBER_POSITION(parser, pos);
+
+                              parse_ws(parser);
+                              if (parser->success) {
+                                { // Match single character ","
+                                  if (parser->pos < parser->input_len &&
+                                      parser->input[parser->pos] == 44) {
+                                    parser->pos++;
+                                  } else {
+#ifdef PGEN_ERRORS
+                                    sprintf(parser->error_message, "Expected character `"
+                                                                   ","
+                                                                   "` at position %zu",
+                                            parser->pos);
+#endif
+                                    parser->success = false;
+                                  }
+                                }
+                                if (parser->success) {
+                                  parse_ws(parser);
+                                  if (parser->success) {
+                                    parse_value(parser);
+                                  }
+                                }
+                                if (!parser->success) {
+                                  RESTORE_POSITION(parser, pos);
+                                }
+                              }
+                            }
+                            if (!parser->success) {
+                              break;
+                            }
+                          }
+                          parser->success = true;
+                        }
+                        if (!parser->success) {
+                          RESTORE_POSITION(parser, pos);
+                        }
+                      }
+                    }
+                  }
+
+                  if (!parser->success || before_pos == parser->pos) {
+                    // Break on failure or zero-width match
+                    parser->success = true;
+                    break;
+                  }
+
+                  rep_count += 1;
+                }
+              }
+              if (!parser->success) {
+                RESTORE_POSITION(parser, pos);
+              }
+            }
+          }
+
+          if (parser->success) {
+            int new_stack_size = lua_gettop(parser->L);
+            int items_start = initial_stack_size + 1;
+
+            // Count array items and named items separately
+            // Named captures are sentinel (light userdata) + value pairs
+            int array_count = 0;
+            int named_count = 0;
+            for (int i = items_start; i <= new_stack_size; i++) {
+              if (lua_islightuserdata(parser->L, i) &&
+                  is_cg_sentinel(lua_touserdata(parser->L, i))) {
+                named_count++;
+                i++; // skip the value that follows the sentinel
+              } else {
+                array_count++;
+              }
+            }
+
+            lua_createtable(parser->L, array_count, named_count);
+            int table_idx = lua_gettop(parser->L);
+
+            int array_idx = 1;
+            for (int i = items_start; i < table_idx; i++) {
+              if (lua_islightuserdata(parser->L, i)) {
+                void *ptr = lua_touserdata(parser->L, i);
+                if (is_cg_sentinel(ptr)) {
+                  // Named capture: sentinel at i, value at i+1
+                  const char *name = (const char *)ptr;
+                  lua_pushstring(parser->L, name);
+                  lua_pushvalue(parser->L, i + 1);
+                  lua_rawset(parser->L, table_idx);
+                  i++; // skip value
+                  continue;
+                }
+              }
+              // Regular capture (including non-sentinel light userdata): add to array part
+              lua_pushvalue(parser->L, i);
+              lua_rawseti(parser->L, table_idx, array_idx++);
+            }
+
+            // Remove all items except table, move table to correct position
+            // Only needed if there were items to remove (items_start <= new_stack_size)
+            if (items_start <= new_stack_size) {
+              lua_replace(parser->L, items_start);
+              lua_settop(parser->L, items_start);
+            }
+          }
+        }
+        if (parser->success) {
+          parse_ws(parser);
+          if (parser->success) {
+            { // Match single character "]"
+              if (parser->pos < parser->input_len &&
+                  parser->input[parser->pos] == 93) {
+                parser->pos++;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected character `"
+                                               "]"
+                                               "` at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            }
+          }
+        }
+      }
+      if (!parser->success) {
+        RESTORE_POSITION(parser, pos);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "array", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "array", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_char(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "char", start);
+#endif
+
+  { // Choice
+    parse_escape(parser);
+
+    if (!parser->success) {
+      parser->success = true;
+      { // Sequence with 2 patterns
+        REMEMBER_POSITION(parser, pos);
+
+        { // Negate (only match if pattern fails)
+          REMEMBER_POSITION(parser, pos);
+
+          { // Match character set "\"\\"
+            if (parser->pos < parser->input_len) {
+              switch (parser->input[parser->pos]) {
+              case 34: /* "\"" */
+              case 92: /* "\\" */
+                parser->pos++;
+                break;
+              default:
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected one of "
+                                               "\"\\\"\\\\\""
+                                               " at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected one of "
+                                             "\"\\\"\\\\\""
+                                             " at position %zu but reached end of input",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+
+          if (parser->success) {
+            // Pattern matched, so negate fails
+            RESTORE_POSITION(parser, pos);
+            parser->success = false;
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
+#endif
+          } else {
+            // Pattern failed, so negate succeeds
+            parser->success = true;
+            RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+          }
+        }
+        if (parser->success) {
+          { // Match any 1 characters
+            if (parser->pos + 1 <= parser->input_len) {
+              parser->pos += 1;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+          if (!parser->success) {
+            RESTORE_POSITION(parser, pos);
+          }
+        }
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "char", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "char", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_escape(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "escape", start);
+#endif
+
+  { // Sequence with 2 patterns
+    REMEMBER_POSITION(parser, pos);
+
+    { // Match single character "\\"
+      if (parser->pos < parser->input_len &&
+          parser->input[parser->pos] == 92) {
+        parser->pos++;
+      } else {
+#ifdef PGEN_ERRORS
+        sprintf(parser->error_message, "Expected character `"
+                                       "\\\\"
+                                       "` at position %zu",
+                parser->pos);
+#endif
+        parser->success = false;
+      }
+    }
+    if (parser->success) {
+      {   // Choice
+        { // Match character set "\"\\\/bfnrt"
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 34:  /* "\"" */
+            case 92:  /* "\\" */
+            case 47:  /* "/" */
+            case 98:  /* "b" */
+            case 102: /* "f" */
+            case 110: /* "n" */
+            case 114: /* "r" */
+            case 116: /* "t" */
+              parser->pos++;
+              break;
+            default:
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected one of "
+                                             "\"\\\"\\\\/bfnrt\""
+                                             " at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          } else {
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Expected one of "
+                                           "\"\\\"\\\\/bfnrt\""
+                                           " at position %zu but reached end of input",
+                    parser->pos);
+#endif
+            parser->success = false;
+          }
+        }
+
+        if (!parser->success) {
+          parser->success = true;
+          parse_unicode(parser);
+        }
+      }
+      if (!parser->success) {
+        RESTORE_POSITION(parser, pos);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "escape", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "escape", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_false(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "false", start);
+#endif
+
+  { // Sequence with 2 patterns
+    REMEMBER_POSITION(parser, pos);
+
+    { // Match literal "false"
+      if (parser->pos + 5 <= parser->input_len &&
+          memcmp(parser->input + parser->pos, "false", 5) == 0) {
+        parser->pos += 5;
+      } else {
+#ifdef PGEN_ERRORS
+        sprintf(parser->error_message, "Expected `"
+                                       "false"
+                                       "` at position %zu",
+                parser->pos);
+#endif
+        parser->success = false;
+      }
+    }
+    if (parser->success) {
+      { // Capture Table
+        int initial_stack_size = lua_gettop(parser->L);
+        { // Sequence with 2 patterns
+          REMEMBER_POSITION(parser, pos);
+
+          { // Constant Capture
+            // A constant capture matches the empty string and produces all given values
+            lua_pushlstring(parser->L, "boolean", 7);
+          }
+          if (parser->success) {
+            { // Constant Capture
+              // A constant capture matches the empty string and produces all given values
+              lua_pushboolean(parser->L, 0);
+            }
+            if (!parser->success) {
+              RESTORE_POSITION(parser, pos);
+            }
+          }
+        }
+
+        if (parser->success) {
+          int new_stack_size = lua_gettop(parser->L);
+          int items_start = initial_stack_size + 1;
+
+          // Count array items and named items separately
+          // Named captures are sentinel (light userdata) + value pairs
+          int array_count = 0;
+          int named_count = 0;
+          for (int i = items_start; i <= new_stack_size; i++) {
+            if (lua_islightuserdata(parser->L, i) &&
+                is_cg_sentinel(lua_touserdata(parser->L, i))) {
+              named_count++;
+              i++; // skip the value that follows the sentinel
+            } else {
+              array_count++;
+            }
+          }
+
+          lua_createtable(parser->L, array_count, named_count);
+          int table_idx = lua_gettop(parser->L);
+
+          int array_idx = 1;
+          for (int i = items_start; i < table_idx; i++) {
+            if (lua_islightuserdata(parser->L, i)) {
+              void *ptr = lua_touserdata(parser->L, i);
+              if (is_cg_sentinel(ptr)) {
+                // Named capture: sentinel at i, value at i+1
+                const char *name = (const char *)ptr;
+                lua_pushstring(parser->L, name);
+                lua_pushvalue(parser->L, i + 1);
+                lua_rawset(parser->L, table_idx);
+                i++; // skip value
+                continue;
+              }
+            }
+            // Regular capture (including non-sentinel light userdata): add to array part
+            lua_pushvalue(parser->L, i);
+            lua_rawseti(parser->L, table_idx, array_idx++);
+          }
+
+          // Remove all items except table, move table to correct position
+          // Only needed if there were items to remove (items_start <= new_stack_size)
+          if (items_start <= new_stack_size) {
+            lua_replace(parser->L, items_start);
+            lua_settop(parser->L, items_start);
+          }
+        }
+      }
+      if (!parser->success) {
+        RESTORE_POSITION(parser, pos);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "false", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "false", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_hex(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "hex", start);
+#endif
+
+  { // Match character range: "09,af,AF"
+    if (parser->pos < parser->input_len &&
+        ((parser->input[parser->pos] >= 48 && parser->input[parser->pos] <= 57) || (parser->input[parser->pos] >= 97 && parser->input[parser->pos] <= 102) || (parser->input[parser->pos] >= 65 && parser->input[parser->pos] <= 70))) {
+      parser->pos++;
+    } else {
+#ifdef PGEN_ERRORS
+      sprintf(parser->error_message, "Expected character in ranges ["
+                                     "0"
+                                     " - "
+                                     "9"
+                                     ", "
+                                     "a"
+                                     " - "
+                                     "f"
+                                     ", "
+                                     "A"
+                                     " - "
+                                     "F"
+                                     "] at position %zu",
+              parser->pos);
+#endif
+      parser->success = false;
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "hex", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "hex", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_member(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "member", start);
+#endif
+
+  { // Capture Table
+    int initial_stack_size = lua_gettop(parser->L);
+    { // Sequence with 6 patterns
+      REMEMBER_POSITION(parser, pos);
+
+      { // Constant Capture
+        // A constant capture matches the empty string and produces all given values
+        lua_pushlstring(parser->L, "member", 6);
+      }
+      if (parser->success) {
+        parse_string(parser);
+        if (parser->success) {
+          parse_ws(parser);
+          if (parser->success) {
+            { // Match single character ":"
+              if (parser->pos < parser->input_len &&
+                  parser->input[parser->pos] == 58) {
+                parser->pos++;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected character `"
+                                               ":"
+                                               "` at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            }
+            if (parser->success) {
+              parse_ws(parser);
+              if (parser->success) {
+                parse_value(parser);
+              }
+            }
+          }
+        }
+        if (!parser->success) {
+          RESTORE_POSITION(parser, pos);
+        }
+      }
+    }
+
+    if (parser->success) {
+      int new_stack_size = lua_gettop(parser->L);
+      int items_start = initial_stack_size + 1;
+
+      // Count array items and named items separately
+      // Named captures are sentinel (light userdata) + value pairs
+      int array_count = 0;
+      int named_count = 0;
+      for (int i = items_start; i <= new_stack_size; i++) {
+        if (lua_islightuserdata(parser->L, i) &&
+            is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          named_count++;
+          i++; // skip the value that follows the sentinel
+        } else {
+          array_count++;
+        }
+      }
+
+      lua_createtable(parser->L, array_count, named_count);
+      int table_idx = lua_gettop(parser->L);
+
+      int array_idx = 1;
+      for (int i = items_start; i < table_idx; i++) {
+        if (lua_islightuserdata(parser->L, i)) {
+          void *ptr = lua_touserdata(parser->L, i);
+          if (is_cg_sentinel(ptr)) {
+            // Named capture: sentinel at i, value at i+1
+            const char *name = (const char *)ptr;
+            lua_pushstring(parser->L, name);
+            lua_pushvalue(parser->L, i + 1);
+            lua_rawset(parser->L, table_idx);
+            i++; // skip value
+            continue;
+          }
+        }
+        // Regular capture (including non-sentinel light userdata): add to array part
+        lua_pushvalue(parser->L, i);
+        lua_rawseti(parser->L, table_idx, array_idx++);
+      }
+
+      // Remove all items except table, move table to correct position
+      // Only needed if there were items to remove (items_start <= new_stack_size)
+      if (items_start <= new_stack_size) {
+        lua_replace(parser->L, items_start);
+        lua_settop(parser->L, items_start);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "member", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "member", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_null(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "null", start);
+#endif
+
+  { // Sequence with 2 patterns
+    REMEMBER_POSITION(parser, pos);
+
+    { // Match literal "null"
+      if (parser->pos + 4 <= parser->input_len &&
+          memcmp(parser->input + parser->pos, "null", 4) == 0) {
+        parser->pos += 4;
+      } else {
+#ifdef PGEN_ERRORS
+        sprintf(parser->error_message, "Expected `"
+                                       "null"
+                                       "` at position %zu",
+                parser->pos);
+#endif
+        parser->success = false;
+      }
+    }
+    if (parser->success) {
+      { // Capture Table
+        int initial_stack_size = lua_gettop(parser->L);
+        { // Constant Capture
+          // A constant capture matches the empty string and produces all given values
+          lua_pushlstring(parser->L, "null", 4);
+        }
+
+        if (parser->success) {
+          int new_stack_size = lua_gettop(parser->L);
+          int items_start = initial_stack_size + 1;
+
+          // Count array items and named items separately
+          // Named captures are sentinel (light userdata) + value pairs
+          int array_count = 0;
+          int named_count = 0;
+          for (int i = items_start; i <= new_stack_size; i++) {
+            if (lua_islightuserdata(parser->L, i) &&
+                is_cg_sentinel(lua_touserdata(parser->L, i))) {
+              named_count++;
+              i++; // skip the value that follows the sentinel
+            } else {
+              array_count++;
+            }
+          }
+
+          lua_createtable(parser->L, array_count, named_count);
+          int table_idx = lua_gettop(parser->L);
+
+          int array_idx = 1;
+          for (int i = items_start; i < table_idx; i++) {
+            if (lua_islightuserdata(parser->L, i)) {
+              void *ptr = lua_touserdata(parser->L, i);
+              if (is_cg_sentinel(ptr)) {
+                // Named capture: sentinel at i, value at i+1
+                const char *name = (const char *)ptr;
+                lua_pushstring(parser->L, name);
+                lua_pushvalue(parser->L, i + 1);
+                lua_rawset(parser->L, table_idx);
+                i++; // skip value
+                continue;
+              }
+            }
+            // Regular capture (including non-sentinel light userdata): add to array part
+            lua_pushvalue(parser->L, i);
+            lua_rawseti(parser->L, table_idx, array_idx++);
+          }
+
+          // Remove all items except table, move table to correct position
+          // Only needed if there were items to remove (items_start <= new_stack_size)
+          if (items_start <= new_stack_size) {
+            lua_replace(parser->L, items_start);
+            lua_settop(parser->L, items_start);
+          }
+        }
+      }
+      if (!parser->success) {
+        RESTORE_POSITION(parser, pos);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "null", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "null", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
 static bool parse_number(Parser *parser) {
   size_t start = parser->pos;
 
@@ -510,766 +1382,6 @@ static bool parse_number(Parser *parser) {
   return parser->success;
 }
 
-static bool parse_string(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "string", start);
-#endif
-
-  { // Sequence with 3 patterns
-    REMEMBER_POSITION(parser, pos);
-
-    { // Match single character "\""
-      if (parser->pos < parser->input_len &&
-          parser->input[parser->pos] == 34) {
-        parser->pos++;
-      } else {
-#ifdef PGEN_ERRORS
-        sprintf(parser->error_message, "Expected character `"
-                                       "\\\""
-                                       "` at position %zu",
-                parser->pos);
-#endif
-        parser->success = false;
-      }
-    }
-    if (parser->success) {
-      { // Capture Table
-        int initial_stack_size = lua_gettop(parser->L);
-        { // Sequence with 2 patterns
-          REMEMBER_POSITION(parser, pos);
-
-          { // Constant Capture
-            // A constant capture matches the empty string and produces all given values
-            lua_pushlstring(parser->L, "string", 6);
-          }
-          if (parser->success) {
-            { // Capture
-              size_t start_pos = parser->pos;
-              { // Zero or more repetitions
-                while (true) {
-                  parse_char(parser);
-                  if (!parser->success) {
-                    break;
-                  }
-                }
-                parser->success = true;
-              }
-
-              if (parser->success) {
-                size_t capture_length = parser->pos - start_pos;
-                // TODO: ensure stack has enough space for push
-                lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-              }
-            }
-            if (!parser->success) {
-              RESTORE_POSITION(parser, pos);
-            }
-          }
-        }
-
-        if (parser->success) {
-          int new_stack_size = lua_gettop(parser->L);
-          int items_start = initial_stack_size + 1;
-
-          // Count array items and named items separately
-          // Named captures are sentinel (light userdata) + value pairs
-          int array_count = 0;
-          int named_count = 0;
-          for (int i = items_start; i <= new_stack_size; i++) {
-            if (lua_islightuserdata(parser->L, i) &&
-                is_cg_sentinel(lua_touserdata(parser->L, i))) {
-              named_count++;
-              i++; // skip the value that follows the sentinel
-            } else {
-              array_count++;
-            }
-          }
-
-          lua_createtable(parser->L, array_count, named_count);
-          int table_idx = lua_gettop(parser->L);
-
-          int array_idx = 1;
-          for (int i = items_start; i < table_idx; i++) {
-            if (lua_islightuserdata(parser->L, i)) {
-              void *ptr = lua_touserdata(parser->L, i);
-              if (is_cg_sentinel(ptr)) {
-                // Named capture: sentinel at i, value at i+1
-                const char *name = (const char *)ptr;
-                lua_pushstring(parser->L, name);
-                lua_pushvalue(parser->L, i + 1);
-                lua_rawset(parser->L, table_idx);
-                i++; // skip value
-                continue;
-              }
-            }
-            // Regular capture (including non-sentinel light userdata): add to array part
-            lua_pushvalue(parser->L, i);
-            lua_rawseti(parser->L, table_idx, array_idx++);
-          }
-
-          // Remove all items except table, move table to correct position
-          // Only needed if there were items to remove (items_start <= new_stack_size)
-          if (items_start <= new_stack_size) {
-            lua_replace(parser->L, items_start);
-            lua_settop(parser->L, items_start);
-          }
-        }
-      }
-      if (parser->success) {
-        { // Match single character "\""
-          if (parser->pos < parser->input_len &&
-              parser->input[parser->pos] == 34) {
-            parser->pos++;
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected character `"
-                                           "\\\""
-                                           "` at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
-          }
-        }
-      }
-      if (!parser->success) {
-        RESTORE_POSITION(parser, pos);
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "string", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "string", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_ws(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "ws", start);
-#endif
-
-  { // Zero or more repetitions
-    while (true) {
-      { // Match character set " \t\n\r"
-        if (parser->pos < parser->input_len) {
-          switch (parser->input[parser->pos]) {
-          case 32: /* " " */
-          case 9:  /* "\t" */
-          case 10: /* "\n" */
-          case 13: /* "\r" */
-            parser->pos++;
-            break;
-          default:
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected one of "
-                                           "\" \\t\\n\\r\""
-                                           " at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
-          }
-        } else {
-#ifdef PGEN_ERRORS
-          sprintf(parser->error_message, "Expected one of "
-                                         "\" \\t\\n\\r\""
-                                         " at position %zu but reached end of input",
-                  parser->pos);
-#endif
-          parser->success = false;
-        }
-      }
-      if (!parser->success) {
-        break;
-      }
-    }
-    parser->success = true;
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "ws", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "ws", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_escape(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "escape", start);
-#endif
-
-  { // Sequence with 2 patterns
-    REMEMBER_POSITION(parser, pos);
-
-    { // Match single character "\\"
-      if (parser->pos < parser->input_len &&
-          parser->input[parser->pos] == 92) {
-        parser->pos++;
-      } else {
-#ifdef PGEN_ERRORS
-        sprintf(parser->error_message, "Expected character `"
-                                       "\\\\"
-                                       "` at position %zu",
-                parser->pos);
-#endif
-        parser->success = false;
-      }
-    }
-    if (parser->success) {
-      {   // Choice
-        { // Match character set "\"\\\/bfnrt"
-          if (parser->pos < parser->input_len) {
-            switch (parser->input[parser->pos]) {
-            case 34:  /* "\"" */
-            case 92:  /* "\\" */
-            case 47:  /* "/" */
-            case 98:  /* "b" */
-            case 102: /* "f" */
-            case 110: /* "n" */
-            case 114: /* "r" */
-            case 116: /* "t" */
-              parser->pos++;
-              break;
-            default:
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected one of "
-                                             "\"\\\"\\\\/bfnrt\""
-                                             " at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected one of "
-                                           "\"\\\"\\\\/bfnrt\""
-                                           " at position %zu but reached end of input",
-                    parser->pos);
-#endif
-            parser->success = false;
-          }
-        }
-
-        if (!parser->success) {
-          parser->success = true;
-          parse_unicode(parser);
-        }
-      }
-      if (!parser->success) {
-        RESTORE_POSITION(parser, pos);
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "escape", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "escape", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_false(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "false", start);
-#endif
-
-  { // Sequence with 2 patterns
-    REMEMBER_POSITION(parser, pos);
-
-    { // Match literal "false"
-      if (parser->pos + 5 <= parser->input_len &&
-          memcmp(parser->input + parser->pos, "false", 5) == 0) {
-        parser->pos += 5;
-      } else {
-#ifdef PGEN_ERRORS
-        sprintf(parser->error_message, "Expected `"
-                                       "false"
-                                       "` at position %zu",
-                parser->pos);
-#endif
-        parser->success = false;
-      }
-    }
-    if (parser->success) {
-      { // Capture Table
-        int initial_stack_size = lua_gettop(parser->L);
-        { // Sequence with 2 patterns
-          REMEMBER_POSITION(parser, pos);
-
-          { // Constant Capture
-            // A constant capture matches the empty string and produces all given values
-            lua_pushlstring(parser->L, "boolean", 7);
-          }
-          if (parser->success) {
-            { // Constant Capture
-              // A constant capture matches the empty string and produces all given values
-              lua_pushboolean(parser->L, 0);
-            }
-            if (!parser->success) {
-              RESTORE_POSITION(parser, pos);
-            }
-          }
-        }
-
-        if (parser->success) {
-          int new_stack_size = lua_gettop(parser->L);
-          int items_start = initial_stack_size + 1;
-
-          // Count array items and named items separately
-          // Named captures are sentinel (light userdata) + value pairs
-          int array_count = 0;
-          int named_count = 0;
-          for (int i = items_start; i <= new_stack_size; i++) {
-            if (lua_islightuserdata(parser->L, i) &&
-                is_cg_sentinel(lua_touserdata(parser->L, i))) {
-              named_count++;
-              i++; // skip the value that follows the sentinel
-            } else {
-              array_count++;
-            }
-          }
-
-          lua_createtable(parser->L, array_count, named_count);
-          int table_idx = lua_gettop(parser->L);
-
-          int array_idx = 1;
-          for (int i = items_start; i < table_idx; i++) {
-            if (lua_islightuserdata(parser->L, i)) {
-              void *ptr = lua_touserdata(parser->L, i);
-              if (is_cg_sentinel(ptr)) {
-                // Named capture: sentinel at i, value at i+1
-                const char *name = (const char *)ptr;
-                lua_pushstring(parser->L, name);
-                lua_pushvalue(parser->L, i + 1);
-                lua_rawset(parser->L, table_idx);
-                i++; // skip value
-                continue;
-              }
-            }
-            // Regular capture (including non-sentinel light userdata): add to array part
-            lua_pushvalue(parser->L, i);
-            lua_rawseti(parser->L, table_idx, array_idx++);
-          }
-
-          // Remove all items except table, move table to correct position
-          // Only needed if there were items to remove (items_start <= new_stack_size)
-          if (items_start <= new_stack_size) {
-            lua_replace(parser->L, items_start);
-            lua_settop(parser->L, items_start);
-          }
-        }
-      }
-      if (!parser->success) {
-        RESTORE_POSITION(parser, pos);
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "false", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "false", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_member(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "member", start);
-#endif
-
-  { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
-    { // Sequence with 6 patterns
-      REMEMBER_POSITION(parser, pos);
-
-      { // Constant Capture
-        // A constant capture matches the empty string and produces all given values
-        lua_pushlstring(parser->L, "member", 6);
-      }
-      if (parser->success) {
-        parse_string(parser);
-        if (parser->success) {
-          parse_ws(parser);
-          if (parser->success) {
-            { // Match single character ":"
-              if (parser->pos < parser->input_len &&
-                  parser->input[parser->pos] == 58) {
-                parser->pos++;
-              } else {
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected character `"
-                                               ":"
-                                               "` at position %zu",
-                        parser->pos);
-#endif
-                parser->success = false;
-              }
-            }
-            if (parser->success) {
-              parse_ws(parser);
-              if (parser->success) {
-                parse_value(parser);
-              }
-            }
-          }
-        }
-        if (!parser->success) {
-          RESTORE_POSITION(parser, pos);
-        }
-      }
-    }
-
-    if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
-      int items_start = initial_stack_size + 1;
-
-      // Count array items and named items separately
-      // Named captures are sentinel (light userdata) + value pairs
-      int array_count = 0;
-      int named_count = 0;
-      for (int i = items_start; i <= new_stack_size; i++) {
-        if (lua_islightuserdata(parser->L, i) &&
-            is_cg_sentinel(lua_touserdata(parser->L, i))) {
-          named_count++;
-          i++; // skip the value that follows the sentinel
-        } else {
-          array_count++;
-        }
-      }
-
-      lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
-
-      int array_idx = 1;
-      for (int i = items_start; i < table_idx; i++) {
-        if (lua_islightuserdata(parser->L, i)) {
-          void *ptr = lua_touserdata(parser->L, i);
-          if (is_cg_sentinel(ptr)) {
-            // Named capture: sentinel at i, value at i+1
-            const char *name = (const char *)ptr;
-            lua_pushstring(parser->L, name);
-            lua_pushvalue(parser->L, i + 1);
-            lua_rawset(parser->L, table_idx);
-            i++; // skip value
-            continue;
-          }
-        }
-        // Regular capture (including non-sentinel light userdata): add to array part
-        lua_pushvalue(parser->L, i);
-        lua_rawseti(parser->L, table_idx, array_idx++);
-      }
-
-      // Remove all items except table, move table to correct position
-      // Only needed if there were items to remove (items_start <= new_stack_size)
-      if (items_start <= new_stack_size) {
-        lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "member", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "member", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_hex(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "hex", start);
-#endif
-
-  { // Match character range: "09,af,AF"
-    if (parser->pos < parser->input_len &&
-        ((parser->input[parser->pos] >= 48 && parser->input[parser->pos] <= 57) || (parser->input[parser->pos] >= 97 && parser->input[parser->pos] <= 102) || (parser->input[parser->pos] >= 65 && parser->input[parser->pos] <= 70))) {
-      parser->pos++;
-    } else {
-#ifdef PGEN_ERRORS
-      sprintf(parser->error_message, "Expected character in ranges ["
-                                     "0"
-                                     " - "
-                                     "9"
-                                     ", "
-                                     "a"
-                                     " - "
-                                     "f"
-                                     ", "
-                                     "A"
-                                     " - "
-                                     "F"
-                                     "] at position %zu",
-              parser->pos);
-#endif
-      parser->success = false;
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "hex", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "hex", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_char(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "char", start);
-#endif
-
-  { // Choice
-    parse_escape(parser);
-
-    if (!parser->success) {
-      parser->success = true;
-      { // Sequence with 2 patterns
-        REMEMBER_POSITION(parser, pos);
-
-        { // Negate (only match if pattern fails)
-          REMEMBER_POSITION(parser, pos);
-
-          { // Match character set "\"\\"
-            if (parser->pos < parser->input_len) {
-              switch (parser->input[parser->pos]) {
-              case 34: /* "\"" */
-              case 92: /* "\\" */
-                parser->pos++;
-                break;
-              default:
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected one of "
-                                               "\"\\\"\\\\\""
-                                               " at position %zu",
-                        parser->pos);
-#endif
-                parser->success = false;
-              }
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected one of "
-                                             "\"\\\"\\\\\""
-                                             " at position %zu but reached end of input",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
-
-          if (parser->success) {
-            // Pattern matched, so negate fails
-            RESTORE_POSITION(parser, pos);
-            parser->success = false;
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
-#endif
-          } else {
-            // Pattern failed, so negate succeeds
-            parser->success = true;
-            RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
-          }
-        }
-        if (parser->success) {
-          { // Match any 1 characters
-            if (parser->pos + 1 <= parser->input_len) {
-              parser->pos += 1;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
-          if (!parser->success) {
-            RESTORE_POSITION(parser, pos);
-          }
-        }
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "char", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "char", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_true(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "true", start);
-#endif
-
-  { // Sequence with 2 patterns
-    REMEMBER_POSITION(parser, pos);
-
-    { // Match literal "true"
-      if (parser->pos + 4 <= parser->input_len &&
-          memcmp(parser->input + parser->pos, "true", 4) == 0) {
-        parser->pos += 4;
-      } else {
-#ifdef PGEN_ERRORS
-        sprintf(parser->error_message, "Expected `"
-                                       "true"
-                                       "` at position %zu",
-                parser->pos);
-#endif
-        parser->success = false;
-      }
-    }
-    if (parser->success) {
-      { // Capture Table
-        int initial_stack_size = lua_gettop(parser->L);
-        { // Sequence with 2 patterns
-          REMEMBER_POSITION(parser, pos);
-
-          { // Constant Capture
-            // A constant capture matches the empty string and produces all given values
-            lua_pushlstring(parser->L, "boolean", 7);
-          }
-          if (parser->success) {
-            { // Constant Capture
-              // A constant capture matches the empty string and produces all given values
-              lua_pushboolean(parser->L, 1);
-            }
-            if (!parser->success) {
-              RESTORE_POSITION(parser, pos);
-            }
-          }
-        }
-
-        if (parser->success) {
-          int new_stack_size = lua_gettop(parser->L);
-          int items_start = initial_stack_size + 1;
-
-          // Count array items and named items separately
-          // Named captures are sentinel (light userdata) + value pairs
-          int array_count = 0;
-          int named_count = 0;
-          for (int i = items_start; i <= new_stack_size; i++) {
-            if (lua_islightuserdata(parser->L, i) &&
-                is_cg_sentinel(lua_touserdata(parser->L, i))) {
-              named_count++;
-              i++; // skip the value that follows the sentinel
-            } else {
-              array_count++;
-            }
-          }
-
-          lua_createtable(parser->L, array_count, named_count);
-          int table_idx = lua_gettop(parser->L);
-
-          int array_idx = 1;
-          for (int i = items_start; i < table_idx; i++) {
-            if (lua_islightuserdata(parser->L, i)) {
-              void *ptr = lua_touserdata(parser->L, i);
-              if (is_cg_sentinel(ptr)) {
-                // Named capture: sentinel at i, value at i+1
-                const char *name = (const char *)ptr;
-                lua_pushstring(parser->L, name);
-                lua_pushvalue(parser->L, i + 1);
-                lua_rawset(parser->L, table_idx);
-                i++; // skip value
-                continue;
-              }
-            }
-            // Regular capture (including non-sentinel light userdata): add to array part
-            lua_pushvalue(parser->L, i);
-            lua_rawseti(parser->L, table_idx, array_idx++);
-          }
-
-          // Remove all items except table, move table to correct position
-          // Only needed if there were items to remove (items_start <= new_stack_size)
-          if (items_start <= new_stack_size) {
-            lua_replace(parser->L, items_start);
-            lua_settop(parser->L, items_start);
-          }
-        }
-      }
-      if (!parser->success) {
-        RESTORE_POSITION(parser, pos);
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "true", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "true", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
 static bool parse_object(Parser *parser) {
   size_t start = parser->pos;
 
@@ -1467,6 +1579,262 @@ static bool parse_object(Parser *parser) {
   return parser->success;
 }
 
+static bool parse_string(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "string", start);
+#endif
+
+  { // Sequence with 3 patterns
+    REMEMBER_POSITION(parser, pos);
+
+    { // Match single character "\""
+      if (parser->pos < parser->input_len &&
+          parser->input[parser->pos] == 34) {
+        parser->pos++;
+      } else {
+#ifdef PGEN_ERRORS
+        sprintf(parser->error_message, "Expected character `"
+                                       "\\\""
+                                       "` at position %zu",
+                parser->pos);
+#endif
+        parser->success = false;
+      }
+    }
+    if (parser->success) {
+      { // Capture Table
+        int initial_stack_size = lua_gettop(parser->L);
+        { // Sequence with 2 patterns
+          REMEMBER_POSITION(parser, pos);
+
+          { // Constant Capture
+            // A constant capture matches the empty string and produces all given values
+            lua_pushlstring(parser->L, "string", 6);
+          }
+          if (parser->success) {
+            { // Capture
+              size_t start_pos = parser->pos;
+              { // Zero or more repetitions
+                while (true) {
+                  parse_char(parser);
+                  if (!parser->success) {
+                    break;
+                  }
+                }
+                parser->success = true;
+              }
+
+              if (parser->success) {
+                size_t capture_length = parser->pos - start_pos;
+                // TODO: ensure stack has enough space for push
+                lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+              }
+            }
+            if (!parser->success) {
+              RESTORE_POSITION(parser, pos);
+            }
+          }
+        }
+
+        if (parser->success) {
+          int new_stack_size = lua_gettop(parser->L);
+          int items_start = initial_stack_size + 1;
+
+          // Count array items and named items separately
+          // Named captures are sentinel (light userdata) + value pairs
+          int array_count = 0;
+          int named_count = 0;
+          for (int i = items_start; i <= new_stack_size; i++) {
+            if (lua_islightuserdata(parser->L, i) &&
+                is_cg_sentinel(lua_touserdata(parser->L, i))) {
+              named_count++;
+              i++; // skip the value that follows the sentinel
+            } else {
+              array_count++;
+            }
+          }
+
+          lua_createtable(parser->L, array_count, named_count);
+          int table_idx = lua_gettop(parser->L);
+
+          int array_idx = 1;
+          for (int i = items_start; i < table_idx; i++) {
+            if (lua_islightuserdata(parser->L, i)) {
+              void *ptr = lua_touserdata(parser->L, i);
+              if (is_cg_sentinel(ptr)) {
+                // Named capture: sentinel at i, value at i+1
+                const char *name = (const char *)ptr;
+                lua_pushstring(parser->L, name);
+                lua_pushvalue(parser->L, i + 1);
+                lua_rawset(parser->L, table_idx);
+                i++; // skip value
+                continue;
+              }
+            }
+            // Regular capture (including non-sentinel light userdata): add to array part
+            lua_pushvalue(parser->L, i);
+            lua_rawseti(parser->L, table_idx, array_idx++);
+          }
+
+          // Remove all items except table, move table to correct position
+          // Only needed if there were items to remove (items_start <= new_stack_size)
+          if (items_start <= new_stack_size) {
+            lua_replace(parser->L, items_start);
+            lua_settop(parser->L, items_start);
+          }
+        }
+      }
+      if (parser->success) {
+        { // Match single character "\""
+          if (parser->pos < parser->input_len &&
+              parser->input[parser->pos] == 34) {
+            parser->pos++;
+          } else {
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Expected character `"
+                                           "\\\""
+                                           "` at position %zu",
+                    parser->pos);
+#endif
+            parser->success = false;
+          }
+        }
+      }
+      if (!parser->success) {
+        RESTORE_POSITION(parser, pos);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "string", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "string", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_true(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "true", start);
+#endif
+
+  { // Sequence with 2 patterns
+    REMEMBER_POSITION(parser, pos);
+
+    { // Match literal "true"
+      if (parser->pos + 4 <= parser->input_len &&
+          memcmp(parser->input + parser->pos, "true", 4) == 0) {
+        parser->pos += 4;
+      } else {
+#ifdef PGEN_ERRORS
+        sprintf(parser->error_message, "Expected `"
+                                       "true"
+                                       "` at position %zu",
+                parser->pos);
+#endif
+        parser->success = false;
+      }
+    }
+    if (parser->success) {
+      { // Capture Table
+        int initial_stack_size = lua_gettop(parser->L);
+        { // Sequence with 2 patterns
+          REMEMBER_POSITION(parser, pos);
+
+          { // Constant Capture
+            // A constant capture matches the empty string and produces all given values
+            lua_pushlstring(parser->L, "boolean", 7);
+          }
+          if (parser->success) {
+            { // Constant Capture
+              // A constant capture matches the empty string and produces all given values
+              lua_pushboolean(parser->L, 1);
+            }
+            if (!parser->success) {
+              RESTORE_POSITION(parser, pos);
+            }
+          }
+        }
+
+        if (parser->success) {
+          int new_stack_size = lua_gettop(parser->L);
+          int items_start = initial_stack_size + 1;
+
+          // Count array items and named items separately
+          // Named captures are sentinel (light userdata) + value pairs
+          int array_count = 0;
+          int named_count = 0;
+          for (int i = items_start; i <= new_stack_size; i++) {
+            if (lua_islightuserdata(parser->L, i) &&
+                is_cg_sentinel(lua_touserdata(parser->L, i))) {
+              named_count++;
+              i++; // skip the value that follows the sentinel
+            } else {
+              array_count++;
+            }
+          }
+
+          lua_createtable(parser->L, array_count, named_count);
+          int table_idx = lua_gettop(parser->L);
+
+          int array_idx = 1;
+          for (int i = items_start; i < table_idx; i++) {
+            if (lua_islightuserdata(parser->L, i)) {
+              void *ptr = lua_touserdata(parser->L, i);
+              if (is_cg_sentinel(ptr)) {
+                // Named capture: sentinel at i, value at i+1
+                const char *name = (const char *)ptr;
+                lua_pushstring(parser->L, name);
+                lua_pushvalue(parser->L, i + 1);
+                lua_rawset(parser->L, table_idx);
+                i++; // skip value
+                continue;
+              }
+            }
+            // Regular capture (including non-sentinel light userdata): add to array part
+            lua_pushvalue(parser->L, i);
+            lua_rawseti(parser->L, table_idx, array_idx++);
+          }
+
+          // Remove all items except table, move table to correct position
+          // Only needed if there were items to remove (items_start <= new_stack_size)
+          if (items_start <= new_stack_size) {
+            lua_replace(parser->L, items_start);
+            lua_settop(parser->L, items_start);
+          }
+        }
+      }
+      if (!parser->success) {
+        RESTORE_POSITION(parser, pos);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "true", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "true", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
 static bool parse_unicode(Parser *parser) {
   size_t start = parser->pos;
 
@@ -1587,425 +1955,57 @@ static bool parse_value(Parser *parser) {
   return parser->success;
 }
 
-static bool parse_array(Parser *parser) {
+static bool parse_ws(Parser *parser) {
   size_t start = parser->pos;
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "array", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "ws", start);
 #endif
 
-  { // Sequence with 5 patterns
-    REMEMBER_POSITION(parser, pos);
-
-    { // Match single character "["
-      if (parser->pos < parser->input_len &&
-          parser->input[parser->pos] == 91) {
-        parser->pos++;
-      } else {
+  { // Zero or more repetitions
+    while (true) {
+      { // Match character set " \t\n\r"
+        if (parser->pos < parser->input_len) {
+          switch (parser->input[parser->pos]) {
+          case 32: /* " " */
+          case 9:  /* "\t" */
+          case 10: /* "\n" */
+          case 13: /* "\r" */
+            parser->pos++;
+            break;
+          default:
 #ifdef PGEN_ERRORS
-        sprintf(parser->error_message, "Expected character `"
-                                       "["
-                                       "` at position %zu",
-                parser->pos);
+            sprintf(parser->error_message, "Expected one of "
+                                           "\" \\t\\n\\r\""
+                                           " at position %zu",
+                    parser->pos);
 #endif
-        parser->success = false;
-      }
-    }
-    if (parser->success) {
-      parse_ws(parser);
-      if (parser->success) {
-        { // Capture Table
-          int initial_stack_size = lua_gettop(parser->L);
-          { // Sequence with 2 patterns
-            REMEMBER_POSITION(parser, pos);
-
-            { // Constant Capture
-              // A constant capture matches the empty string and produces all given values
-              lua_pushlstring(parser->L, "array", 5);
-            }
-            if (parser->success) {
-              { // At most 1 repetitions
-                size_t rep_count = 0;
-
-                while (rep_count < 1) {
-                  size_t before_pos = parser->pos;
-
-                  {
-                    { // Sequence with 2 patterns
-                      REMEMBER_POSITION(parser, pos);
-
-                      parse_value(parser);
-                      if (parser->success) {
-                        { // Zero or more repetitions
-                          while (true) {
-                            { // Sequence with 4 patterns
-                              REMEMBER_POSITION(parser, pos);
-
-                              parse_ws(parser);
-                              if (parser->success) {
-                                { // Match single character ","
-                                  if (parser->pos < parser->input_len &&
-                                      parser->input[parser->pos] == 44) {
-                                    parser->pos++;
-                                  } else {
+            parser->success = false;
+          }
+        } else {
 #ifdef PGEN_ERRORS
-                                    sprintf(parser->error_message, "Expected character `"
-                                                                   ","
-                                                                   "` at position %zu",
-                                            parser->pos);
+          sprintf(parser->error_message, "Expected one of "
+                                         "\" \\t\\n\\r\""
+                                         " at position %zu but reached end of input",
+                  parser->pos);
 #endif
-                                    parser->success = false;
-                                  }
-                                }
-                                if (parser->success) {
-                                  parse_ws(parser);
-                                  if (parser->success) {
-                                    parse_value(parser);
-                                  }
-                                }
-                                if (!parser->success) {
-                                  RESTORE_POSITION(parser, pos);
-                                }
-                              }
-                            }
-                            if (!parser->success) {
-                              break;
-                            }
-                          }
-                          parser->success = true;
-                        }
-                        if (!parser->success) {
-                          RESTORE_POSITION(parser, pos);
-                        }
-                      }
-                    }
-                  }
-
-                  if (!parser->success || before_pos == parser->pos) {
-                    // Break on failure or zero-width match
-                    parser->success = true;
-                    break;
-                  }
-
-                  rep_count += 1;
-                }
-              }
-              if (!parser->success) {
-                RESTORE_POSITION(parser, pos);
-              }
-            }
-          }
-
-          if (parser->success) {
-            int new_stack_size = lua_gettop(parser->L);
-            int items_start = initial_stack_size + 1;
-
-            // Count array items and named items separately
-            // Named captures are sentinel (light userdata) + value pairs
-            int array_count = 0;
-            int named_count = 0;
-            for (int i = items_start; i <= new_stack_size; i++) {
-              if (lua_islightuserdata(parser->L, i) &&
-                  is_cg_sentinel(lua_touserdata(parser->L, i))) {
-                named_count++;
-                i++; // skip the value that follows the sentinel
-              } else {
-                array_count++;
-              }
-            }
-
-            lua_createtable(parser->L, array_count, named_count);
-            int table_idx = lua_gettop(parser->L);
-
-            int array_idx = 1;
-            for (int i = items_start; i < table_idx; i++) {
-              if (lua_islightuserdata(parser->L, i)) {
-                void *ptr = lua_touserdata(parser->L, i);
-                if (is_cg_sentinel(ptr)) {
-                  // Named capture: sentinel at i, value at i+1
-                  const char *name = (const char *)ptr;
-                  lua_pushstring(parser->L, name);
-                  lua_pushvalue(parser->L, i + 1);
-                  lua_rawset(parser->L, table_idx);
-                  i++; // skip value
-                  continue;
-                }
-              }
-              // Regular capture (including non-sentinel light userdata): add to array part
-              lua_pushvalue(parser->L, i);
-              lua_rawseti(parser->L, table_idx, array_idx++);
-            }
-
-            // Remove all items except table, move table to correct position
-            // Only needed if there were items to remove (items_start <= new_stack_size)
-            if (items_start <= new_stack_size) {
-              lua_replace(parser->L, items_start);
-              lua_settop(parser->L, items_start);
-            }
-          }
-        }
-        if (parser->success) {
-          parse_ws(parser);
-          if (parser->success) {
-            { // Match single character "]"
-              if (parser->pos < parser->input_len &&
-                  parser->input[parser->pos] == 93) {
-                parser->pos++;
-              } else {
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected character `"
-                                               "]"
-                                               "` at position %zu",
-                        parser->pos);
-#endif
-                parser->success = false;
-              }
-            }
-          }
+          parser->success = false;
         }
       }
       if (!parser->success) {
-        RESTORE_POSITION(parser, pos);
+        break;
       }
     }
+    parser->success = true;
   }
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "array", start, parser->pos);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "ws", start, parser->pos);
     fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "array", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_null(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "null", start);
-#endif
-
-  { // Sequence with 2 patterns
-    REMEMBER_POSITION(parser, pos);
-
-    { // Match literal "null"
-      if (parser->pos + 4 <= parser->input_len &&
-          memcmp(parser->input + parser->pos, "null", 4) == 0) {
-        parser->pos += 4;
-      } else {
-#ifdef PGEN_ERRORS
-        sprintf(parser->error_message, "Expected `"
-                                       "null"
-                                       "` at position %zu",
-                parser->pos);
-#endif
-        parser->success = false;
-      }
-    }
-    if (parser->success) {
-      { // Capture Table
-        int initial_stack_size = lua_gettop(parser->L);
-        { // Constant Capture
-          // A constant capture matches the empty string and produces all given values
-          lua_pushlstring(parser->L, "null", 4);
-        }
-
-        if (parser->success) {
-          int new_stack_size = lua_gettop(parser->L);
-          int items_start = initial_stack_size + 1;
-
-          // Count array items and named items separately
-          // Named captures are sentinel (light userdata) + value pairs
-          int array_count = 0;
-          int named_count = 0;
-          for (int i = items_start; i <= new_stack_size; i++) {
-            if (lua_islightuserdata(parser->L, i) &&
-                is_cg_sentinel(lua_touserdata(parser->L, i))) {
-              named_count++;
-              i++; // skip the value that follows the sentinel
-            } else {
-              array_count++;
-            }
-          }
-
-          lua_createtable(parser->L, array_count, named_count);
-          int table_idx = lua_gettop(parser->L);
-
-          int array_idx = 1;
-          for (int i = items_start; i < table_idx; i++) {
-            if (lua_islightuserdata(parser->L, i)) {
-              void *ptr = lua_touserdata(parser->L, i);
-              if (is_cg_sentinel(ptr)) {
-                // Named capture: sentinel at i, value at i+1
-                const char *name = (const char *)ptr;
-                lua_pushstring(parser->L, name);
-                lua_pushvalue(parser->L, i + 1);
-                lua_rawset(parser->L, table_idx);
-                i++; // skip value
-                continue;
-              }
-            }
-            // Regular capture (including non-sentinel light userdata): add to array part
-            lua_pushvalue(parser->L, i);
-            lua_rawseti(parser->L, table_idx, array_idx++);
-          }
-
-          // Remove all items except table, move table to correct position
-          // Only needed if there were items to remove (items_start <= new_stack_size)
-          if (items_start <= new_stack_size) {
-            lua_replace(parser->L, items_start);
-            lua_settop(parser->L, items_start);
-          }
-        }
-      }
-      if (!parser->success) {
-        RESTORE_POSITION(parser, pos);
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "null", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "null", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_json(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "json", start);
-#endif
-
-  { // Sequence with 4 patterns
-    REMEMBER_POSITION(parser, pos);
-
-    parse_ws(parser);
-    if (parser->success) {
-      { // Capture Table
-        int initial_stack_size = lua_gettop(parser->L);
-        { // Sequence with 2 patterns
-          REMEMBER_POSITION(parser, pos);
-
-          { // Constant Capture
-            // A constant capture matches the empty string and produces all given values
-            lua_pushlstring(parser->L, "json", 4);
-          }
-          if (parser->success) {
-            parse_value(parser);
-            if (!parser->success) {
-              RESTORE_POSITION(parser, pos);
-            }
-          }
-        }
-
-        if (parser->success) {
-          int new_stack_size = lua_gettop(parser->L);
-          int items_start = initial_stack_size + 1;
-
-          // Count array items and named items separately
-          // Named captures are sentinel (light userdata) + value pairs
-          int array_count = 0;
-          int named_count = 0;
-          for (int i = items_start; i <= new_stack_size; i++) {
-            if (lua_islightuserdata(parser->L, i) &&
-                is_cg_sentinel(lua_touserdata(parser->L, i))) {
-              named_count++;
-              i++; // skip the value that follows the sentinel
-            } else {
-              array_count++;
-            }
-          }
-
-          lua_createtable(parser->L, array_count, named_count);
-          int table_idx = lua_gettop(parser->L);
-
-          int array_idx = 1;
-          for (int i = items_start; i < table_idx; i++) {
-            if (lua_islightuserdata(parser->L, i)) {
-              void *ptr = lua_touserdata(parser->L, i);
-              if (is_cg_sentinel(ptr)) {
-                // Named capture: sentinel at i, value at i+1
-                const char *name = (const char *)ptr;
-                lua_pushstring(parser->L, name);
-                lua_pushvalue(parser->L, i + 1);
-                lua_rawset(parser->L, table_idx);
-                i++; // skip value
-                continue;
-              }
-            }
-            // Regular capture (including non-sentinel light userdata): add to array part
-            lua_pushvalue(parser->L, i);
-            lua_rawseti(parser->L, table_idx, array_idx++);
-          }
-
-          // Remove all items except table, move table to correct position
-          // Only needed if there were items to remove (items_start <= new_stack_size)
-          if (items_start <= new_stack_size) {
-            lua_replace(parser->L, items_start);
-            lua_settop(parser->L, items_start);
-          }
-        }
-      }
-      if (parser->success) {
-        parse_ws(parser);
-        if (parser->success) {
-          { // Negate (only match if pattern fails)
-            REMEMBER_POSITION(parser, pos);
-
-            { // Match any 1 characters
-              if (parser->pos + 1 <= parser->input_len) {
-                parser->pos += 1;
-              } else {
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
-#endif
-                parser->success = false;
-              }
-            }
-
-            if (parser->success) {
-              // Pattern matched, so negate fails
-              RESTORE_POSITION(parser, pos);
-              parser->success = false;
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
-#endif
-            } else {
-              // Pattern failed, so negate succeeds
-              parser->success = true;
-              RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
-            }
-          }
-        }
-      }
-      if (!parser->success) {
-        RESTORE_POSITION(parser, pos);
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "json", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "json", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "ws", parser->pos);
   }
   parser->depth -= 1;
 #endif

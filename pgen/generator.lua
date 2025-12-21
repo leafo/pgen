@@ -81,6 +81,25 @@ local function template_code(template, vars)
   return result
 end
 
+-- Iterator for rules, sorted with start_rule first, then alphabetically
+local function sorted_rules(rules, start_rule)
+  local names = {}
+  for name in pairs(rules) do
+    if name ~= start_rule then
+      table.insert(names, name)
+    end
+  end
+  table.sort(names)
+  table.insert(names, 1, start_rule)
+  local i = 0
+  return function()
+    i = i + 1
+    local name = names[i]
+    if name then
+      return name, rules[name]
+    end
+  end
+end
 
 -- Compile a grammar definition to C code
 function generator.generate(grammar, parser_name, options)
@@ -115,8 +134,8 @@ function generator.generate(grammar, parser_name, options)
   -- Generate the C code
   local c_chunks = {
     generator.generate_parser_header(parser_name, cg_names),
-    generator.generate_forward_declarations(rules),
-    generator.generate_rule_functions(rules),
+    generator.generate_forward_declarations(rules, start_rule),
+    generator.generate_rule_functions(rules, start_rule),
     generator.generate_parser_main(parser_name, start_rule),
     -- Add compilation instructions as a comment
     template_code([[/*
@@ -258,10 +277,10 @@ static void dumpstack (lua_State *L) {
 end
 
 -- Generate forward declarations for all rules
-function generator.generate_forward_declarations(rules)
+function generator.generate_forward_declarations(rules, start_rule)
   local result = "// Forward declarations\n"
 
-  for name, _ in pairs(rules) do
+  for name in sorted_rules(rules, start_rule) do
     result = result .. template_code("static bool parse_$NAME$(Parser *parser);\n", {NAME = name})
   end
 
@@ -269,10 +288,10 @@ function generator.generate_forward_declarations(rules)
 end
 
 -- Generate functions for each rule
-function generator.generate_rule_functions(rules)
+function generator.generate_rule_functions(rules, start_rule)
   local result = "// Rule functions\n"
 
-  for name, pattern in pairs(rules) do
+  for name, pattern in sorted_rules(rules, start_rule) do
     result = result .. generator.generate_rule_function(name, pattern)
   end
 

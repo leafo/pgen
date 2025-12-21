@@ -25,15 +25,15 @@ typedef struct {
   int stack_size;
 } ParserPosition;
 
-#define REMEMBER_POSITION(parser, pos) \
-  ParserPosition pos;                  \
-  (pos).pos = (parser)->pos;           \
-  (pos).stack_size = lua_gettop((parser)->L);
+#define REMEMBER_POSITION(parser, pp) \
+  ParserPosition pp;                  \
+  (pp).pos = (parser)->pos;           \
+  (pp).stack_size = lua_gettop((parser)->L);
 
 // Restore parser position
-#define RESTORE_POSITION(parser, pos) \
-  (parser)->pos = (pos).pos;          \
-  lua_settop((parser)->L, (pos).stack_size);
+#define RESTORE_POSITION(parser, pp) \
+  (parser)->pos = (pp).pos;          \
+  lua_settop((parser)->L, (pp).stack_size);
 
 #ifdef PGEN_DEBUG
 static void dumpstack(lua_State *L) {
@@ -68,650 +68,17 @@ static bool is_cg_sentinel(void *ptr) {
 }
 
 // Forward declarations
-static bool parse_test1(Parser *parser);
-static bool parse_test6(Parser *parser);
-static bool parse_test4(Parser *parser);
-static bool parse_test3(Parser *parser);
-static bool parse_test5(Parser *parser);
-static bool parse_test8(Parser *parser);
 static bool parse_test(Parser *parser);
+static bool parse_test1(Parser *parser);
 static bool parse_test2(Parser *parser);
+static bool parse_test3(Parser *parser);
+static bool parse_test4(Parser *parser);
+static bool parse_test5(Parser *parser);
+static bool parse_test6(Parser *parser);
 static bool parse_test7(Parser *parser);
+static bool parse_test8(Parser *parser);
 
 // Rule functions
-static bool parse_test1(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test1", start);
-#endif
-
-  { // Numbered Capture (select 1)
-    int cn_stack_start = lua_gettop(parser->L);
-    { // Sequence with 3 patterns
-      REMEMBER_POSITION(parser, pos);
-
-      { // Capture
-        size_t start_pos = parser->pos;
-        { // Match single character "a"
-          if (parser->pos < parser->input_len &&
-              parser->input[parser->pos] == 97) {
-            parser->pos++;
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected character `"
-                                           "a"
-                                           "` at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
-          }
-        }
-
-        if (parser->success) {
-          size_t capture_length = parser->pos - start_pos;
-          // TODO: ensure stack has enough space for push
-          lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-        }
-      }
-      if (parser->success) {
-        { // Capture
-          size_t start_pos = parser->pos;
-          { // Match single character "b"
-            if (parser->pos < parser->input_len &&
-                parser->input[parser->pos] == 98) {
-              parser->pos++;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected character `"
-                                             "b"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
-
-          if (parser->success) {
-            size_t capture_length = parser->pos - start_pos;
-            // TODO: ensure stack has enough space for push
-            lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-          }
-        }
-        if (parser->success) {
-          { // Capture
-            size_t start_pos = parser->pos;
-            { // Match single character "c"
-              if (parser->pos < parser->input_len &&
-                  parser->input[parser->pos] == 99) {
-                parser->pos++;
-              } else {
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected character `"
-                                               "c"
-                                               "` at position %zu",
-                        parser->pos);
-#endif
-                parser->success = false;
-              }
-            }
-
-            if (parser->success) {
-              size_t capture_length = parser->pos - start_pos;
-              // TODO: ensure stack has enough space for push
-              lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-            }
-          }
-        }
-        if (!parser->success) {
-          RESTORE_POSITION(parser, pos);
-        }
-      }
-    }
-
-    if (parser->success) {
-      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
-
-      if (1 <= captures_produced) {
-        lua_pushvalue(parser->L, cn_stack_start + 1);
-        lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
-      } else {
-        lua_settop(parser->L, cn_stack_start);
-        lua_pushnil(parser->L);
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test1", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test1", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_test6(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test6", start);
-#endif
-
-  { // Numbered Capture (select 1)
-    int cn_stack_start = lua_gettop(parser->L);
-    { // Capture
-      size_t start_pos = parser->pos;
-      { // Match literal "single"
-        if (parser->pos + 6 <= parser->input_len &&
-            memcmp(parser->input + parser->pos, "single", 6) == 0) {
-          parser->pos += 6;
-        } else {
-#ifdef PGEN_ERRORS
-          sprintf(parser->error_message, "Expected `"
-                                         "single"
-                                         "` at position %zu",
-                  parser->pos);
-#endif
-          parser->success = false;
-        }
-      }
-
-      if (parser->success) {
-        size_t capture_length = parser->pos - start_pos;
-        // TODO: ensure stack has enough space for push
-        lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-      }
-    }
-
-    if (parser->success) {
-      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
-
-      if (1 <= captures_produced) {
-        lua_pushvalue(parser->L, cn_stack_start + 1);
-        lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
-      } else {
-        lua_settop(parser->L, cn_stack_start);
-        lua_pushnil(parser->L);
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test6", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test6", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_test4(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test4", start);
-#endif
-
-  { // Numbered Capture (discard all)
-    int cn_stack_start = lua_gettop(parser->L);
-    { // Sequence with 3 patterns
-      REMEMBER_POSITION(parser, pos);
-
-      { // Capture
-        size_t start_pos = parser->pos;
-        { // Match literal "hello"
-          if (parser->pos + 5 <= parser->input_len &&
-              memcmp(parser->input + parser->pos, "hello", 5) == 0) {
-            parser->pos += 5;
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected `"
-                                           "hello"
-                                           "` at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
-          }
-        }
-
-        if (parser->success) {
-          size_t capture_length = parser->pos - start_pos;
-          // TODO: ensure stack has enough space for push
-          lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-        }
-      }
-      if (parser->success) {
-        { // Capture
-          size_t start_pos = parser->pos;
-          { // Match single character " "
-            if (parser->pos < parser->input_len &&
-                parser->input[parser->pos] == 32) {
-              parser->pos++;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected character `"
-                                             " "
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
-
-          if (parser->success) {
-            size_t capture_length = parser->pos - start_pos;
-            // TODO: ensure stack has enough space for push
-            lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-          }
-        }
-        if (parser->success) {
-          { // Capture
-            size_t start_pos = parser->pos;
-            { // Match literal "world"
-              if (parser->pos + 5 <= parser->input_len &&
-                  memcmp(parser->input + parser->pos, "world", 5) == 0) {
-                parser->pos += 5;
-              } else {
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected `"
-                                               "world"
-                                               "` at position %zu",
-                        parser->pos);
-#endif
-                parser->success = false;
-              }
-            }
-
-            if (parser->success) {
-              size_t capture_length = parser->pos - start_pos;
-              // TODO: ensure stack has enough space for push
-              lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-            }
-          }
-        }
-        if (!parser->success) {
-          RESTORE_POSITION(parser, pos);
-        }
-      }
-    }
-
-    if (parser->success) {
-      lua_settop(parser->L, cn_stack_start);
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test4", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test4", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_test3(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test3", start);
-#endif
-
-  { // Numbered Capture (select 3)
-    int cn_stack_start = lua_gettop(parser->L);
-    { // Sequence with 3 patterns
-      REMEMBER_POSITION(parser, pos);
-
-      { // Capture
-        size_t start_pos = parser->pos;
-        { // Match single character "a"
-          if (parser->pos < parser->input_len &&
-              parser->input[parser->pos] == 97) {
-            parser->pos++;
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected character `"
-                                           "a"
-                                           "` at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
-          }
-        }
-
-        if (parser->success) {
-          size_t capture_length = parser->pos - start_pos;
-          // TODO: ensure stack has enough space for push
-          lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-        }
-      }
-      if (parser->success) {
-        { // Capture
-          size_t start_pos = parser->pos;
-          { // Match single character "b"
-            if (parser->pos < parser->input_len &&
-                parser->input[parser->pos] == 98) {
-              parser->pos++;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected character `"
-                                             "b"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
-
-          if (parser->success) {
-            size_t capture_length = parser->pos - start_pos;
-            // TODO: ensure stack has enough space for push
-            lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-          }
-        }
-        if (parser->success) {
-          { // Capture
-            size_t start_pos = parser->pos;
-            { // Match single character "c"
-              if (parser->pos < parser->input_len &&
-                  parser->input[parser->pos] == 99) {
-                parser->pos++;
-              } else {
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected character `"
-                                               "c"
-                                               "` at position %zu",
-                        parser->pos);
-#endif
-                parser->success = false;
-              }
-            }
-
-            if (parser->success) {
-              size_t capture_length = parser->pos - start_pos;
-              // TODO: ensure stack has enough space for push
-              lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-            }
-          }
-        }
-        if (!parser->success) {
-          RESTORE_POSITION(parser, pos);
-        }
-      }
-    }
-
-    if (parser->success) {
-      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
-
-      if (3 <= captures_produced) {
-        lua_pushvalue(parser->L, cn_stack_start + 3);
-        lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
-      } else {
-        lua_settop(parser->L, cn_stack_start);
-        lua_pushnil(parser->L);
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test3", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test3", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_test5(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test5", start);
-#endif
-
-  { // Numbered Capture (select 5)
-    int cn_stack_start = lua_gettop(parser->L);
-    { // Sequence with 2 patterns
-      REMEMBER_POSITION(parser, pos);
-
-      { // Capture
-        size_t start_pos = parser->pos;
-        { // Match single character "a"
-          if (parser->pos < parser->input_len &&
-              parser->input[parser->pos] == 97) {
-            parser->pos++;
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected character `"
-                                           "a"
-                                           "` at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
-          }
-        }
-
-        if (parser->success) {
-          size_t capture_length = parser->pos - start_pos;
-          // TODO: ensure stack has enough space for push
-          lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-        }
-      }
-      if (parser->success) {
-        { // Capture
-          size_t start_pos = parser->pos;
-          { // Match single character "b"
-            if (parser->pos < parser->input_len &&
-                parser->input[parser->pos] == 98) {
-              parser->pos++;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected character `"
-                                             "b"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
-
-          if (parser->success) {
-            size_t capture_length = parser->pos - start_pos;
-            // TODO: ensure stack has enough space for push
-            lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-          }
-        }
-        if (!parser->success) {
-          RESTORE_POSITION(parser, pos);
-        }
-      }
-    }
-
-    if (parser->success) {
-      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
-
-      if (5 <= captures_produced) {
-        lua_pushvalue(parser->L, cn_stack_start + 5);
-        lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
-      } else {
-        lua_settop(parser->L, cn_stack_start);
-        lua_pushnil(parser->L);
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test5", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test5", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_test8(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test8", start);
-#endif
-
-  { // Numbered Capture (select 1)
-    int cn_stack_start = lua_gettop(parser->L);
-    { // Numbered Capture (select 2)
-      int cn_stack_start = lua_gettop(parser->L);
-      { // Sequence with 3 patterns
-        REMEMBER_POSITION(parser, pos);
-
-        { // Capture
-          size_t start_pos = parser->pos;
-          { // Match single character "a"
-            if (parser->pos < parser->input_len &&
-                parser->input[parser->pos] == 97) {
-              parser->pos++;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected character `"
-                                             "a"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
-
-          if (parser->success) {
-            size_t capture_length = parser->pos - start_pos;
-            // TODO: ensure stack has enough space for push
-            lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-          }
-        }
-        if (parser->success) {
-          { // Capture
-            size_t start_pos = parser->pos;
-            { // Match single character "b"
-              if (parser->pos < parser->input_len &&
-                  parser->input[parser->pos] == 98) {
-                parser->pos++;
-              } else {
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected character `"
-                                               "b"
-                                               "` at position %zu",
-                        parser->pos);
-#endif
-                parser->success = false;
-              }
-            }
-
-            if (parser->success) {
-              size_t capture_length = parser->pos - start_pos;
-              // TODO: ensure stack has enough space for push
-              lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-            }
-          }
-          if (parser->success) {
-            { // Capture
-              size_t start_pos = parser->pos;
-              { // Match single character "c"
-                if (parser->pos < parser->input_len &&
-                    parser->input[parser->pos] == 99) {
-                  parser->pos++;
-                } else {
-#ifdef PGEN_ERRORS
-                  sprintf(parser->error_message, "Expected character `"
-                                                 "c"
-                                                 "` at position %zu",
-                          parser->pos);
-#endif
-                  parser->success = false;
-                }
-              }
-
-              if (parser->success) {
-                size_t capture_length = parser->pos - start_pos;
-                // TODO: ensure stack has enough space for push
-                lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-              }
-            }
-          }
-          if (!parser->success) {
-            RESTORE_POSITION(parser, pos);
-          }
-        }
-      }
-
-      if (parser->success) {
-        int captures_produced = lua_gettop(parser->L) - cn_stack_start;
-
-        if (2 <= captures_produced) {
-          lua_pushvalue(parser->L, cn_stack_start + 2);
-          lua_replace(parser->L, cn_stack_start + 1);
-          lua_settop(parser->L, cn_stack_start + 1);
-        } else {
-          lua_settop(parser->L, cn_stack_start);
-          lua_pushnil(parser->L);
-        }
-      }
-    }
-
-    if (parser->success) {
-      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
-
-      if (1 <= captures_produced) {
-        lua_pushvalue(parser->L, cn_stack_start + 1);
-        lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
-      } else {
-        lua_settop(parser->L, cn_stack_start);
-        lua_pushnil(parser->L);
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test8", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test8", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
 static bool parse_test(Parser *parser) {
   size_t start = parser->pos;
 
@@ -968,6 +335,124 @@ static bool parse_test(Parser *parser) {
   return parser->success;
 }
 
+static bool parse_test1(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test1", start);
+#endif
+
+  { // Numbered Capture (select 1)
+    int cn_stack_start = lua_gettop(parser->L);
+    { // Sequence with 3 patterns
+      REMEMBER_POSITION(parser, pos);
+
+      { // Capture
+        size_t start_pos = parser->pos;
+        { // Match single character "a"
+          if (parser->pos < parser->input_len &&
+              parser->input[parser->pos] == 97) {
+            parser->pos++;
+          } else {
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Expected character `"
+                                           "a"
+                                           "` at position %zu",
+                    parser->pos);
+#endif
+            parser->success = false;
+          }
+        }
+
+        if (parser->success) {
+          size_t capture_length = parser->pos - start_pos;
+          // TODO: ensure stack has enough space for push
+          lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+        }
+      }
+      if (parser->success) {
+        { // Capture
+          size_t start_pos = parser->pos;
+          { // Match single character "b"
+            if (parser->pos < parser->input_len &&
+                parser->input[parser->pos] == 98) {
+              parser->pos++;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected character `"
+                                             "b"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+
+          if (parser->success) {
+            size_t capture_length = parser->pos - start_pos;
+            // TODO: ensure stack has enough space for push
+            lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+          }
+        }
+        if (parser->success) {
+          { // Capture
+            size_t start_pos = parser->pos;
+            { // Match single character "c"
+              if (parser->pos < parser->input_len &&
+                  parser->input[parser->pos] == 99) {
+                parser->pos++;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected character `"
+                                               "c"
+                                               "` at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            }
+
+            if (parser->success) {
+              size_t capture_length = parser->pos - start_pos;
+              // TODO: ensure stack has enough space for push
+              lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            }
+          }
+        }
+        if (!parser->success) {
+          RESTORE_POSITION(parser, pos);
+        }
+      }
+    }
+
+    if (parser->success) {
+      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+
+      if (1 <= captures_produced) {
+        lua_pushvalue(parser->L, cn_stack_start + 1);
+        lua_replace(parser->L, cn_stack_start + 1);
+        lua_settop(parser->L, cn_stack_start + 1);
+      } else {
+        lua_settop(parser->L, cn_stack_start);
+        lua_pushnil(parser->L);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test1", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test1", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
 static bool parse_test2(Parser *parser) {
   size_t start = parser->pos;
 
@@ -1079,6 +564,387 @@ static bool parse_test2(Parser *parser) {
     fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test2", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_test3(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test3", start);
+#endif
+
+  { // Numbered Capture (select 3)
+    int cn_stack_start = lua_gettop(parser->L);
+    { // Sequence with 3 patterns
+      REMEMBER_POSITION(parser, pos);
+
+      { // Capture
+        size_t start_pos = parser->pos;
+        { // Match single character "a"
+          if (parser->pos < parser->input_len &&
+              parser->input[parser->pos] == 97) {
+            parser->pos++;
+          } else {
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Expected character `"
+                                           "a"
+                                           "` at position %zu",
+                    parser->pos);
+#endif
+            parser->success = false;
+          }
+        }
+
+        if (parser->success) {
+          size_t capture_length = parser->pos - start_pos;
+          // TODO: ensure stack has enough space for push
+          lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+        }
+      }
+      if (parser->success) {
+        { // Capture
+          size_t start_pos = parser->pos;
+          { // Match single character "b"
+            if (parser->pos < parser->input_len &&
+                parser->input[parser->pos] == 98) {
+              parser->pos++;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected character `"
+                                             "b"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+
+          if (parser->success) {
+            size_t capture_length = parser->pos - start_pos;
+            // TODO: ensure stack has enough space for push
+            lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+          }
+        }
+        if (parser->success) {
+          { // Capture
+            size_t start_pos = parser->pos;
+            { // Match single character "c"
+              if (parser->pos < parser->input_len &&
+                  parser->input[parser->pos] == 99) {
+                parser->pos++;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected character `"
+                                               "c"
+                                               "` at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            }
+
+            if (parser->success) {
+              size_t capture_length = parser->pos - start_pos;
+              // TODO: ensure stack has enough space for push
+              lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            }
+          }
+        }
+        if (!parser->success) {
+          RESTORE_POSITION(parser, pos);
+        }
+      }
+    }
+
+    if (parser->success) {
+      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+
+      if (3 <= captures_produced) {
+        lua_pushvalue(parser->L, cn_stack_start + 3);
+        lua_replace(parser->L, cn_stack_start + 1);
+        lua_settop(parser->L, cn_stack_start + 1);
+      } else {
+        lua_settop(parser->L, cn_stack_start);
+        lua_pushnil(parser->L);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test3", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test3", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_test4(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test4", start);
+#endif
+
+  { // Numbered Capture (discard all)
+    int cn_stack_start = lua_gettop(parser->L);
+    { // Sequence with 3 patterns
+      REMEMBER_POSITION(parser, pos);
+
+      { // Capture
+        size_t start_pos = parser->pos;
+        { // Match literal "hello"
+          if (parser->pos + 5 <= parser->input_len &&
+              memcmp(parser->input + parser->pos, "hello", 5) == 0) {
+            parser->pos += 5;
+          } else {
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Expected `"
+                                           "hello"
+                                           "` at position %zu",
+                    parser->pos);
+#endif
+            parser->success = false;
+          }
+        }
+
+        if (parser->success) {
+          size_t capture_length = parser->pos - start_pos;
+          // TODO: ensure stack has enough space for push
+          lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+        }
+      }
+      if (parser->success) {
+        { // Capture
+          size_t start_pos = parser->pos;
+          { // Match single character " "
+            if (parser->pos < parser->input_len &&
+                parser->input[parser->pos] == 32) {
+              parser->pos++;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected character `"
+                                             " "
+                                             "` at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+
+          if (parser->success) {
+            size_t capture_length = parser->pos - start_pos;
+            // TODO: ensure stack has enough space for push
+            lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+          }
+        }
+        if (parser->success) {
+          { // Capture
+            size_t start_pos = parser->pos;
+            { // Match literal "world"
+              if (parser->pos + 5 <= parser->input_len &&
+                  memcmp(parser->input + parser->pos, "world", 5) == 0) {
+                parser->pos += 5;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected `"
+                                               "world"
+                                               "` at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            }
+
+            if (parser->success) {
+              size_t capture_length = parser->pos - start_pos;
+              // TODO: ensure stack has enough space for push
+              lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            }
+          }
+        }
+        if (!parser->success) {
+          RESTORE_POSITION(parser, pos);
+        }
+      }
+    }
+
+    if (parser->success) {
+      lua_settop(parser->L, cn_stack_start);
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test4", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test4", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_test5(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test5", start);
+#endif
+
+  { // Numbered Capture (select 5)
+    int cn_stack_start = lua_gettop(parser->L);
+    { // Sequence with 2 patterns
+      REMEMBER_POSITION(parser, pos);
+
+      { // Capture
+        size_t start_pos = parser->pos;
+        { // Match single character "a"
+          if (parser->pos < parser->input_len &&
+              parser->input[parser->pos] == 97) {
+            parser->pos++;
+          } else {
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Expected character `"
+                                           "a"
+                                           "` at position %zu",
+                    parser->pos);
+#endif
+            parser->success = false;
+          }
+        }
+
+        if (parser->success) {
+          size_t capture_length = parser->pos - start_pos;
+          // TODO: ensure stack has enough space for push
+          lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+        }
+      }
+      if (parser->success) {
+        { // Capture
+          size_t start_pos = parser->pos;
+          { // Match single character "b"
+            if (parser->pos < parser->input_len &&
+                parser->input[parser->pos] == 98) {
+              parser->pos++;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected character `"
+                                             "b"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+
+          if (parser->success) {
+            size_t capture_length = parser->pos - start_pos;
+            // TODO: ensure stack has enough space for push
+            lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+          }
+        }
+        if (!parser->success) {
+          RESTORE_POSITION(parser, pos);
+        }
+      }
+    }
+
+    if (parser->success) {
+      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+
+      if (5 <= captures_produced) {
+        lua_pushvalue(parser->L, cn_stack_start + 5);
+        lua_replace(parser->L, cn_stack_start + 1);
+        lua_settop(parser->L, cn_stack_start + 1);
+      } else {
+        lua_settop(parser->L, cn_stack_start);
+        lua_pushnil(parser->L);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test5", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test5", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_test6(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test6", start);
+#endif
+
+  { // Numbered Capture (select 1)
+    int cn_stack_start = lua_gettop(parser->L);
+    { // Capture
+      size_t start_pos = parser->pos;
+      { // Match literal "single"
+        if (parser->pos + 6 <= parser->input_len &&
+            memcmp(parser->input + parser->pos, "single", 6) == 0) {
+          parser->pos += 6;
+        } else {
+#ifdef PGEN_ERRORS
+          sprintf(parser->error_message, "Expected `"
+                                         "single"
+                                         "` at position %zu",
+                  parser->pos);
+#endif
+          parser->success = false;
+        }
+      }
+
+      if (parser->success) {
+        size_t capture_length = parser->pos - start_pos;
+        // TODO: ensure stack has enough space for push
+        lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+      }
+    }
+
+    if (parser->success) {
+      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+
+      if (1 <= captures_produced) {
+        lua_pushvalue(parser->L, cn_stack_start + 1);
+        lua_replace(parser->L, cn_stack_start + 1);
+        lua_settop(parser->L, cn_stack_start + 1);
+      } else {
+        lua_settop(parser->L, cn_stack_start);
+        lua_pushnil(parser->L);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test6", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test6", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -1255,6 +1121,140 @@ static bool parse_test7(Parser *parser) {
     fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test7", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_test8(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test8", start);
+#endif
+
+  { // Numbered Capture (select 1)
+    int cn_stack_start = lua_gettop(parser->L);
+    { // Numbered Capture (select 2)
+      int cn_stack_start = lua_gettop(parser->L);
+      { // Sequence with 3 patterns
+        REMEMBER_POSITION(parser, pos);
+
+        { // Capture
+          size_t start_pos = parser->pos;
+          { // Match single character "a"
+            if (parser->pos < parser->input_len &&
+                parser->input[parser->pos] == 97) {
+              parser->pos++;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected character `"
+                                             "a"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+
+          if (parser->success) {
+            size_t capture_length = parser->pos - start_pos;
+            // TODO: ensure stack has enough space for push
+            lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+          }
+        }
+        if (parser->success) {
+          { // Capture
+            size_t start_pos = parser->pos;
+            { // Match single character "b"
+              if (parser->pos < parser->input_len &&
+                  parser->input[parser->pos] == 98) {
+                parser->pos++;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected character `"
+                                               "b"
+                                               "` at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            }
+
+            if (parser->success) {
+              size_t capture_length = parser->pos - start_pos;
+              // TODO: ensure stack has enough space for push
+              lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            }
+          }
+          if (parser->success) {
+            { // Capture
+              size_t start_pos = parser->pos;
+              { // Match single character "c"
+                if (parser->pos < parser->input_len &&
+                    parser->input[parser->pos] == 99) {
+                  parser->pos++;
+                } else {
+#ifdef PGEN_ERRORS
+                  sprintf(parser->error_message, "Expected character `"
+                                                 "c"
+                                                 "` at position %zu",
+                          parser->pos);
+#endif
+                  parser->success = false;
+                }
+              }
+
+              if (parser->success) {
+                size_t capture_length = parser->pos - start_pos;
+                // TODO: ensure stack has enough space for push
+                lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+              }
+            }
+          }
+          if (!parser->success) {
+            RESTORE_POSITION(parser, pos);
+          }
+        }
+      }
+
+      if (parser->success) {
+        int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+
+        if (2 <= captures_produced) {
+          lua_pushvalue(parser->L, cn_stack_start + 2);
+          lua_replace(parser->L, cn_stack_start + 1);
+          lua_settop(parser->L, cn_stack_start + 1);
+        } else {
+          lua_settop(parser->L, cn_stack_start);
+          lua_pushnil(parser->L);
+        }
+      }
+    }
+
+    if (parser->success) {
+      int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+
+      if (1 <= captures_produced) {
+        lua_pushvalue(parser->L, cn_stack_start + 1);
+        lua_replace(parser->L, cn_stack_start + 1);
+        lua_settop(parser->L, cn_stack_start + 1);
+      } else {
+        lua_settop(parser->L, cn_stack_start);
+        lua_pushnil(parser->L);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test8", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test8", parser->pos);
   }
   parser->depth -= 1;
 #endif

@@ -68,469 +68,14 @@ static bool is_cg_sentinel(void *ptr) {
 }
 
 // Forward declarations
-static bool parse_test3(Parser *parser);
+static bool parse_test(Parser *parser);
 static bool parse_test1(Parser *parser);
 static bool parse_test2(Parser *parser);
-static bool parse_test(Parser *parser);
-static bool parse_test5(Parser *parser);
+static bool parse_test3(Parser *parser);
 static bool parse_test4(Parser *parser);
+static bool parse_test5(Parser *parser);
 
 // Rule functions
-static bool parse_test3(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test3", start);
-#endif
-
-  { // Capture
-    size_t start_pos = parser->pos;
-    { // Trie match for: "fork", "foo", "for"
-      REMEMBER_POSITION(parser, trie_start);
-      size_t last_terminal_pos = 0;
-      int has_terminal = 0;
-
-      if (parser->pos < parser->input_len) {
-        switch (parser->input[parser->pos]) {
-        case 102: // "f"
-          parser->pos++;
-
-          if (parser->pos < parser->input_len) {
-            switch (parser->input[parser->pos]) {
-            case 111: // "o"
-              parser->pos++;
-
-              if (parser->pos < parser->input_len) {
-                switch (parser->input[parser->pos]) {
-                case 111: // "o"
-                  parser->pos++;
-                  break;
-                case 114: // "r"
-                  parser->pos++;
-                  if (!has_terminal || parser->pos > last_terminal_pos) {
-                    last_terminal_pos = parser->pos;
-                    has_terminal = 1;
-                  }
-                  if (parser->pos < parser->input_len) {
-                    switch (parser->input[parser->pos]) {
-                    case 107: // "k"
-                      parser->pos++;
-                      break;
-                    default:
-                      parser->success = false;
-                      if (has_terminal) {
-                        parser->pos = last_terminal_pos;
-                        parser->success = true;
-                      }
-                    }
-                  } else {
-                    parser->success = false;
-                    if (has_terminal) {
-                      parser->pos = last_terminal_pos;
-                      parser->success = true;
-                    }
-                  }
-                  if (!parser->success) {
-                    // Partial match is valid: "for"
-                    parser->success = true;
-                  }
-                  break;
-                default:
-                  parser->success = false;
-                  if (has_terminal) {
-                    parser->pos = last_terminal_pos;
-                    parser->success = true;
-                  }
-                }
-              } else {
-                parser->success = false;
-                if (has_terminal) {
-                  parser->pos = last_terminal_pos;
-                  parser->success = true;
-                }
-              }
-              break;
-            default:
-              parser->success = false;
-              if (has_terminal) {
-                parser->pos = last_terminal_pos;
-                parser->success = true;
-              }
-            }
-          } else {
-            parser->success = false;
-            if (has_terminal) {
-              parser->pos = last_terminal_pos;
-              parser->success = true;
-            }
-          }
-          break;
-        default:
-          parser->success = false;
-          if (has_terminal) {
-            parser->pos = last_terminal_pos;
-            parser->success = true;
-          }
-        }
-      } else {
-        parser->success = false;
-        if (has_terminal) {
-          parser->pos = last_terminal_pos;
-          parser->success = true;
-        }
-      }
-      if (!parser->success) {
-        RESTORE_POSITION(parser, trie_start);
-      }
-    }
-
-    if (parser->success) {
-      size_t capture_length = parser->pos - start_pos;
-      // TODO: ensure stack has enough space for push
-      lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test3", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test3", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_test1(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test1", start);
-#endif
-
-  { // Capture
-    size_t start_pos = parser->pos;
-    { // Trie match for: "foo", "bar", "baz", "qux"
-      REMEMBER_POSITION(parser, trie_start);
-      size_t last_terminal_pos = 0;
-      int has_terminal = 0;
-
-      if (parser->pos < parser->input_len) {
-        switch (parser->input[parser->pos]) {
-        case 98: // "b"
-          parser->pos++;
-
-          if (parser->pos < parser->input_len) {
-            switch (parser->input[parser->pos]) {
-            case 97: // "a"
-              parser->pos++;
-
-              if (parser->pos < parser->input_len) {
-                switch (parser->input[parser->pos]) {
-                case 114: // "r"
-                  parser->pos++;
-                  break;
-                case 122: // "z"
-                  parser->pos++;
-                  break;
-                default:
-                  parser->success = false;
-                  if (has_terminal) {
-                    parser->pos = last_terminal_pos;
-                    parser->success = true;
-                  }
-                }
-              } else {
-                parser->success = false;
-                if (has_terminal) {
-                  parser->pos = last_terminal_pos;
-                  parser->success = true;
-                }
-              }
-              break;
-            default:
-              parser->success = false;
-              if (has_terminal) {
-                parser->pos = last_terminal_pos;
-                parser->success = true;
-              }
-            }
-          } else {
-            parser->success = false;
-            if (has_terminal) {
-              parser->pos = last_terminal_pos;
-              parser->success = true;
-            }
-          }
-          break;
-        case 102: // "f"
-          parser->pos++;
-
-          if (parser->pos < parser->input_len) {
-            switch (parser->input[parser->pos]) {
-            case 111: // "o"
-              parser->pos++;
-
-              if (parser->pos < parser->input_len) {
-                switch (parser->input[parser->pos]) {
-                case 111: // "o"
-                  parser->pos++;
-                  break;
-                default:
-                  parser->success = false;
-                  if (has_terminal) {
-                    parser->pos = last_terminal_pos;
-                    parser->success = true;
-                  }
-                }
-              } else {
-                parser->success = false;
-                if (has_terminal) {
-                  parser->pos = last_terminal_pos;
-                  parser->success = true;
-                }
-              }
-              break;
-            default:
-              parser->success = false;
-              if (has_terminal) {
-                parser->pos = last_terminal_pos;
-                parser->success = true;
-              }
-            }
-          } else {
-            parser->success = false;
-            if (has_terminal) {
-              parser->pos = last_terminal_pos;
-              parser->success = true;
-            }
-          }
-          break;
-        case 113: // "q"
-          parser->pos++;
-
-          if (parser->pos < parser->input_len) {
-            switch (parser->input[parser->pos]) {
-            case 117: // "u"
-              parser->pos++;
-
-              if (parser->pos < parser->input_len) {
-                switch (parser->input[parser->pos]) {
-                case 120: // "x"
-                  parser->pos++;
-                  break;
-                default:
-                  parser->success = false;
-                  if (has_terminal) {
-                    parser->pos = last_terminal_pos;
-                    parser->success = true;
-                  }
-                }
-              } else {
-                parser->success = false;
-                if (has_terminal) {
-                  parser->pos = last_terminal_pos;
-                  parser->success = true;
-                }
-              }
-              break;
-            default:
-              parser->success = false;
-              if (has_terminal) {
-                parser->pos = last_terminal_pos;
-                parser->success = true;
-              }
-            }
-          } else {
-            parser->success = false;
-            if (has_terminal) {
-              parser->pos = last_terminal_pos;
-              parser->success = true;
-            }
-          }
-          break;
-        default:
-          parser->success = false;
-          if (has_terminal) {
-            parser->pos = last_terminal_pos;
-            parser->success = true;
-          }
-        }
-      } else {
-        parser->success = false;
-        if (has_terminal) {
-          parser->pos = last_terminal_pos;
-          parser->success = true;
-        }
-      }
-      if (!parser->success) {
-        RESTORE_POSITION(parser, trie_start);
-      }
-    }
-
-    if (parser->success) {
-      size_t capture_length = parser->pos - start_pos;
-      // TODO: ensure stack has enough space for push
-      lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test1", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test1", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_test2(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test2", start);
-#endif
-
-  {   // Choice
-    { // Capture
-      size_t start_pos = parser->pos;
-      { // Trie match for: "abd", "abc", "ab"
-        REMEMBER_POSITION(parser, trie_start);
-        size_t last_terminal_pos = 0;
-        int has_terminal = 0;
-
-        if (parser->pos < parser->input_len) {
-          switch (parser->input[parser->pos]) {
-          case 97: // "a"
-            parser->pos++;
-
-            if (parser->pos < parser->input_len) {
-              switch (parser->input[parser->pos]) {
-              case 98: // "b"
-                parser->pos++;
-                if (!has_terminal || parser->pos > last_terminal_pos) {
-                  last_terminal_pos = parser->pos;
-                  has_terminal = 1;
-                }
-                if (parser->pos < parser->input_len) {
-                  switch (parser->input[parser->pos]) {
-                  case 99: // "c"
-                    parser->pos++;
-                    break;
-                  case 100: // "d"
-                    parser->pos++;
-                    break;
-                  default:
-                    parser->success = false;
-                    if (has_terminal) {
-                      parser->pos = last_terminal_pos;
-                      parser->success = true;
-                    }
-                  }
-                } else {
-                  parser->success = false;
-                  if (has_terminal) {
-                    parser->pos = last_terminal_pos;
-                    parser->success = true;
-                  }
-                }
-                if (!parser->success) {
-                  // Partial match is valid: "ab"
-                  parser->success = true;
-                }
-                break;
-              default:
-                parser->success = false;
-                if (has_terminal) {
-                  parser->pos = last_terminal_pos;
-                  parser->success = true;
-                }
-              }
-            } else {
-              parser->success = false;
-              if (has_terminal) {
-                parser->pos = last_terminal_pos;
-                parser->success = true;
-              }
-            }
-            break;
-          default:
-            parser->success = false;
-            if (has_terminal) {
-              parser->pos = last_terminal_pos;
-              parser->success = true;
-            }
-          }
-        } else {
-          parser->success = false;
-          if (has_terminal) {
-            parser->pos = last_terminal_pos;
-            parser->success = true;
-          }
-        }
-        if (!parser->success) {
-          RESTORE_POSITION(parser, trie_start);
-        }
-      }
-
-      if (parser->success) {
-        size_t capture_length = parser->pos - start_pos;
-        // TODO: ensure stack has enough space for push
-        lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-      }
-    }
-
-    if (!parser->success) {
-      parser->success = true;
-      { // Capture
-        size_t start_pos = parser->pos;
-        { // Match single character "a"
-          if (parser->pos < parser->input_len &&
-              parser->input[parser->pos] == 97) {
-            parser->pos++;
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected character `"
-                                           "a"
-                                           "` at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
-          }
-        }
-
-        if (parser->success) {
-          size_t capture_length = parser->pos - start_pos;
-          // TODO: ensure stack has enough space for push
-          lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-        }
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test2", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test2", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
 static bool parse_test(Parser *parser) {
   size_t start = parser->pos;
 
@@ -697,115 +242,174 @@ static bool parse_test(Parser *parser) {
   return parser->success;
 }
 
-static bool parse_test5(Parser *parser) {
+static bool parse_test1(Parser *parser) {
   size_t start = parser->pos;
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test5", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test1", start);
 #endif
 
-  { // Sequence with 2 patterns
-    REMEMBER_POSITION(parser, pos);
-
-    { // Capture
-      size_t start_pos = parser->pos;
-      { // Trie match for: "abcd", "ab", "ax"
-        REMEMBER_POSITION(parser, trie_start);
-        size_t last_terminal_pos = 0;
-        int has_terminal = 0;
-
-        if (parser->pos < parser->input_len) {
-          switch (parser->input[parser->pos]) {
-          case 97: // "a"
-            parser->pos++;
-
-            if (parser->pos < parser->input_len) {
-              switch (parser->input[parser->pos]) {
-              case 98: // "b"
-                parser->pos++;
-                if (!has_terminal || parser->pos > last_terminal_pos) {
-                  last_terminal_pos = parser->pos;
-                  has_terminal = 1;
-                }
-                if (parser->pos < parser->input_len) {
-                  switch (parser->input[parser->pos]) {
-                  case 99: // "c"
-                    parser->pos++;
-
-                    if (parser->pos < parser->input_len) {
-                      switch (parser->input[parser->pos]) {
-                      case 100: // "d"
-                        parser->pos++;
-                        break;
-                      default:
-                        parser->success = false;
-                        if (has_terminal) {
-                          parser->pos = last_terminal_pos;
-                          parser->success = true;
-                        }
-                      }
-                    } else {
-                      parser->success = false;
-                      if (has_terminal) {
-                        parser->pos = last_terminal_pos;
-                        parser->success = true;
-                      }
-                    }
-                    break;
-                  default:
-                    parser->success = false;
-                    if (has_terminal) {
-                      parser->pos = last_terminal_pos;
-                      parser->success = true;
-                    }
-                  }
-                } else {
-                  parser->success = false;
-                  if (has_terminal) {
-                    parser->pos = last_terminal_pos;
-                    parser->success = true;
-                  }
-                }
-                if (!parser->success) {
-                  // Partial match is valid: "ab"
-                  parser->success = true;
-                }
-                break;
-              case 120: // "x"
-                parser->pos++;
-                break;
-              default:
-                parser->success = false;
-                if (has_terminal) {
-                  parser->pos = last_terminal_pos;
-                  parser->success = true;
-                }
-              }
+  { // Capture
+    size_t start_pos = parser->pos;
+    {       // Choice
+      {     // Choice
+        {   // Choice
+          { // Match literal "foo"
+            if (parser->pos + 3 <= parser->input_len &&
+                memcmp(parser->input + parser->pos, "foo", 3) == 0) {
+              parser->pos += 3;
             } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected `"
+                                             "foo"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
               parser->success = false;
-              if (has_terminal) {
-                parser->pos = last_terminal_pos;
-                parser->success = true;
-              }
-            }
-            break;
-          default:
-            parser->success = false;
-            if (has_terminal) {
-              parser->pos = last_terminal_pos;
-              parser->success = true;
             }
           }
-        } else {
-          parser->success = false;
-          if (has_terminal) {
-            parser->pos = last_terminal_pos;
+
+          if (!parser->success) {
             parser->success = true;
+            { // Match literal "bar"
+              if (parser->pos + 3 <= parser->input_len &&
+                  memcmp(parser->input + parser->pos, "bar", 3) == 0) {
+                parser->pos += 3;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected `"
+                                               "bar"
+                                               "` at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            }
           }
         }
+
         if (!parser->success) {
-          RESTORE_POSITION(parser, trie_start);
+          parser->success = true;
+          { // Match literal "baz"
+            if (parser->pos + 3 <= parser->input_len &&
+                memcmp(parser->input + parser->pos, "baz", 3) == 0) {
+              parser->pos += 3;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected `"
+                                             "baz"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+        }
+      }
+
+      if (!parser->success) {
+        parser->success = true;
+        { // Match literal "qux"
+          if (parser->pos + 3 <= parser->input_len &&
+              memcmp(parser->input + parser->pos, "qux", 3) == 0) {
+            parser->pos += 3;
+          } else {
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Expected `"
+                                           "qux"
+                                           "` at position %zu",
+                    parser->pos);
+#endif
+            parser->success = false;
+          }
+        }
+      }
+    }
+
+    if (parser->success) {
+      size_t capture_length = parser->pos - start_pos;
+      // TODO: ensure stack has enough space for push
+      lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test1", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test1", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_test2(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test2", start);
+#endif
+
+  {   // Choice
+    { // Capture
+      size_t start_pos = parser->pos;
+      {     // Choice
+        {   // Choice
+          { // Match literal "abd"
+            if (parser->pos + 3 <= parser->input_len &&
+                memcmp(parser->input + parser->pos, "abd", 3) == 0) {
+              parser->pos += 3;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected `"
+                                             "abd"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+
+          if (!parser->success) {
+            parser->success = true;
+            { // Match literal "abc"
+              if (parser->pos + 3 <= parser->input_len &&
+                  memcmp(parser->input + parser->pos, "abc", 3) == 0) {
+                parser->pos += 3;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected `"
+                                               "abc"
+                                               "` at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            }
+          }
+        }
+
+        if (!parser->success) {
+          parser->success = true;
+          { // Match literal "ab"
+            if (parser->pos + 2 <= parser->input_len &&
+                memcmp(parser->input + parser->pos, "ab", 2) == 0) {
+              parser->pos += 2;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected `"
+                                             "ab"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
         }
       }
 
@@ -815,33 +419,126 @@ static bool parse_test5(Parser *parser) {
         lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
       }
     }
-    if (parser->success) {
-      { // Match single character "X"
-        if (parser->pos < parser->input_len &&
-            parser->input[parser->pos] == 88) {
-          parser->pos++;
-        } else {
+
+    if (!parser->success) {
+      parser->success = true;
+      { // Capture
+        size_t start_pos = parser->pos;
+        { // Match single character "a"
+          if (parser->pos < parser->input_len &&
+              parser->input[parser->pos] == 97) {
+            parser->pos++;
+          } else {
 #ifdef PGEN_ERRORS
-          sprintf(parser->error_message, "Expected character `"
-                                         "X"
-                                         "` at position %zu",
-                  parser->pos);
+            sprintf(parser->error_message, "Expected character `"
+                                           "a"
+                                           "` at position %zu",
+                    parser->pos);
 #endif
-          parser->success = false;
+            parser->success = false;
+          }
         }
-      }
-      if (!parser->success) {
-        RESTORE_POSITION(parser, pos);
+
+        if (parser->success) {
+          size_t capture_length = parser->pos - start_pos;
+          // TODO: ensure stack has enough space for push
+          lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+        }
       }
     }
   }
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test5", start, parser->pos);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test2", start, parser->pos);
     fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test5", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test2", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_test3(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test3", start);
+#endif
+
+  { // Capture
+    size_t start_pos = parser->pos;
+    {     // Choice
+      {   // Choice
+        { // Match literal "fork"
+          if (parser->pos + 4 <= parser->input_len &&
+              memcmp(parser->input + parser->pos, "fork", 4) == 0) {
+            parser->pos += 4;
+          } else {
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Expected `"
+                                           "fork"
+                                           "` at position %zu",
+                    parser->pos);
+#endif
+            parser->success = false;
+          }
+        }
+
+        if (!parser->success) {
+          parser->success = true;
+          { // Match literal "foo"
+            if (parser->pos + 3 <= parser->input_len &&
+                memcmp(parser->input + parser->pos, "foo", 3) == 0) {
+              parser->pos += 3;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected `"
+                                             "foo"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+        }
+      }
+
+      if (!parser->success) {
+        parser->success = true;
+        { // Match literal "for"
+          if (parser->pos + 3 <= parser->input_len &&
+              memcmp(parser->input + parser->pos, "for", 3) == 0) {
+            parser->pos += 3;
+          } else {
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Expected `"
+                                           "for"
+                                           "` at position %zu",
+                    parser->pos);
+#endif
+            parser->success = false;
+          }
+        }
+      }
+    }
+
+    if (parser->success) {
+      size_t capture_length = parser->pos - start_pos;
+      // TODO: ensure stack has enough space for push
+      lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test3", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test3", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -862,58 +559,58 @@ static bool parse_test4(Parser *parser) {
 
     { // Capture
       size_t start_pos = parser->pos;
-      { // Trie match for: "xx", "xy", "xz"
-        REMEMBER_POSITION(parser, trie_start);
-        size_t last_terminal_pos = 0;
-        int has_terminal = 0;
-
-        if (parser->pos < parser->input_len) {
-          switch (parser->input[parser->pos]) {
-          case 120: // "x"
-            parser->pos++;
-
-            if (parser->pos < parser->input_len) {
-              switch (parser->input[parser->pos]) {
-              case 120: // "x"
-                parser->pos++;
-                break;
-              case 121: // "y"
-                parser->pos++;
-                break;
-              case 122: // "z"
-                parser->pos++;
-                break;
-              default:
-                parser->success = false;
-                if (has_terminal) {
-                  parser->pos = last_terminal_pos;
-                  parser->success = true;
-                }
-              }
+      {     // Choice
+        {   // Choice
+          { // Match literal "xx"
+            if (parser->pos + 2 <= parser->input_len &&
+                memcmp(parser->input + parser->pos, "xx", 2) == 0) {
+              parser->pos += 2;
             } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected `"
+                                             "xx"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
               parser->success = false;
-              if (has_terminal) {
-                parser->pos = last_terminal_pos;
-                parser->success = true;
-              }
-            }
-            break;
-          default:
-            parser->success = false;
-            if (has_terminal) {
-              parser->pos = last_terminal_pos;
-              parser->success = true;
             }
           }
-        } else {
-          parser->success = false;
-          if (has_terminal) {
-            parser->pos = last_terminal_pos;
+
+          if (!parser->success) {
             parser->success = true;
+            { // Match literal "xy"
+              if (parser->pos + 2 <= parser->input_len &&
+                  memcmp(parser->input + parser->pos, "xy", 2) == 0) {
+                parser->pos += 2;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected `"
+                                               "xy"
+                                               "` at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            }
           }
         }
+
         if (!parser->success) {
-          RESTORE_POSITION(parser, trie_start);
+          parser->success = true;
+          { // Match literal "xz"
+            if (parser->pos + 2 <= parser->input_len &&
+                memcmp(parser->input + parser->pos, "xz", 2) == 0) {
+              parser->pos += 2;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected `"
+                                             "xz"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
         }
       }
 
@@ -972,6 +669,114 @@ static bool parse_test4(Parser *parser) {
     fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test4", parser->pos);
+  }
+  parser->depth -= 1;
+#endif
+
+  return parser->success;
+}
+
+static bool parse_test5(Parser *parser) {
+  size_t start = parser->pos;
+
+#ifdef PGEN_DEBUG
+  parser->depth += 1;
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test5", start);
+#endif
+
+  { // Sequence with 2 patterns
+    REMEMBER_POSITION(parser, pos);
+
+    { // Capture
+      size_t start_pos = parser->pos;
+      {     // Choice
+        {   // Choice
+          { // Match literal "abcd"
+            if (parser->pos + 4 <= parser->input_len &&
+                memcmp(parser->input + parser->pos, "abcd", 4) == 0) {
+              parser->pos += 4;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected `"
+                                             "abcd"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+
+          if (!parser->success) {
+            parser->success = true;
+            { // Match literal "ab"
+              if (parser->pos + 2 <= parser->input_len &&
+                  memcmp(parser->input + parser->pos, "ab", 2) == 0) {
+                parser->pos += 2;
+              } else {
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Expected `"
+                                               "ab"
+                                               "` at position %zu",
+                        parser->pos);
+#endif
+                parser->success = false;
+              }
+            }
+          }
+        }
+
+        if (!parser->success) {
+          parser->success = true;
+          { // Match literal "ax"
+            if (parser->pos + 2 <= parser->input_len &&
+                memcmp(parser->input + parser->pos, "ax", 2) == 0) {
+              parser->pos += 2;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected `"
+                                             "ax"
+                                             "` at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+        }
+      }
+
+      if (parser->success) {
+        size_t capture_length = parser->pos - start_pos;
+        // TODO: ensure stack has enough space for push
+        lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+      }
+    }
+    if (parser->success) {
+      { // Match single character "X"
+        if (parser->pos < parser->input_len &&
+            parser->input[parser->pos] == 88) {
+          parser->pos++;
+        } else {
+#ifdef PGEN_ERRORS
+          sprintf(parser->error_message, "Expected character `"
+                                         "X"
+                                         "` at position %zu",
+                  parser->pos);
+#endif
+          parser->success = false;
+        }
+      }
+      if (!parser->success) {
+        RESTORE_POSITION(parser, pos);
+      }
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "test5", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test5", parser->pos);
   }
   parser->depth -= 1;
 #endif
