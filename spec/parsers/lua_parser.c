@@ -61,9 +61,21 @@ static void dumpstack(lua_State *L) {
 }
 #endif
 
-// No Cg sentinels defined - stub function
+// Named capture group sentinels
+static const char __cg_sentinel_eq[] = "eq";
+
+// Registry of all known sentinels (for validation)
+static const void *__cg_sentinel_registry[] = {
+    (void *)__cg_sentinel_eq,
+    NULL // terminator
+};
+
+// Check if a pointer is one of our Cg sentinels
 static bool is_cg_sentinel(void *ptr) {
-  (void)ptr; // unused
+  for (int i = 0; __cg_sentinel_registry[i] != NULL; i++) {
+    if (ptr == __cg_sentinel_registry[i])
+      return true;
+  }
   return false;
 }
 
@@ -1112,7 +1124,7 @@ static bool parse_String(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "String", start);
 #endif
 
-  { // Capture Table (array-only)
+  { // Capture Table
     int initial_stack_size = lua_gettop(parser->L);
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
@@ -1124,161 +1136,45 @@ static bool parse_String(Parser *parser) {
       if (parser->success) {
         {     // Choice
           {   // Choice
-            { // Capture
-              size_t start_pos = parser->pos;
-              { // Sequence with 7 patterns
-                REMEMBER_POSITION(parser, pos);
+            { // Numbered Capture (select 3)
+              int cn_stack_start = lua_gettop(parser->L);
+              { // Capture
+                size_t start_pos = parser->pos;
+                { // Sequence with 7 patterns
+                  REMEMBER_POSITION(parser, pos);
 
-                { // Match single character "["
-                  if (parser->pos < parser->input_len &&
-                      parser->input[parser->pos] == 91) {
-                    parser->pos++;
-                  } else {
+                  { // Match single character "["
+                    if (parser->pos < parser->input_len &&
+                        parser->input[parser->pos] == 91) {
+                      parser->pos++;
+                    } else {
 #ifdef PGEN_ERRORS
-                    sprintf(parser->error_message, "Expected character `"
-                                                   "["
-                                                   "` at position %zu",
-                            parser->pos);
+                      sprintf(parser->error_message, "Expected character `"
+                                                     "["
+                                                     "` at position %zu",
+                              parser->pos);
 #endif
-                    parser->success = false;
-                  }
-                }
-                if (parser->success) {
-                  { // Zero or more repetitions
-                    while (true) {
-                      { // Match single character "="
-                        if (parser->pos < parser->input_len &&
-                            parser->input[parser->pos] == 61) {
-                          parser->pos++;
-                        } else {
-#ifdef PGEN_ERRORS
-                          sprintf(parser->error_message, "Expected character `"
-                                                         "="
-                                                         "` at position %zu",
-                                  parser->pos);
-#endif
-                          parser->success = false;
-                        }
-                      }
-                      if (!parser->success) {
-                        break;
-                      }
+                      parser->success = false;
                     }
-                    parser->success = true;
                   }
                   if (parser->success) {
-                    { // Match single character "["
-                      if (parser->pos < parser->input_len &&
-                          parser->input[parser->pos] == 91) {
-                        parser->pos++;
-                      } else {
-#ifdef PGEN_ERRORS
-                        sprintf(parser->error_message, "Expected character `"
-                                                       "["
-                                                       "` at position %zu",
-                                parser->pos);
-#endif
-                        parser->success = false;
-                      }
-                    }
-                    if (parser->success) {
+                    { // Capture Group "eq"
+                      int cg_stack_start = lua_gettop(parser->L);
+                      size_t start_pos = parser->pos;
                       { // Zero or more repetitions
                         while (true) {
-                          { // Sequence with 2 patterns
-                            REMEMBER_POSITION(parser, pos);
-
-                            { // Negate (only match if pattern fails)
-                              REMEMBER_POSITION(parser, pos);
-
-                              { // Sequence with 3 patterns
-                                REMEMBER_POSITION(parser, pos);
-
-                                { // Match single character "]"
-                                  if (parser->pos < parser->input_len &&
-                                      parser->input[parser->pos] == 93) {
-                                    parser->pos++;
-                                  } else {
+                          { // Match single character "="
+                            if (parser->pos < parser->input_len &&
+                                parser->input[parser->pos] == 61) {
+                              parser->pos++;
+                            } else {
 #ifdef PGEN_ERRORS
-                                    sprintf(parser->error_message, "Expected character `"
-                                                                   "]"
-                                                                   "` at position %zu",
-                                            parser->pos);
+                              sprintf(parser->error_message, "Expected character `"
+                                                             "="
+                                                             "` at position %zu",
+                                      parser->pos);
 #endif
-                                    parser->success = false;
-                                  }
-                                }
-                                if (parser->success) {
-                                  { // Zero or more repetitions
-                                    while (true) {
-                                      { // Match single character "="
-                                        if (parser->pos < parser->input_len &&
-                                            parser->input[parser->pos] == 61) {
-                                          parser->pos++;
-                                        } else {
-#ifdef PGEN_ERRORS
-                                          sprintf(parser->error_message, "Expected character `"
-                                                                         "="
-                                                                         "` at position %zu",
-                                                  parser->pos);
-#endif
-                                          parser->success = false;
-                                        }
-                                      }
-                                      if (!parser->success) {
-                                        break;
-                                      }
-                                    }
-                                    parser->success = true;
-                                  }
-                                  if (parser->success) {
-                                    { // Match single character "]"
-                                      if (parser->pos < parser->input_len &&
-                                          parser->input[parser->pos] == 93) {
-                                        parser->pos++;
-                                      } else {
-#ifdef PGEN_ERRORS
-                                        sprintf(parser->error_message, "Expected character `"
-                                                                       "]"
-                                                                       "` at position %zu",
-                                                parser->pos);
-#endif
-                                        parser->success = false;
-                                      }
-                                    }
-                                  }
-                                  if (!parser->success) {
-                                    RESTORE_POSITION(parser, pos);
-                                  }
-                                }
-                              }
-
-                              if (parser->success) {
-                                // Pattern matched, so negate fails
-                                RESTORE_POSITION(parser, pos);
-                                parser->success = false;
-#ifdef PGEN_ERRORS
-                                sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
-#endif
-                              } else {
-                                // Pattern failed, so negate succeeds
-                                parser->success = true;
-                                RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
-                              }
-                            }
-                            if (parser->success) {
-                              { // Match any 1 characters
-                                if (parser->pos + 1 <= parser->input_len) {
-                                  parser->pos += 1;
-                                } else {
-#ifdef PGEN_ERRORS
-                                  sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
-#endif
-                                  parser->success = false;
-                                }
-                              }
-                              if (!parser->success) {
-                                RESTORE_POSITION(parser, pos);
-                              }
+                              parser->success = false;
                             }
                           }
                           if (!parser->success) {
@@ -1287,74 +1183,247 @@ static bool parse_String(Parser *parser) {
                         }
                         parser->success = true;
                       }
+
                       if (parser->success) {
-                        { // Match single character "]"
-                          if (parser->pos < parser->input_len &&
-                              parser->input[parser->pos] == 93) {
-                            parser->pos++;
-                          } else {
+                        int cg_stack_end = lua_gettop(parser->L);
+                        int captures_produced = cg_stack_end - cg_stack_start;
+
+                        if (captures_produced > 0) {
+                          // Inner pattern produced captures - use the first one
+                          // Push sentinel (identifies this as named capture "eq")
+                          lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_eq);
+                          // Move sentinel before the first capture
+                          lua_insert(parser->L, cg_stack_start + 1);
+                          // Now stack is: sentinel, first_capture, [other_captures...]
+                          // Remove any extra captures (keep only sentinel + first capture)
+                          lua_settop(parser->L, cg_stack_start + 2);
+                        } else {
+                          // No captures - capture the matched text span
+                          size_t capture_len = parser->pos - start_pos;
+                          // Push sentinel (identifies this as named capture "eq")
+                          lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_eq);
+                          // Push captured value
+                          lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+                        }
+                      }
+                    }
+                    if (parser->success) {
+                      { // Match single character "["
+                        if (parser->pos < parser->input_len &&
+                            parser->input[parser->pos] == 91) {
+                          parser->pos++;
+                        } else {
 #ifdef PGEN_ERRORS
-                            sprintf(parser->error_message, "Expected character `"
-                                                           "]"
-                                                           "` at position %zu",
-                                    parser->pos);
+                          sprintf(parser->error_message, "Expected character `"
+                                                         "["
+                                                         "` at position %zu",
+                                  parser->pos);
 #endif
-                            parser->success = false;
+                          parser->success = false;
+                        }
+                      }
+                      if (parser->success) {
+                        { // Zero or more repetitions
+                          while (true) {
+                            { // Sequence with 2 patterns
+                              REMEMBER_POSITION(parser, pos);
+
+                              { // Negate (only match if pattern fails)
+                                REMEMBER_POSITION(parser, pos);
+
+                                { // Sequence with 3 patterns
+                                  REMEMBER_POSITION(parser, pos);
+
+                                  { // Match single character "]"
+                                    if (parser->pos < parser->input_len &&
+                                        parser->input[parser->pos] == 93) {
+                                      parser->pos++;
+                                    } else {
+#ifdef PGEN_ERRORS
+                                      sprintf(parser->error_message, "Expected character `"
+                                                                     "]"
+                                                                     "` at position %zu",
+                                              parser->pos);
+#endif
+                                      parser->success = false;
+                                    }
+                                  }
+                                  if (parser->success) {
+                                    { // Capture Match Back "eq"
+                                      parser->success = false;
+
+                                      // Search backward through stack for sentinel "eq"
+                                      for (int i = lua_gettop(parser->L); i >= 1; i--) {
+                                        if (lua_islightuserdata(parser->L, i)) {
+                                          void *ptr = lua_touserdata(parser->L, i);
+                                          if (ptr == (void *)__cg_sentinel_eq) {
+                                            // Found sentinel - value is at i+1 (use only if it's already a string)
+                                            if (i + 1 <= lua_gettop(parser->L) && lua_type(parser->L, i + 1) == LUA_TSTRING) {
+                                              size_t match_len;
+                                              const char *match_str = lua_tolstring(parser->L, i + 1, &match_len);
+                                              // Try to match at current position
+                                              if (parser->pos + match_len <= parser->input_len &&
+                                                  memcmp(parser->input + parser->pos, match_str, match_len) == 0) {
+                                                parser->pos += match_len;
+                                                parser->success = true;
+                                              }
+                                            }
+                                            break; // Found sentinel, stop searching regardless of match result
+                                          }
+                                        }
+                                      }
+#ifdef PGEN_ERRORS
+                                      if (!parser->success) {
+                                        sprintf(parser->error_message, "Capture match back 'eq' failed at position %zu", parser->pos);
+                                      }
+#endif
+                                    }
+                                    if (parser->success) {
+                                      { // Match single character "]"
+                                        if (parser->pos < parser->input_len &&
+                                            parser->input[parser->pos] == 93) {
+                                          parser->pos++;
+                                        } else {
+#ifdef PGEN_ERRORS
+                                          sprintf(parser->error_message, "Expected character `"
+                                                                         "]"
+                                                                         "` at position %zu",
+                                                  parser->pos);
+#endif
+                                          parser->success = false;
+                                        }
+                                      }
+                                    }
+                                    if (!parser->success) {
+                                      RESTORE_POSITION(parser, pos);
+                                    }
+                                  }
+                                }
+
+                                if (parser->success) {
+                                  // Pattern matched, so negate fails
+                                  RESTORE_POSITION(parser, pos);
+                                  parser->success = false;
+#ifdef PGEN_ERRORS
+                                  sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
+#endif
+                                } else {
+                                  // Pattern failed, so negate succeeds
+                                  parser->success = true;
+                                  RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+                                }
+                              }
+                              if (parser->success) {
+                                { // Match any 1 characters
+                                  if (parser->pos + 1 <= parser->input_len) {
+                                    parser->pos += 1;
+                                  } else {
+#ifdef PGEN_ERRORS
+                                    sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
+#endif
+                                    parser->success = false;
+                                  }
+                                }
+                                if (!parser->success) {
+                                  RESTORE_POSITION(parser, pos);
+                                }
+                              }
+                            }
+                            if (!parser->success) {
+                              break;
+                            }
                           }
+                          parser->success = true;
                         }
                         if (parser->success) {
-                          { // Zero or more repetitions
-                            while (true) {
-                              { // Match single character "="
+                          { // Match single character "]"
+                            if (parser->pos < parser->input_len &&
+                                parser->input[parser->pos] == 93) {
+                              parser->pos++;
+                            } else {
+#ifdef PGEN_ERRORS
+                              sprintf(parser->error_message, "Expected character `"
+                                                             "]"
+                                                             "` at position %zu",
+                                      parser->pos);
+#endif
+                              parser->success = false;
+                            }
+                          }
+                          if (parser->success) {
+                            { // Capture Match Back "eq"
+                              parser->success = false;
+
+                              // Search backward through stack for sentinel "eq"
+                              for (int i = lua_gettop(parser->L); i >= 1; i--) {
+                                if (lua_islightuserdata(parser->L, i)) {
+                                  void *ptr = lua_touserdata(parser->L, i);
+                                  if (ptr == (void *)__cg_sentinel_eq) {
+                                    // Found sentinel - value is at i+1 (use only if it's already a string)
+                                    if (i + 1 <= lua_gettop(parser->L) && lua_type(parser->L, i + 1) == LUA_TSTRING) {
+                                      size_t match_len;
+                                      const char *match_str = lua_tolstring(parser->L, i + 1, &match_len);
+                                      // Try to match at current position
+                                      if (parser->pos + match_len <= parser->input_len &&
+                                          memcmp(parser->input + parser->pos, match_str, match_len) == 0) {
+                                        parser->pos += match_len;
+                                        parser->success = true;
+                                      }
+                                    }
+                                    break; // Found sentinel, stop searching regardless of match result
+                                  }
+                                }
+                              }
+#ifdef PGEN_ERRORS
+                              if (!parser->success) {
+                                sprintf(parser->error_message, "Capture match back 'eq' failed at position %zu", parser->pos);
+                              }
+#endif
+                            }
+                            if (parser->success) {
+                              { // Match single character "]"
                                 if (parser->pos < parser->input_len &&
-                                    parser->input[parser->pos] == 61) {
+                                    parser->input[parser->pos] == 93) {
                                   parser->pos++;
                                 } else {
 #ifdef PGEN_ERRORS
                                   sprintf(parser->error_message, "Expected character `"
-                                                                 "="
+                                                                 "]"
                                                                  "` at position %zu",
                                           parser->pos);
 #endif
                                   parser->success = false;
                                 }
                               }
-                              if (!parser->success) {
-                                break;
-                              }
-                            }
-                            parser->success = true;
-                          }
-                          if (parser->success) {
-                            { // Match single character "]"
-                              if (parser->pos < parser->input_len &&
-                                  parser->input[parser->pos] == 93) {
-                                parser->pos++;
-                              } else {
-#ifdef PGEN_ERRORS
-                                sprintf(parser->error_message, "Expected character `"
-                                                               "]"
-                                                               "` at position %zu",
-                                        parser->pos);
-#endif
-                                parser->success = false;
-                              }
                             }
                           }
                         }
                       }
                     }
+                    if (!parser->success) {
+                      RESTORE_POSITION(parser, pos);
+                    }
                   }
-                  if (!parser->success) {
-                    RESTORE_POSITION(parser, pos);
-                  }
+                }
+
+                if (parser->success) {
+                  size_t capture_length = parser->pos - start_pos;
+                  // TODO: ensure stack has enough space for push
+                  lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
                 }
               }
 
               if (parser->success) {
-                size_t capture_length = parser->pos - start_pos;
-                // TODO: ensure stack has enough space for push
-                lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+                int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+
+                if (3 <= captures_produced) {
+                  lua_pushvalue(parser->L, cn_stack_start + 3);
+                  lua_replace(parser->L, cn_stack_start + 1);
+                  lua_settop(parser->L, cn_stack_start + 1);
+                } else {
+                  lua_settop(parser->L, cn_stack_start);
+                  lua_pushnil(parser->L);
+                }
               }
             }
 
@@ -1666,18 +1735,45 @@ static bool parse_String(Parser *parser) {
     if (parser->success) {
       int new_stack_size = lua_gettop(parser->L);
       int items_start = initial_stack_size + 1;
-      int array_count = new_stack_size - initial_stack_size;
 
-      lua_createtable(parser->L, array_count, 0);
+      // Count array items and named items separately
+      // Named captures are sentinel (light userdata) + value pairs
+      int array_count = 0;
+      int named_count = 0;
+      for (int i = items_start; i <= new_stack_size; i++) {
+        if (lua_islightuserdata(parser->L, i) &&
+            is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          named_count++;
+          i++; // skip the value that follows the sentinel
+        } else {
+          array_count++;
+        }
+      }
+
+      lua_createtable(parser->L, array_count, named_count);
       int table_idx = lua_gettop(parser->L);
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
+        if (lua_islightuserdata(parser->L, i)) {
+          void *ptr = lua_touserdata(parser->L, i);
+          if (is_cg_sentinel(ptr)) {
+            // Named capture: sentinel at i, value at i+1
+            const char *name = (const char *)ptr;
+            lua_pushstring(parser->L, name);
+            lua_pushvalue(parser->L, i + 1);
+            lua_rawset(parser->L, table_idx);
+            i++; // skip value
+            continue;
+          }
+        }
+        // Regular capture (including non-sentinel light userdata): add to array part
         lua_pushvalue(parser->L, i);
         lua_rawseti(parser->L, table_idx, array_idx++);
       }
 
       // Remove all items except table, move table to correct position
+      // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
         lua_settop(parser->L, items_start);
@@ -1806,7 +1902,7 @@ static bool parse_attnamelist(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "attnamelist", start);
 #endif
 
-  { // Capture Table (array-only)
+  { // Capture Table
     int initial_stack_size = lua_gettop(parser->L);
     { // Sequence with 4 patterns
       REMEMBER_POSITION(parser, pos);
@@ -1908,18 +2004,45 @@ static bool parse_attnamelist(Parser *parser) {
     if (parser->success) {
       int new_stack_size = lua_gettop(parser->L);
       int items_start = initial_stack_size + 1;
-      int array_count = new_stack_size - initial_stack_size;
 
-      lua_createtable(parser->L, array_count, 0);
+      // Count array items and named items separately
+      // Named captures are sentinel (light userdata) + value pairs
+      int array_count = 0;
+      int named_count = 0;
+      for (int i = items_start; i <= new_stack_size; i++) {
+        if (lua_islightuserdata(parser->L, i) &&
+            is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          named_count++;
+          i++; // skip the value that follows the sentinel
+        } else {
+          array_count++;
+        }
+      }
+
+      lua_createtable(parser->L, array_count, named_count);
       int table_idx = lua_gettop(parser->L);
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
+        if (lua_islightuserdata(parser->L, i)) {
+          void *ptr = lua_touserdata(parser->L, i);
+          if (is_cg_sentinel(ptr)) {
+            // Named capture: sentinel at i, value at i+1
+            const char *name = (const char *)ptr;
+            lua_pushstring(parser->L, name);
+            lua_pushvalue(parser->L, i + 1);
+            lua_rawset(parser->L, table_idx);
+            i++; // skip value
+            continue;
+          }
+        }
+        // Regular capture (including non-sentinel light userdata): add to array part
         lua_pushvalue(parser->L, i);
         lua_rawseti(parser->L, table_idx, array_idx++);
       }
 
       // Remove all items except table, move table to correct position
+      // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
         lua_settop(parser->L, items_start);
@@ -1953,7 +2076,7 @@ static bool parse_attrib(Parser *parser) {
 
     parse_ws(parser);
     if (parser->success) {
-      { // Capture Table (array-only)
+      { // Capture Table
         int initial_stack_size = lua_gettop(parser->L);
         { // Sequence with 6 patterns
           REMEMBER_POSITION(parser, pos);
@@ -2011,18 +2134,45 @@ static bool parse_attrib(Parser *parser) {
         if (parser->success) {
           int new_stack_size = lua_gettop(parser->L);
           int items_start = initial_stack_size + 1;
-          int array_count = new_stack_size - initial_stack_size;
 
-          lua_createtable(parser->L, array_count, 0);
+          // Count array items and named items separately
+          // Named captures are sentinel (light userdata) + value pairs
+          int array_count = 0;
+          int named_count = 0;
+          for (int i = items_start; i <= new_stack_size; i++) {
+            if (lua_islightuserdata(parser->L, i) &&
+                is_cg_sentinel(lua_touserdata(parser->L, i))) {
+              named_count++;
+              i++; // skip the value that follows the sentinel
+            } else {
+              array_count++;
+            }
+          }
+
+          lua_createtable(parser->L, array_count, named_count);
           int table_idx = lua_gettop(parser->L);
 
           int array_idx = 1;
           for (int i = items_start; i < table_idx; i++) {
+            if (lua_islightuserdata(parser->L, i)) {
+              void *ptr = lua_touserdata(parser->L, i);
+              if (is_cg_sentinel(ptr)) {
+                // Named capture: sentinel at i, value at i+1
+                const char *name = (const char *)ptr;
+                lua_pushstring(parser->L, name);
+                lua_pushvalue(parser->L, i + 1);
+                lua_rawset(parser->L, table_idx);
+                i++; // skip value
+                continue;
+              }
+            }
+            // Regular capture (including non-sentinel light userdata): add to array part
             lua_pushvalue(parser->L, i);
             lua_rawseti(parser->L, table_idx, array_idx++);
           }
 
           // Remove all items except table, move table to correct position
+          // Only needed if there were items to remove (items_start <= new_stack_size)
           if (items_start <= new_stack_size) {
             lua_replace(parser->L, items_start);
             lua_settop(parser->L, items_start);
@@ -2738,69 +2888,344 @@ static bool parse_comment(Parser *parser) {
     }
     if (parser->success) {
       {   // Choice
-        { // Sequence with 3 patterns
-          REMEMBER_POSITION(parser, pos);
+        { // Numbered Capture (discard all)
+          int cn_stack_start = lua_gettop(parser->L);
+          { // Sequence with 7 patterns
+            REMEMBER_POSITION(parser, pos);
 
-          { // Match literal "[["
-            if (parser->pos + 2 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "[[", 2) == 0) {
-              parser->pos += 2;
-            } else {
+            { // Match single character "["
+              if (parser->pos < parser->input_len &&
+                  parser->input[parser->pos] == 91) {
+                parser->pos++;
+              } else {
 #ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected `"
-                                             "[["
-                                             "` at position %zu",
-                      parser->pos);
+                sprintf(parser->error_message, "Expected character `"
+                                               "["
+                                               "` at position %zu",
+                        parser->pos);
 #endif
-              parser->success = false;
+                parser->success = false;
+              }
             }
-          }
-          if (parser->success) {
-            { // Zero or more repetitions
-              while (true) {
-                { // Sequence with 2 patterns
-                  REMEMBER_POSITION(parser, pos);
-
-                  { // Negate (only match if pattern fails)
-                    REMEMBER_POSITION(parser, pos);
-
-                    { // Match literal "]]"
-                      if (parser->pos + 2 <= parser->input_len &&
-                          memcmp(parser->input + parser->pos, "]]", 2) == 0) {
-                        parser->pos += 2;
+            if (parser->success) {
+              { // Capture Group "eq"
+                int cg_stack_start = lua_gettop(parser->L);
+                size_t start_pos = parser->pos;
+                { // Zero or more repetitions
+                  while (true) {
+                    { // Match single character "="
+                      if (parser->pos < parser->input_len &&
+                          parser->input[parser->pos] == 61) {
+                        parser->pos++;
                       } else {
 #ifdef PGEN_ERRORS
-                        sprintf(parser->error_message, "Expected `"
-                                                       "]]"
+                        sprintf(parser->error_message, "Expected character `"
+                                                       "="
                                                        "` at position %zu",
                                 parser->pos);
 #endif
                         parser->success = false;
                       }
                     }
+                    if (!parser->success) {
+                      break;
+                    }
+                  }
+                  parser->success = true;
+                }
 
-                    if (parser->success) {
-                      // Pattern matched, so negate fails
-                      RESTORE_POSITION(parser, pos);
-                      parser->success = false;
+                if (parser->success) {
+                  int cg_stack_end = lua_gettop(parser->L);
+                  int captures_produced = cg_stack_end - cg_stack_start;
+
+                  if (captures_produced > 0) {
+                    // Inner pattern produced captures - use the first one
+                    // Push sentinel (identifies this as named capture "eq")
+                    lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_eq);
+                    // Move sentinel before the first capture
+                    lua_insert(parser->L, cg_stack_start + 1);
+                    // Now stack is: sentinel, first_capture, [other_captures...]
+                    // Remove any extra captures (keep only sentinel + first capture)
+                    lua_settop(parser->L, cg_stack_start + 2);
+                  } else {
+                    // No captures - capture the matched text span
+                    size_t capture_len = parser->pos - start_pos;
+                    // Push sentinel (identifies this as named capture "eq")
+                    lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_eq);
+                    // Push captured value
+                    lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+                  }
+                }
+              }
+              if (parser->success) {
+                { // Match single character "["
+                  if (parser->pos < parser->input_len &&
+                      parser->input[parser->pos] == 91) {
+                    parser->pos++;
+                  } else {
 #ifdef PGEN_ERRORS
-                      sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
+                    sprintf(parser->error_message, "Expected character `"
+                                                   "["
+                                                   "` at position %zu",
+                            parser->pos);
 #endif
+                    parser->success = false;
+                  }
+                }
+                if (parser->success) {
+                  { // Zero or more repetitions
+                    while (true) {
+                      { // Sequence with 2 patterns
+                        REMEMBER_POSITION(parser, pos);
+
+                        { // Negate (only match if pattern fails)
+                          REMEMBER_POSITION(parser, pos);
+
+                          { // Sequence with 3 patterns
+                            REMEMBER_POSITION(parser, pos);
+
+                            { // Match single character "]"
+                              if (parser->pos < parser->input_len &&
+                                  parser->input[parser->pos] == 93) {
+                                parser->pos++;
+                              } else {
+#ifdef PGEN_ERRORS
+                                sprintf(parser->error_message, "Expected character `"
+                                                               "]"
+                                                               "` at position %zu",
+                                        parser->pos);
+#endif
+                                parser->success = false;
+                              }
+                            }
+                            if (parser->success) {
+                              { // Capture Match Back "eq"
+                                parser->success = false;
+
+                                // Search backward through stack for sentinel "eq"
+                                for (int i = lua_gettop(parser->L); i >= 1; i--) {
+                                  if (lua_islightuserdata(parser->L, i)) {
+                                    void *ptr = lua_touserdata(parser->L, i);
+                                    if (ptr == (void *)__cg_sentinel_eq) {
+                                      // Found sentinel - value is at i+1 (use only if it's already a string)
+                                      if (i + 1 <= lua_gettop(parser->L) && lua_type(parser->L, i + 1) == LUA_TSTRING) {
+                                        size_t match_len;
+                                        const char *match_str = lua_tolstring(parser->L, i + 1, &match_len);
+                                        // Try to match at current position
+                                        if (parser->pos + match_len <= parser->input_len &&
+                                            memcmp(parser->input + parser->pos, match_str, match_len) == 0) {
+                                          parser->pos += match_len;
+                                          parser->success = true;
+                                        }
+                                      }
+                                      break; // Found sentinel, stop searching regardless of match result
+                                    }
+                                  }
+                                }
+#ifdef PGEN_ERRORS
+                                if (!parser->success) {
+                                  sprintf(parser->error_message, "Capture match back 'eq' failed at position %zu", parser->pos);
+                                }
+#endif
+                              }
+                              if (parser->success) {
+                                { // Match single character "]"
+                                  if (parser->pos < parser->input_len &&
+                                      parser->input[parser->pos] == 93) {
+                                    parser->pos++;
+                                  } else {
+#ifdef PGEN_ERRORS
+                                    sprintf(parser->error_message, "Expected character `"
+                                                                   "]"
+                                                                   "` at position %zu",
+                                            parser->pos);
+#endif
+                                    parser->success = false;
+                                  }
+                                }
+                              }
+                              if (!parser->success) {
+                                RESTORE_POSITION(parser, pos);
+                              }
+                            }
+                          }
+
+                          if (parser->success) {
+                            // Pattern matched, so negate fails
+                            RESTORE_POSITION(parser, pos);
+                            parser->success = false;
+#ifdef PGEN_ERRORS
+                            sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
+#endif
+                          } else {
+                            // Pattern failed, so negate succeeds
+                            parser->success = true;
+                            RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+                          }
+                        }
+                        if (parser->success) {
+                          { // Match any 1 characters
+                            if (parser->pos + 1 <= parser->input_len) {
+                              parser->pos += 1;
+                            } else {
+#ifdef PGEN_ERRORS
+                              sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
+#endif
+                              parser->success = false;
+                            }
+                          }
+                          if (!parser->success) {
+                            RESTORE_POSITION(parser, pos);
+                          }
+                        }
+                      }
+                      if (!parser->success) {
+                        break;
+                      }
+                    }
+                    parser->success = true;
+                  }
+                  if (parser->success) {
+                    { // Match single character "]"
+                      if (parser->pos < parser->input_len &&
+                          parser->input[parser->pos] == 93) {
+                        parser->pos++;
+                      } else {
+#ifdef PGEN_ERRORS
+                        sprintf(parser->error_message, "Expected character `"
+                                                       "]"
+                                                       "` at position %zu",
+                                parser->pos);
+#endif
+                        parser->success = false;
+                      }
+                    }
+                    if (parser->success) {
+                      { // Capture Match Back "eq"
+                        parser->success = false;
+
+                        // Search backward through stack for sentinel "eq"
+                        for (int i = lua_gettop(parser->L); i >= 1; i--) {
+                          if (lua_islightuserdata(parser->L, i)) {
+                            void *ptr = lua_touserdata(parser->L, i);
+                            if (ptr == (void *)__cg_sentinel_eq) {
+                              // Found sentinel - value is at i+1 (use only if it's already a string)
+                              if (i + 1 <= lua_gettop(parser->L) && lua_type(parser->L, i + 1) == LUA_TSTRING) {
+                                size_t match_len;
+                                const char *match_str = lua_tolstring(parser->L, i + 1, &match_len);
+                                // Try to match at current position
+                                if (parser->pos + match_len <= parser->input_len &&
+                                    memcmp(parser->input + parser->pos, match_str, match_len) == 0) {
+                                  parser->pos += match_len;
+                                  parser->success = true;
+                                }
+                              }
+                              break; // Found sentinel, stop searching regardless of match result
+                            }
+                          }
+                        }
+#ifdef PGEN_ERRORS
+                        if (!parser->success) {
+                          sprintf(parser->error_message, "Capture match back 'eq' failed at position %zu", parser->pos);
+                        }
+#endif
+                      }
+                      if (parser->success) {
+                        { // Match single character "]"
+                          if (parser->pos < parser->input_len &&
+                              parser->input[parser->pos] == 93) {
+                            parser->pos++;
+                          } else {
+#ifdef PGEN_ERRORS
+                            sprintf(parser->error_message, "Expected character `"
+                                                           "]"
+                                                           "` at position %zu",
+                                    parser->pos);
+#endif
+                            parser->success = false;
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+              if (!parser->success) {
+                RESTORE_POSITION(parser, pos);
+              }
+            }
+          }
+
+          if (parser->success) {
+            lua_settop(parser->L, cn_stack_start);
+          }
+        }
+
+        if (!parser->success) {
+          parser->success = true;
+          { // Sequence with 2 patterns
+            REMEMBER_POSITION(parser, pos);
+
+            { // Negate (only match if pattern fails)
+              REMEMBER_POSITION(parser, pos);
+
+              { // Lookahead (match without consuming input)
+                REMEMBER_POSITION(parser, pos);
+
+                { // Sequence with 3 patterns
+                  REMEMBER_POSITION(parser, pos);
+
+                  { // Match single character "["
+                    if (parser->pos < parser->input_len &&
+                        parser->input[parser->pos] == 91) {
+                      parser->pos++;
                     } else {
-                      // Pattern failed, so negate succeeds
-                      parser->success = true;
-                      RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+#ifdef PGEN_ERRORS
+                      sprintf(parser->error_message, "Expected character `"
+                                                     "["
+                                                     "` at position %zu",
+                              parser->pos);
+#endif
+                      parser->success = false;
                     }
                   }
                   if (parser->success) {
-                    { // Match any 1 characters
-                      if (parser->pos + 1 <= parser->input_len) {
-                        parser->pos += 1;
-                      } else {
+                    { // Zero or more repetitions
+                      while (true) {
+                        { // Match single character "="
+                          if (parser->pos < parser->input_len &&
+                              parser->input[parser->pos] == 61) {
+                            parser->pos++;
+                          } else {
 #ifdef PGEN_ERRORS
-                        sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
+                            sprintf(parser->error_message, "Expected character `"
+                                                           "="
+                                                           "` at position %zu",
+                                    parser->pos);
 #endif
-                        parser->success = false;
+                            parser->success = false;
+                          }
+                        }
+                        if (!parser->success) {
+                          break;
+                        }
+                      }
+                      parser->success = true;
+                    }
+                    if (parser->success) {
+                      { // Match single character "["
+                        if (parser->pos < parser->input_len &&
+                            parser->input[parser->pos] == 91) {
+                          parser->pos++;
+                        } else {
+#ifdef PGEN_ERRORS
+                          sprintf(parser->error_message, "Expected character `"
+                                                         "["
+                                                         "` at position %zu",
+                                  parser->pos);
+#endif
+                          parser->success = false;
+                        }
                       }
                     }
                     if (!parser->success) {
@@ -2808,93 +3233,89 @@ static bool parse_comment(Parser *parser) {
                     }
                   }
                 }
-                if (!parser->success) {
-                  break;
+
+                if (parser->success) {
+                  // Pattern matched, but we don't consume any input
+                  RESTORE_POSITION(parser, pos);
                 }
               }
-              parser->success = true;
+
+              if (parser->success) {
+                // Pattern matched, so negate fails
+                RESTORE_POSITION(parser, pos);
+                parser->success = false;
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
+#endif
+              } else {
+                // Pattern failed, so negate succeeds
+                parser->success = true;
+                RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+              }
             }
             if (parser->success) {
-              { // Match literal "]]"
-                if (parser->pos + 2 <= parser->input_len &&
-                    memcmp(parser->input + parser->pos, "]]", 2) == 0) {
-                  parser->pos += 2;
-                } else {
+              { // Zero or more repetitions
+                while (true) {
+                  { // Sequence with 2 patterns
+                    REMEMBER_POSITION(parser, pos);
+
+                    { // Negate (only match if pattern fails)
+                      REMEMBER_POSITION(parser, pos);
+
+                      { // Match single character "\n"
+                        if (parser->pos < parser->input_len &&
+                            parser->input[parser->pos] == 10) {
+                          parser->pos++;
+                        } else {
 #ifdef PGEN_ERRORS
-                  sprintf(parser->error_message, "Expected `"
-                                                 "]]"
-                                                 "` at position %zu",
-                          parser->pos);
+                          sprintf(parser->error_message, "Expected character `"
+                                                         "\\n"
+                                                         "` at position %zu",
+                                  parser->pos);
 #endif
-                  parser->success = false;
-                }
-              }
-            }
-            if (!parser->success) {
-              RESTORE_POSITION(parser, pos);
-            }
-          }
-        }
+                          parser->success = false;
+                        }
+                      }
 
-        if (!parser->success) {
-          parser->success = true;
-          { // Zero or more repetitions
-            while (true) {
-              { // Sequence with 2 patterns
-                REMEMBER_POSITION(parser, pos);
-
-                { // Negate (only match if pattern fails)
-                  REMEMBER_POSITION(parser, pos);
-
-                  { // Match single character "\n"
-                    if (parser->pos < parser->input_len &&
-                        parser->input[parser->pos] == 10) {
-                      parser->pos++;
-                    } else {
+                      if (parser->success) {
+                        // Pattern matched, so negate fails
+                        RESTORE_POSITION(parser, pos);
+                        parser->success = false;
 #ifdef PGEN_ERRORS
-                      sprintf(parser->error_message, "Expected character `"
-                                                     "\\n"
-                                                     "` at position %zu",
-                              parser->pos);
+                        sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
 #endif
-                      parser->success = false;
+                      } else {
+                        // Pattern failed, so negate succeeds
+                        parser->success = true;
+                        RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+                      }
                     }
-                  }
-
-                  if (parser->success) {
-                    // Pattern matched, so negate fails
-                    RESTORE_POSITION(parser, pos);
-                    parser->success = false;
+                    if (parser->success) {
+                      { // Match any 1 characters
+                        if (parser->pos + 1 <= parser->input_len) {
+                          parser->pos += 1;
+                        } else {
 #ifdef PGEN_ERRORS
-                    sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
+                          sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
 #endif
-                  } else {
-                    // Pattern failed, so negate succeeds
-                    parser->success = true;
-                    RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
-                  }
-                }
-                if (parser->success) {
-                  { // Match any 1 characters
-                    if (parser->pos + 1 <= parser->input_len) {
-                      parser->pos += 1;
-                    } else {
-#ifdef PGEN_ERRORS
-                      sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
-#endif
-                      parser->success = false;
+                          parser->success = false;
+                        }
+                      }
+                      if (!parser->success) {
+                        RESTORE_POSITION(parser, pos);
+                      }
                     }
                   }
                   if (!parser->success) {
-                    RESTORE_POSITION(parser, pos);
+                    break;
                   }
                 }
+                parser->success = true;
               }
               if (!parser->success) {
-                break;
+                RESTORE_POSITION(parser, pos);
               }
             }
-            parser->success = true;
           }
         }
       }
@@ -3852,7 +4273,7 @@ static bool parse_funcname(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "funcname", start);
 #endif
 
-  { // Capture Table (array-only)
+  { // Capture Table
     int initial_stack_size = lua_gettop(parser->L);
     { // Sequence with 4 patterns
       REMEMBER_POSITION(parser, pos);
@@ -3962,18 +4383,45 @@ static bool parse_funcname(Parser *parser) {
     if (parser->success) {
       int new_stack_size = lua_gettop(parser->L);
       int items_start = initial_stack_size + 1;
-      int array_count = new_stack_size - initial_stack_size;
 
-      lua_createtable(parser->L, array_count, 0);
+      // Count array items and named items separately
+      // Named captures are sentinel (light userdata) + value pairs
+      int array_count = 0;
+      int named_count = 0;
+      for (int i = items_start; i <= new_stack_size; i++) {
+        if (lua_islightuserdata(parser->L, i) &&
+            is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          named_count++;
+          i++; // skip the value that follows the sentinel
+        } else {
+          array_count++;
+        }
+      }
+
+      lua_createtable(parser->L, array_count, named_count);
       int table_idx = lua_gettop(parser->L);
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
+        if (lua_islightuserdata(parser->L, i)) {
+          void *ptr = lua_touserdata(parser->L, i);
+          if (is_cg_sentinel(ptr)) {
+            // Named capture: sentinel at i, value at i+1
+            const char *name = (const char *)ptr;
+            lua_pushstring(parser->L, name);
+            lua_pushvalue(parser->L, i + 1);
+            lua_rawset(parser->L, table_idx);
+            i++; // skip value
+            continue;
+          }
+        }
+        // Regular capture (including non-sentinel light userdata): add to array part
         lua_pushvalue(parser->L, i);
         lua_rawseti(parser->L, table_idx, array_idx++);
       }
 
       // Remove all items except table, move table to correct position
+      // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
         lua_settop(parser->L, items_start);
@@ -5594,7 +6042,7 @@ static bool parse_namelist(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "namelist", start);
 #endif
 
-  { // Capture Table (array-only)
+  { // Capture Table
     int initial_stack_size = lua_gettop(parser->L);
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
@@ -5654,18 +6102,45 @@ static bool parse_namelist(Parser *parser) {
     if (parser->success) {
       int new_stack_size = lua_gettop(parser->L);
       int items_start = initial_stack_size + 1;
-      int array_count = new_stack_size - initial_stack_size;
 
-      lua_createtable(parser->L, array_count, 0);
+      // Count array items and named items separately
+      // Named captures are sentinel (light userdata) + value pairs
+      int array_count = 0;
+      int named_count = 0;
+      for (int i = items_start; i <= new_stack_size; i++) {
+        if (lua_islightuserdata(parser->L, i) &&
+            is_cg_sentinel(lua_touserdata(parser->L, i))) {
+          named_count++;
+          i++; // skip the value that follows the sentinel
+        } else {
+          array_count++;
+        }
+      }
+
+      lua_createtable(parser->L, array_count, named_count);
       int table_idx = lua_gettop(parser->L);
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
+        if (lua_islightuserdata(parser->L, i)) {
+          void *ptr = lua_touserdata(parser->L, i);
+          if (is_cg_sentinel(ptr)) {
+            // Named capture: sentinel at i, value at i+1
+            const char *name = (const char *)ptr;
+            lua_pushstring(parser->L, name);
+            lua_pushvalue(parser->L, i + 1);
+            lua_rawset(parser->L, table_idx);
+            i++; // skip value
+            continue;
+          }
+        }
+        // Regular capture (including non-sentinel light userdata): add to array part
         lua_pushvalue(parser->L, i);
         lua_rawseti(parser->L, table_idx, array_idx++);
       }
 
       // Remove all items except table, move table to correct position
+      // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
         lua_settop(parser->L, items_start);
@@ -6875,7 +7350,7 @@ static bool parse_stat(Parser *parser) {
 
                               if (!parser->success) {
                                 parser->success = true;
-                                { // Capture Table (array-only)
+                                { // Capture Table
                                   int initial_stack_size = lua_gettop(parser->L);
                                   { // Sequence with 6 patterns
                                     REMEMBER_POSITION(parser, pos);
@@ -6933,18 +7408,45 @@ static bool parse_stat(Parser *parser) {
                                   if (parser->success) {
                                     int new_stack_size = lua_gettop(parser->L);
                                     int items_start = initial_stack_size + 1;
-                                    int array_count = new_stack_size - initial_stack_size;
 
-                                    lua_createtable(parser->L, array_count, 0);
+                                    // Count array items and named items separately
+                                    // Named captures are sentinel (light userdata) + value pairs
+                                    int array_count = 0;
+                                    int named_count = 0;
+                                    for (int i = items_start; i <= new_stack_size; i++) {
+                                      if (lua_islightuserdata(parser->L, i) &&
+                                          is_cg_sentinel(lua_touserdata(parser->L, i))) {
+                                        named_count++;
+                                        i++; // skip the value that follows the sentinel
+                                      } else {
+                                        array_count++;
+                                      }
+                                    }
+
+                                    lua_createtable(parser->L, array_count, named_count);
                                     int table_idx = lua_gettop(parser->L);
 
                                     int array_idx = 1;
                                     for (int i = items_start; i < table_idx; i++) {
+                                      if (lua_islightuserdata(parser->L, i)) {
+                                        void *ptr = lua_touserdata(parser->L, i);
+                                        if (is_cg_sentinel(ptr)) {
+                                          // Named capture: sentinel at i, value at i+1
+                                          const char *name = (const char *)ptr;
+                                          lua_pushstring(parser->L, name);
+                                          lua_pushvalue(parser->L, i + 1);
+                                          lua_rawset(parser->L, table_idx);
+                                          i++; // skip value
+                                          continue;
+                                        }
+                                      }
+                                      // Regular capture (including non-sentinel light userdata): add to array part
                                       lua_pushvalue(parser->L, i);
                                       lua_rawseti(parser->L, table_idx, array_idx++);
                                     }
 
                                     // Remove all items except table, move table to correct position
+                                    // Only needed if there were items to remove (items_start <= new_stack_size)
                                     if (items_start <= new_stack_size) {
                                       lua_replace(parser->L, items_start);
                                       lua_settop(parser->L, items_start);
@@ -7012,7 +7514,7 @@ static bool parse_stat(Parser *parser) {
 
                           if (!parser->success) {
                             parser->success = true;
-                            { // Capture Table (array-only)
+                            { // Capture Table
                               int initial_stack_size = lua_gettop(parser->L);
                               { // Sequence with 4 patterns
                                 REMEMBER_POSITION(parser, pos);
@@ -7051,18 +7553,45 @@ static bool parse_stat(Parser *parser) {
                               if (parser->success) {
                                 int new_stack_size = lua_gettop(parser->L);
                                 int items_start = initial_stack_size + 1;
-                                int array_count = new_stack_size - initial_stack_size;
 
-                                lua_createtable(parser->L, array_count, 0);
+                                // Count array items and named items separately
+                                // Named captures are sentinel (light userdata) + value pairs
+                                int array_count = 0;
+                                int named_count = 0;
+                                for (int i = items_start; i <= new_stack_size; i++) {
+                                  if (lua_islightuserdata(parser->L, i) &&
+                                      is_cg_sentinel(lua_touserdata(parser->L, i))) {
+                                    named_count++;
+                                    i++; // skip the value that follows the sentinel
+                                  } else {
+                                    array_count++;
+                                  }
+                                }
+
+                                lua_createtable(parser->L, array_count, named_count);
                                 int table_idx = lua_gettop(parser->L);
 
                                 int array_idx = 1;
                                 for (int i = items_start; i < table_idx; i++) {
+                                  if (lua_islightuserdata(parser->L, i)) {
+                                    void *ptr = lua_touserdata(parser->L, i);
+                                    if (is_cg_sentinel(ptr)) {
+                                      // Named capture: sentinel at i, value at i+1
+                                      const char *name = (const char *)ptr;
+                                      lua_pushstring(parser->L, name);
+                                      lua_pushvalue(parser->L, i + 1);
+                                      lua_rawset(parser->L, table_idx);
+                                      i++; // skip value
+                                      continue;
+                                    }
+                                  }
+                                  // Regular capture (including non-sentinel light userdata): add to array part
                                   lua_pushvalue(parser->L, i);
                                   lua_rawseti(parser->L, table_idx, array_idx++);
                                 }
 
                                 // Remove all items except table, move table to correct position
+                                // Only needed if there were items to remove (items_start <= new_stack_size)
                                 if (items_start <= new_stack_size) {
                                   lua_replace(parser->L, items_start);
                                   lua_settop(parser->L, items_start);
@@ -8861,7 +9390,7 @@ static bool parse_var_suffix(Parser *parser) {
 
     if (!parser->success) {
       parser->success = true;
-      { // Capture Table (array-only)
+      { // Capture Table
         int initial_stack_size = lua_gettop(parser->L);
         { // Sequence with 5 patterns
           REMEMBER_POSITION(parser, pos);
@@ -8903,18 +9432,45 @@ static bool parse_var_suffix(Parser *parser) {
         if (parser->success) {
           int new_stack_size = lua_gettop(parser->L);
           int items_start = initial_stack_size + 1;
-          int array_count = new_stack_size - initial_stack_size;
 
-          lua_createtable(parser->L, array_count, 0);
+          // Count array items and named items separately
+          // Named captures are sentinel (light userdata) + value pairs
+          int array_count = 0;
+          int named_count = 0;
+          for (int i = items_start; i <= new_stack_size; i++) {
+            if (lua_islightuserdata(parser->L, i) &&
+                is_cg_sentinel(lua_touserdata(parser->L, i))) {
+              named_count++;
+              i++; // skip the value that follows the sentinel
+            } else {
+              array_count++;
+            }
+          }
+
+          lua_createtable(parser->L, array_count, named_count);
           int table_idx = lua_gettop(parser->L);
 
           int array_idx = 1;
           for (int i = items_start; i < table_idx; i++) {
+            if (lua_islightuserdata(parser->L, i)) {
+              void *ptr = lua_touserdata(parser->L, i);
+              if (is_cg_sentinel(ptr)) {
+                // Named capture: sentinel at i, value at i+1
+                const char *name = (const char *)ptr;
+                lua_pushstring(parser->L, name);
+                lua_pushvalue(parser->L, i + 1);
+                lua_rawset(parser->L, table_idx);
+                i++; // skip value
+                continue;
+              }
+            }
+            // Regular capture (including non-sentinel light userdata): add to array part
             lua_pushvalue(parser->L, i);
             lua_rawseti(parser->L, table_idx, array_idx++);
           }
 
           // Remove all items except table, move table to correct position
+          // Only needed if there were items to remove (items_start <= new_stack_size)
           if (items_start <= new_stack_size) {
             lua_replace(parser->L, items_start);
             lua_settop(parser->L, items_start);

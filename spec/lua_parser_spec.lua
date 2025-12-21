@@ -91,7 +91,7 @@ describe("lua_parser", function()
       assert.same(ret({"string", "[==[hello]==]"}), result)
     end)
 
-    pending("rejects long strings with mismatched equals", function()
+    it("rejects long strings with mismatched equals", function()
       check_parse("return [=[hello]]", false)    -- 1 open, 0 close
       check_parse("return [[hello]=]", false)    -- 0 open, 1 close
       check_parse("return [==[hello]=]", false)  -- 2 open, 1 close
@@ -753,13 +753,13 @@ describe("lua_parser", function()
       assert.same({"block", {"return", {"explist", {"exp", {"number", "1"}}}}}, result)
     end)
 
-    pending("parses long comment with equals", function()
+    it("parses long comment with equals", function()
       check_parse("--[=[ comment ]=]\nreturn 1", true)
       check_parse("--[=[ multi\nline ]=]\nreturn 1", true)
       check_parse("--[==[ comment ]==]\nreturn 1", true)
     end)
 
-    pending("rejects long comments with mismatched equals", function()
+    it("rejects long comments with mismatched equals", function()
       check_parse("--[=[ comment ]]\nreturn 1", false)   -- 1 open, 0 close
       check_parse("--[[ comment ]=]\nreturn 1", false)   -- 0 open, 1 close
       check_parse("--[==[ comment ]=]\nreturn 1", false) -- 2 open, 1 close

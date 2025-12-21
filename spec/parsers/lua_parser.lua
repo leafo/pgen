@@ -1,5 +1,5 @@
 local pgen = require "pgen"
-local P, R, S, V, C, Cc, Ct, Cp = pgen.P, pgen.R, pgen.S, pgen.V, pgen.C, pgen.Cc, pgen.Ct, pgen.Cp
+local P, R, S, V, C, Cc, Ct, Cp, Cg, Cmb, L = pgen.P, pgen.R, pgen.S, pgen.V, pgen.C, pgen.Cc, pgen.Ct, pgen.Cp, pgen.Cg, pgen.Cmb, pgen.L
 
 -- Define a Lua grammar that captures into an AST
 return {
@@ -163,8 +163,12 @@ return {
   -- Unary operators
   unop = C(P"-" + P"not" + P"#" + P"~"),
 
-  -- Comments (single line or multi-line)
-  comment = P"--" * (P"[[" * (P(1) - P"]]")^0 * P"]]" + (P(1) - P"\n")^0),
+  -- Comments (single line or multi-line with matched equals)
+  -- Use negative lookahead to prevent single-line fallback when long comment start is detected
+  comment = P"--" * (
+    (P"[" * Cg(P"="^0, "eq") * P"[" * (P(1) - (P"]" * Cmb("eq") * P"]"))^0 * P"]" * Cmb("eq") * P"]") / 0 +
+    -L(P"[" * P"="^0 * P"[") * (P(1) - P"\n")^0
+  ),
 
   -- Whitespace (including comments)
   ws = (S" \t\n\r" + V"comment")^0,
@@ -197,8 +201,9 @@ return {
 
   -- String literals
   String = Ct(Cc("string") * (
-    -- Long string [[ ... ]] or [=[ ... ]=]
-    C(P"[" * P"="^0 * P"[" * (P(1) - (P"]" * P"="^0 * P"]"))^0 * P"]" * P"="^0 * P"]") +
+    -- Long string [[ ... ]] or [=[ ... ]=] with matched equals
+    -- Use Cg to capture equals, Cmb to match in closing, /3 to select only the C capture
+    (C(P"[" * Cg(P"="^0, "eq") * P"[" * (P(1) - (P"]" * Cmb("eq") * P"]"))^0 * P"]" * Cmb("eq") * P"]")) / 3 +
     -- Single quoted string
     C(P"'" * (P"\\" * P(1) + (P(1) - P"'"))^0 * P"'") +
     -- Double quoted string
