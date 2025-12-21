@@ -16,22 +16,36 @@ local function flatten_choices(pattern)
   return result
 end
 
--- Check if ALL alternatives are string literals (P"..." nodes only) and all
--- options are in length descending order since trie prioritizes longest
--- substring
+-- Check if ALL alternatives are string literals (P"..." nodes only) and
+-- ordering won't change semantics when trie prefers longest prefix matches
 local function is_trie_eligible(alternatives)
   if #alternatives < 3 then
     return false
   end
 
-  local prev_len = math.huge
-  for _, alt in ipairs(alternatives) do
+  local strings = {}
+  for i, alt in ipairs(alternatives) do
     -- Must be P node (type == 1) with string value
     if alt.type ~= 1 then return false end
     if type(alt.value) ~= "string" then return false end
     if #alt.value == 0 then return false end
-    if #alt.value > prev_len then return false end
-    prev_len = #alt.value
+    strings[i] = alt.value
+  end
+
+  -- Only require descending order for items that share prefixes.
+  for i = 1, #strings do
+    local a = strings[i]
+    for j = 1, #strings do
+      if i ~= j then
+        local b = strings[j]
+        if #a < #b and b:sub(1, #a) == a then
+          -- a is a prefix of b, b must appear before a
+          if j > i then
+            return false
+          end
+        end
+      end
+    end
   end
 
   return true

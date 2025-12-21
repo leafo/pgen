@@ -135,6 +135,7 @@ return {
 
   -- Binary operators (with appropriate precedence handled by the grammar)
   -- Note: longer operators must come before shorter ones (e.g., <= before <)
+  -- this set of patterns is eligible for trie optimization
   binop = Ct(Cc("binop") * C(
     P"or" +                                -- logical or
     P"and" +                               -- logical and
@@ -173,6 +174,7 @@ return {
 
   -- Reserved keywords (must be followed by non-identifier character)
   -- Note: longer keywords must come before shorter prefixes (elseif before else)
+  -- this set of patterns is eligible for trie optimization
   keyword = (
     P"and" + P"break" + P"do" + P"elseif" + P"else" + P"end" +
     P"false" + P"for" + P"function" + P"goto" + P"if" + P"in" +

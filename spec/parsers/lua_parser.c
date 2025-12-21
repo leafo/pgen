@@ -2203,418 +2203,288 @@ static bool parse_binop(Parser *parser) {
       if (parser->success) {
         { // Capture
           size_t start_pos = parser->pos;
-          {                                         // Choice
-            {                                       // Choice
-              {                                     // Choice
-                {                                   // Choice
-                  {                                 // Choice
-                    {                               // Choice
-                      {                             // Choice
-                        {                           // Choice
-                          {                         // Choice
-                            {                       // Choice
-                              {                     // Choice
-                                {                   // Choice
-                                  {                 // Choice
-                                    {               // Choice
-                                      {             // Choice
-                                        {           // Choice
-                                          {         // Choice
-                                            {       // Choice
-                                              {     // Choice
-                                                {   // Choice
-                                                  { // Match literal "or"
-                                                    if (parser->pos + 2 <= parser->input_len &&
-                                                        memcmp(parser->input + parser->pos, "or", 2) == 0) {
-                                                      parser->pos += 2;
-                                                    } else {
-#ifdef PGEN_ERRORS
-                                                      sprintf(parser->error_message, "Expected `"
-                                                                                     "or"
-                                                                                     "` at position %zu",
-                                                              parser->pos);
-#endif
-                                                      parser->success = false;
-                                                    }
-                                                  }
+          { // Trie match for: "or", "and", "<=", ">=", "<<", ">>", "<", ">", "~=", "==", "|", "~", "&", "..", "\/\/", "\/", "+", "-", "*", "%", "^"
+            REMEMBER_POSITION(parser, trie_start);
+            size_t last_terminal_pos = 0;
+            int has_terminal = 0;
 
-                                                  if (!parser->success) {
-                                                    parser->success = true;
-                                                    { // Match literal "and"
-                                                      if (parser->pos + 3 <= parser->input_len &&
-                                                          memcmp(parser->input + parser->pos, "and", 3) == 0) {
-                                                        parser->pos += 3;
-                                                      } else {
-#ifdef PGEN_ERRORS
-                                                        sprintf(parser->error_message, "Expected `"
-                                                                                       "and"
-                                                                                       "` at position %zu",
-                                                                parser->pos);
-#endif
-                                                        parser->success = false;
-                                                      }
-                                                    }
-                                                  }
-                                                }
+            if (parser->pos < parser->input_len) {
+              switch (parser->input[parser->pos]) {
+              case 37: // "%"
+                parser->pos++;
+                break;
+              case 38: // "&"
+                parser->pos++;
+                break;
+              case 42: // "*"
+                parser->pos++;
+                break;
+              case 43: // "+"
+                parser->pos++;
+                break;
+              case 45: // "-"
+                parser->pos++;
+                break;
+              case 46: // "."
+                parser->pos++;
 
-                                                if (!parser->success) {
-                                                  parser->success = true;
-                                                  { // Match literal "<="
-                                                    if (parser->pos + 2 <= parser->input_len &&
-                                                        memcmp(parser->input + parser->pos, "<=", 2) == 0) {
-                                                      parser->pos += 2;
-                                                    } else {
-#ifdef PGEN_ERRORS
-                                                      sprintf(parser->error_message, "Expected `"
-                                                                                     "<="
-                                                                                     "` at position %zu",
-                                                              parser->pos);
-#endif
-                                                      parser->success = false;
-                                                    }
-                                                  }
-                                                }
-                                              }
-
-                                              if (!parser->success) {
-                                                parser->success = true;
-                                                { // Match literal ">="
-                                                  if (parser->pos + 2 <= parser->input_len &&
-                                                      memcmp(parser->input + parser->pos, ">=", 2) == 0) {
-                                                    parser->pos += 2;
-                                                  } else {
-#ifdef PGEN_ERRORS
-                                                    sprintf(parser->error_message, "Expected `"
-                                                                                   ">="
-                                                                                   "` at position %zu",
-                                                            parser->pos);
-#endif
-                                                    parser->success = false;
-                                                  }
-                                                }
-                                              }
-                                            }
-
-                                            if (!parser->success) {
-                                              parser->success = true;
-                                              { // Match literal "<<"
-                                                if (parser->pos + 2 <= parser->input_len &&
-                                                    memcmp(parser->input + parser->pos, "<<", 2) == 0) {
-                                                  parser->pos += 2;
-                                                } else {
-#ifdef PGEN_ERRORS
-                                                  sprintf(parser->error_message, "Expected `"
-                                                                                 "<<"
-                                                                                 "` at position %zu",
-                                                          parser->pos);
-#endif
-                                                  parser->success = false;
-                                                }
-                                              }
-                                            }
-                                          }
-
-                                          if (!parser->success) {
-                                            parser->success = true;
-                                            { // Match literal ">>"
-                                              if (parser->pos + 2 <= parser->input_len &&
-                                                  memcmp(parser->input + parser->pos, ">>", 2) == 0) {
-                                                parser->pos += 2;
-                                              } else {
-#ifdef PGEN_ERRORS
-                                                sprintf(parser->error_message, "Expected `"
-                                                                               ">>"
-                                                                               "` at position %zu",
-                                                        parser->pos);
-#endif
-                                                parser->success = false;
-                                              }
-                                            }
-                                          }
-                                        }
-
-                                        if (!parser->success) {
-                                          parser->success = true;
-                                          { // Match single character "<"
-                                            if (parser->pos < parser->input_len &&
-                                                parser->input[parser->pos] == 60) {
-                                              parser->pos++;
-                                            } else {
-#ifdef PGEN_ERRORS
-                                              sprintf(parser->error_message, "Expected character `"
-                                                                             "<"
-                                                                             "` at position %zu",
-                                                      parser->pos);
-#endif
-                                              parser->success = false;
-                                            }
-                                          }
-                                        }
-                                      }
-
-                                      if (!parser->success) {
-                                        parser->success = true;
-                                        { // Match single character ">"
-                                          if (parser->pos < parser->input_len &&
-                                              parser->input[parser->pos] == 62) {
-                                            parser->pos++;
-                                          } else {
-#ifdef PGEN_ERRORS
-                                            sprintf(parser->error_message, "Expected character `"
-                                                                           ">"
-                                                                           "` at position %zu",
-                                                    parser->pos);
-#endif
-                                            parser->success = false;
-                                          }
-                                        }
-                                      }
-                                    }
-
-                                    if (!parser->success) {
-                                      parser->success = true;
-                                      { // Match literal "~="
-                                        if (parser->pos + 2 <= parser->input_len &&
-                                            memcmp(parser->input + parser->pos, "~=", 2) == 0) {
-                                          parser->pos += 2;
-                                        } else {
-#ifdef PGEN_ERRORS
-                                          sprintf(parser->error_message, "Expected `"
-                                                                         "~="
-                                                                         "` at position %zu",
-                                                  parser->pos);
-#endif
-                                          parser->success = false;
-                                        }
-                                      }
-                                    }
-                                  }
-
-                                  if (!parser->success) {
-                                    parser->success = true;
-                                    { // Match literal "=="
-                                      if (parser->pos + 2 <= parser->input_len &&
-                                          memcmp(parser->input + parser->pos, "==", 2) == 0) {
-                                        parser->pos += 2;
-                                      } else {
-#ifdef PGEN_ERRORS
-                                        sprintf(parser->error_message, "Expected `"
-                                                                       "=="
-                                                                       "` at position %zu",
-                                                parser->pos);
-#endif
-                                        parser->success = false;
-                                      }
-                                    }
-                                  }
-                                }
-
-                                if (!parser->success) {
-                                  parser->success = true;
-                                  { // Match single character "|"
-                                    if (parser->pos < parser->input_len &&
-                                        parser->input[parser->pos] == 124) {
-                                      parser->pos++;
-                                    } else {
-#ifdef PGEN_ERRORS
-                                      sprintf(parser->error_message, "Expected character `"
-                                                                     "|"
-                                                                     "` at position %zu",
-                                              parser->pos);
-#endif
-                                      parser->success = false;
-                                    }
-                                  }
-                                }
-                              }
-
-                              if (!parser->success) {
-                                parser->success = true;
-                                { // Match single character "~"
-                                  if (parser->pos < parser->input_len &&
-                                      parser->input[parser->pos] == 126) {
-                                    parser->pos++;
-                                  } else {
-#ifdef PGEN_ERRORS
-                                    sprintf(parser->error_message, "Expected character `"
-                                                                   "~"
-                                                                   "` at position %zu",
-                                            parser->pos);
-#endif
-                                    parser->success = false;
-                                  }
-                                }
-                              }
-                            }
-
-                            if (!parser->success) {
-                              parser->success = true;
-                              { // Match single character "&"
-                                if (parser->pos < parser->input_len &&
-                                    parser->input[parser->pos] == 38) {
-                                  parser->pos++;
-                                } else {
-#ifdef PGEN_ERRORS
-                                  sprintf(parser->error_message, "Expected character `"
-                                                                 "&"
-                                                                 "` at position %zu",
-                                          parser->pos);
-#endif
-                                  parser->success = false;
-                                }
-                              }
-                            }
-                          }
-
-                          if (!parser->success) {
-                            parser->success = true;
-                            { // Match literal ".."
-                              if (parser->pos + 2 <= parser->input_len &&
-                                  memcmp(parser->input + parser->pos, "..", 2) == 0) {
-                                parser->pos += 2;
-                              } else {
-#ifdef PGEN_ERRORS
-                                sprintf(parser->error_message, "Expected `"
-                                                               ".."
-                                                               "` at position %zu",
-                                        parser->pos);
-#endif
-                                parser->success = false;
-                              }
-                            }
-                          }
-                        }
-
-                        if (!parser->success) {
-                          parser->success = true;
-                          { // Match literal "\/\/"
-                            if (parser->pos + 2 <= parser->input_len &&
-                                memcmp(parser->input + parser->pos, "//", 2) == 0) {
-                              parser->pos += 2;
-                            } else {
-#ifdef PGEN_ERRORS
-                              sprintf(parser->error_message, "Expected `"
-                                                             "//"
-                                                             "` at position %zu",
-                                      parser->pos);
-#endif
-                              parser->success = false;
-                            }
-                          }
-                        }
-                      }
-
-                      if (!parser->success) {
-                        parser->success = true;
-                        { // Match single character "\/"
-                          if (parser->pos < parser->input_len &&
-                              parser->input[parser->pos] == 47) {
-                            parser->pos++;
-                          } else {
-#ifdef PGEN_ERRORS
-                            sprintf(parser->error_message, "Expected character `"
-                                                           "/"
-                                                           "` at position %zu",
-                                    parser->pos);
-#endif
-                            parser->success = false;
-                          }
-                        }
-                      }
-                    }
-
-                    if (!parser->success) {
+                if (parser->pos < parser->input_len) {
+                  switch (parser->input[parser->pos]) {
+                  case 46: // "."
+                    parser->pos++;
+                    break;
+                  default:
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
                       parser->success = true;
-                      { // Match single character "+"
-                        if (parser->pos < parser->input_len &&
-                            parser->input[parser->pos] == 43) {
-                          parser->pos++;
-                        } else {
-#ifdef PGEN_ERRORS
-                          sprintf(parser->error_message, "Expected character `"
-                                                         "+"
-                                                         "` at position %zu",
-                                  parser->pos);
-#endif
-                          parser->success = false;
-                        }
-                      }
                     }
                   }
-
-                  if (!parser->success) {
+                } else {
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
                     parser->success = true;
-                    { // Match single character "-"
-                      if (parser->pos < parser->input_len &&
-                          parser->input[parser->pos] == 45) {
-                        parser->pos++;
-                      } else {
-#ifdef PGEN_ERRORS
-                        sprintf(parser->error_message, "Expected character `"
-                                                       "-"
-                                                       "` at position %zu",
-                                parser->pos);
-#endif
-                        parser->success = false;
-                      }
-                    }
                   }
                 }
-
-                if (!parser->success) {
-                  parser->success = true;
-                  { // Match single character "*"
-                    if (parser->pos < parser->input_len &&
-                        parser->input[parser->pos] == 42) {
-                      parser->pos++;
-                    } else {
-#ifdef PGEN_ERRORS
-                      sprintf(parser->error_message, "Expected character `"
-                                                     "*"
-                                                     "` at position %zu",
-                              parser->pos);
-#endif
-                      parser->success = false;
+                break;
+              case 47: // "/"
+                parser->pos++;
+                if (!has_terminal || parser->pos > last_terminal_pos) {
+                  last_terminal_pos = parser->pos;
+                  has_terminal = 1;
+                }
+                if (parser->pos < parser->input_len) {
+                  switch (parser->input[parser->pos]) {
+                  case 47: // "/"
+                    parser->pos++;
+                    break;
+                  default:
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
                     }
                   }
+                } else {
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+                if (!parser->success) {
+                  // Partial match is valid: "/"
+                  parser->success = true;
+                }
+                break;
+              case 60: // "<"
+                parser->pos++;
+                if (!has_terminal || parser->pos > last_terminal_pos) {
+                  last_terminal_pos = parser->pos;
+                  has_terminal = 1;
+                }
+                if (parser->pos < parser->input_len) {
+                  switch (parser->input[parser->pos]) {
+                  case 60: // "<"
+                    parser->pos++;
+                    break;
+                  case 61: // "="
+                    parser->pos++;
+                    break;
+                  default:
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                } else {
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+                if (!parser->success) {
+                  // Partial match is valid: "<"
+                  parser->success = true;
+                }
+                break;
+              case 61: // "="
+                parser->pos++;
+
+                if (parser->pos < parser->input_len) {
+                  switch (parser->input[parser->pos]) {
+                  case 61: // "="
+                    parser->pos++;
+                    break;
+                  default:
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                } else {
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+                break;
+              case 62: // ">"
+                parser->pos++;
+                if (!has_terminal || parser->pos > last_terminal_pos) {
+                  last_terminal_pos = parser->pos;
+                  has_terminal = 1;
+                }
+                if (parser->pos < parser->input_len) {
+                  switch (parser->input[parser->pos]) {
+                  case 61: // "="
+                    parser->pos++;
+                    break;
+                  case 62: // ">"
+                    parser->pos++;
+                    break;
+                  default:
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                } else {
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+                if (!parser->success) {
+                  // Partial match is valid: ">"
+                  parser->success = true;
+                }
+                break;
+              case 94: // "^"
+                parser->pos++;
+                break;
+              case 97: // "a"
+                parser->pos++;
+
+                if (parser->pos < parser->input_len) {
+                  switch (parser->input[parser->pos]) {
+                  case 110: // "n"
+                    parser->pos++;
+
+                    if (parser->pos < parser->input_len) {
+                      switch (parser->input[parser->pos]) {
+                      case 100: // "d"
+                        parser->pos++;
+                        break;
+                      default:
+                        parser->success = false;
+                        if (has_terminal) {
+                          parser->pos = last_terminal_pos;
+                          parser->success = true;
+                        }
+                      }
+                    } else {
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                    break;
+                  default:
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                } else {
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+                break;
+              case 111: // "o"
+                parser->pos++;
+
+                if (parser->pos < parser->input_len) {
+                  switch (parser->input[parser->pos]) {
+                  case 114: // "r"
+                    parser->pos++;
+                    break;
+                  default:
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                } else {
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+                break;
+              case 124: // "|"
+                parser->pos++;
+                break;
+              case 126: // "~"
+                parser->pos++;
+                if (!has_terminal || parser->pos > last_terminal_pos) {
+                  last_terminal_pos = parser->pos;
+                  has_terminal = 1;
+                }
+                if (parser->pos < parser->input_len) {
+                  switch (parser->input[parser->pos]) {
+                  case 61: // "="
+                    parser->pos++;
+                    break;
+                  default:
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                } else {
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+                if (!parser->success) {
+                  // Partial match is valid: "~"
+                  parser->success = true;
+                }
+                break;
+              default:
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
                 }
               }
-
-              if (!parser->success) {
+            } else {
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
                 parser->success = true;
-                { // Match single character "%"
-                  if (parser->pos < parser->input_len &&
-                      parser->input[parser->pos] == 37) {
-                    parser->pos++;
-                  } else {
-#ifdef PGEN_ERRORS
-                    sprintf(parser->error_message, "Expected character `"
-                                                   "%"
-                                                   "` at position %zu",
-                            parser->pos);
-#endif
-                    parser->success = false;
-                  }
-                }
               }
             }
-
             if (!parser->success) {
-              parser->success = true;
-              { // Match single character "^"
-                if (parser->pos < parser->input_len &&
-                    parser->input[parser->pos] == 94) {
-                  parser->pos++;
-                } else {
-#ifdef PGEN_ERRORS
-                  sprintf(parser->error_message, "Expected character `"
-                                                 "^"
-                                                 "` at position %zu",
-                          parser->pos);
-#endif
-                  parser->success = false;
-                }
-              }
+              RESTORE_POSITION(parser, trie_start);
             }
           }
 
@@ -4605,438 +4475,1239 @@ static bool parse_keyword(Parser *parser) {
   { // Sequence with 2 patterns
     REMEMBER_POSITION(parser, pos);
 
-    {                                           // Choice
-      {                                         // Choice
-        {                                       // Choice
-          {                                     // Choice
-            {                                   // Choice
-              {                                 // Choice
-                {                               // Choice
-                  {                             // Choice
-                    {                           // Choice
-                      {                         // Choice
-                        {                       // Choice
-                          {                     // Choice
-                            {                   // Choice
-                              {                 // Choice
-                                {               // Choice
-                                  {             // Choice
-                                    {           // Choice
-                                      {         // Choice
-                                        {       // Choice
-                                          {     // Choice
-                                            {   // Choice
-                                              { // Match literal "and"
-                                                if (parser->pos + 3 <= parser->input_len &&
-                                                    memcmp(parser->input + parser->pos, "and", 3) == 0) {
-                                                  parser->pos += 3;
-                                                } else {
-#ifdef PGEN_ERRORS
-                                                  sprintf(parser->error_message, "Expected `"
-                                                                                 "and"
-                                                                                 "` at position %zu",
-                                                          parser->pos);
-#endif
-                                                  parser->success = false;
-                                                }
-                                              }
+    { // Trie match for: "and", "break", "do", "elseif", "else", "end", "false", "for", "function", "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while"
+      REMEMBER_POSITION(parser, trie_start);
+      size_t last_terminal_pos = 0;
+      int has_terminal = 0;
 
-                                              if (!parser->success) {
-                                                parser->success = true;
-                                                { // Match literal "break"
-                                                  if (parser->pos + 5 <= parser->input_len &&
-                                                      memcmp(parser->input + parser->pos, "break", 5) == 0) {
-                                                    parser->pos += 5;
-                                                  } else {
-#ifdef PGEN_ERRORS
-                                                    sprintf(parser->error_message, "Expected `"
-                                                                                   "break"
-                                                                                   "` at position %zu",
-                                                            parser->pos);
-#endif
-                                                    parser->success = false;
-                                                  }
-                                                }
-                                              }
-                                            }
+      if (parser->pos < parser->input_len) {
+        switch (parser->input[parser->pos]) {
+        case 97: // "a"
+          parser->pos++;
 
-                                            if (!parser->success) {
-                                              parser->success = true;
-                                              { // Match literal "do"
-                                                if (parser->pos + 2 <= parser->input_len &&
-                                                    memcmp(parser->input + parser->pos, "do", 2) == 0) {
-                                                  parser->pos += 2;
-                                                } else {
-#ifdef PGEN_ERRORS
-                                                  sprintf(parser->error_message, "Expected `"
-                                                                                 "do"
-                                                                                 "` at position %zu",
-                                                          parser->pos);
-#endif
-                                                  parser->success = false;
-                                                }
-                                              }
-                                            }
-                                          }
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 110: // "n"
+              parser->pos++;
 
-                                          if (!parser->success) {
-                                            parser->success = true;
-                                            { // Match literal "elseif"
-                                              if (parser->pos + 6 <= parser->input_len &&
-                                                  memcmp(parser->input + parser->pos, "elseif", 6) == 0) {
-                                                parser->pos += 6;
-                                              } else {
-#ifdef PGEN_ERRORS
-                                                sprintf(parser->error_message, "Expected `"
-                                                                               "elseif"
-                                                                               "` at position %zu",
-                                                        parser->pos);
-#endif
-                                                parser->success = false;
-                                              }
-                                            }
-                                          }
-                                        }
-
-                                        if (!parser->success) {
-                                          parser->success = true;
-                                          { // Match literal "else"
-                                            if (parser->pos + 4 <= parser->input_len &&
-                                                memcmp(parser->input + parser->pos, "else", 4) == 0) {
-                                              parser->pos += 4;
-                                            } else {
-#ifdef PGEN_ERRORS
-                                              sprintf(parser->error_message, "Expected `"
-                                                                             "else"
-                                                                             "` at position %zu",
-                                                      parser->pos);
-#endif
-                                              parser->success = false;
-                                            }
-                                          }
-                                        }
-                                      }
-
-                                      if (!parser->success) {
-                                        parser->success = true;
-                                        { // Match literal "end"
-                                          if (parser->pos + 3 <= parser->input_len &&
-                                              memcmp(parser->input + parser->pos, "end", 3) == 0) {
-                                            parser->pos += 3;
-                                          } else {
-#ifdef PGEN_ERRORS
-                                            sprintf(parser->error_message, "Expected `"
-                                                                           "end"
-                                                                           "` at position %zu",
-                                                    parser->pos);
-#endif
-                                            parser->success = false;
-                                          }
-                                        }
-                                      }
-                                    }
-
-                                    if (!parser->success) {
-                                      parser->success = true;
-                                      { // Match literal "false"
-                                        if (parser->pos + 5 <= parser->input_len &&
-                                            memcmp(parser->input + parser->pos, "false", 5) == 0) {
-                                          parser->pos += 5;
-                                        } else {
-#ifdef PGEN_ERRORS
-                                          sprintf(parser->error_message, "Expected `"
-                                                                         "false"
-                                                                         "` at position %zu",
-                                                  parser->pos);
-#endif
-                                          parser->success = false;
-                                        }
-                                      }
-                                    }
-                                  }
-
-                                  if (!parser->success) {
-                                    parser->success = true;
-                                    { // Match literal "for"
-                                      if (parser->pos + 3 <= parser->input_len &&
-                                          memcmp(parser->input + parser->pos, "for", 3) == 0) {
-                                        parser->pos += 3;
-                                      } else {
-#ifdef PGEN_ERRORS
-                                        sprintf(parser->error_message, "Expected `"
-                                                                       "for"
-                                                                       "` at position %zu",
-                                                parser->pos);
-#endif
-                                        parser->success = false;
-                                      }
-                                    }
-                                  }
-                                }
-
-                                if (!parser->success) {
-                                  parser->success = true;
-                                  { // Match literal "function"
-                                    if (parser->pos + 8 <= parser->input_len &&
-                                        memcmp(parser->input + parser->pos, "function", 8) == 0) {
-                                      parser->pos += 8;
-                                    } else {
-#ifdef PGEN_ERRORS
-                                      sprintf(parser->error_message, "Expected `"
-                                                                     "function"
-                                                                     "` at position %zu",
-                                              parser->pos);
-#endif
-                                      parser->success = false;
-                                    }
-                                  }
-                                }
-                              }
-
-                              if (!parser->success) {
-                                parser->success = true;
-                                { // Match literal "goto"
-                                  if (parser->pos + 4 <= parser->input_len &&
-                                      memcmp(parser->input + parser->pos, "goto", 4) == 0) {
-                                    parser->pos += 4;
-                                  } else {
-#ifdef PGEN_ERRORS
-                                    sprintf(parser->error_message, "Expected `"
-                                                                   "goto"
-                                                                   "` at position %zu",
-                                            parser->pos);
-#endif
-                                    parser->success = false;
-                                  }
-                                }
-                              }
-                            }
-
-                            if (!parser->success) {
-                              parser->success = true;
-                              { // Match literal "if"
-                                if (parser->pos + 2 <= parser->input_len &&
-                                    memcmp(parser->input + parser->pos, "if", 2) == 0) {
-                                  parser->pos += 2;
-                                } else {
-#ifdef PGEN_ERRORS
-                                  sprintf(parser->error_message, "Expected `"
-                                                                 "if"
-                                                                 "` at position %zu",
-                                          parser->pos);
-#endif
-                                  parser->success = false;
-                                }
-                              }
-                            }
-                          }
-
-                          if (!parser->success) {
-                            parser->success = true;
-                            { // Match literal "in"
-                              if (parser->pos + 2 <= parser->input_len &&
-                                  memcmp(parser->input + parser->pos, "in", 2) == 0) {
-                                parser->pos += 2;
-                              } else {
-#ifdef PGEN_ERRORS
-                                sprintf(parser->error_message, "Expected `"
-                                                               "in"
-                                                               "` at position %zu",
-                                        parser->pos);
-#endif
-                                parser->success = false;
-                              }
-                            }
-                          }
-                        }
-
-                        if (!parser->success) {
-                          parser->success = true;
-                          { // Match literal "local"
-                            if (parser->pos + 5 <= parser->input_len &&
-                                memcmp(parser->input + parser->pos, "local", 5) == 0) {
-                              parser->pos += 5;
-                            } else {
-#ifdef PGEN_ERRORS
-                              sprintf(parser->error_message, "Expected `"
-                                                             "local"
-                                                             "` at position %zu",
-                                      parser->pos);
-#endif
-                              parser->success = false;
-                            }
-                          }
-                        }
-                      }
-
-                      if (!parser->success) {
-                        parser->success = true;
-                        { // Match literal "nil"
-                          if (parser->pos + 3 <= parser->input_len &&
-                              memcmp(parser->input + parser->pos, "nil", 3) == 0) {
-                            parser->pos += 3;
-                          } else {
-#ifdef PGEN_ERRORS
-                            sprintf(parser->error_message, "Expected `"
-                                                           "nil"
-                                                           "` at position %zu",
-                                    parser->pos);
-#endif
-                            parser->success = false;
-                          }
-                        }
-                      }
-                    }
-
-                    if (!parser->success) {
-                      parser->success = true;
-                      { // Match literal "not"
-                        if (parser->pos + 3 <= parser->input_len &&
-                            memcmp(parser->input + parser->pos, "not", 3) == 0) {
-                          parser->pos += 3;
-                        } else {
-#ifdef PGEN_ERRORS
-                          sprintf(parser->error_message, "Expected `"
-                                                         "not"
-                                                         "` at position %zu",
-                                  parser->pos);
-#endif
-                          parser->success = false;
-                        }
-                      }
-                    }
-                  }
-
-                  if (!parser->success) {
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 100: // "d"
+                  parser->pos++;
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
                     parser->success = true;
-                    { // Match literal "or"
-                      if (parser->pos + 2 <= parser->input_len &&
-                          memcmp(parser->input + parser->pos, "or", 2) == 0) {
-                        parser->pos += 2;
-                      } else {
-#ifdef PGEN_ERRORS
-                        sprintf(parser->error_message, "Expected `"
-                                                       "or"
-                                                       "` at position %zu",
-                                parser->pos);
-#endif
-                        parser->success = false;
-                      }
-                    }
                   }
                 }
-
-                if (!parser->success) {
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
                   parser->success = true;
-                  { // Match literal "repeat"
-                    if (parser->pos + 6 <= parser->input_len &&
-                        memcmp(parser->input + parser->pos, "repeat", 6) == 0) {
-                      parser->pos += 6;
-                    } else {
-#ifdef PGEN_ERRORS
-                      sprintf(parser->error_message, "Expected `"
-                                                     "repeat"
-                                                     "` at position %zu",
-                              parser->pos);
-#endif
-                      parser->success = false;
-                    }
-                  }
                 }
               }
-
-              if (!parser->success) {
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
                 parser->success = true;
-                { // Match literal "return"
-                  if (parser->pos + 6 <= parser->input_len &&
-                      memcmp(parser->input + parser->pos, "return", 6) == 0) {
-                    parser->pos += 6;
-                  } else {
-#ifdef PGEN_ERRORS
-                    sprintf(parser->error_message, "Expected `"
-                                                   "return"
-                                                   "` at position %zu",
-                            parser->pos);
-#endif
-                    parser->success = false;
-                  }
-                }
               }
             }
-
-            if (!parser->success) {
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
               parser->success = true;
-              { // Match literal "then"
-                if (parser->pos + 4 <= parser->input_len &&
-                    memcmp(parser->input + parser->pos, "then", 4) == 0) {
-                  parser->pos += 4;
-                } else {
-#ifdef PGEN_ERRORS
-                  sprintf(parser->error_message, "Expected `"
-                                                 "then"
-                                                 "` at position %zu",
-                          parser->pos);
-#endif
-                  parser->success = false;
-                }
-              }
             }
           }
+          break;
+        case 98: // "b"
+          parser->pos++;
 
-          if (!parser->success) {
-            parser->success = true;
-            { // Match literal "true"
-              if (parser->pos + 4 <= parser->input_len &&
-                  memcmp(parser->input + parser->pos, "true", 4) == 0) {
-                parser->pos += 4;
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 114: // "r"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 101: // "e"
+                  parser->pos++;
+
+                  if (parser->pos < parser->input_len) {
+                    switch (parser->input[parser->pos]) {
+                    case 97: // "a"
+                      parser->pos++;
+
+                      if (parser->pos < parser->input_len) {
+                        switch (parser->input[parser->pos]) {
+                        case 107: // "k"
+                          parser->pos++;
+                          break;
+                        default:
+                          parser->success = false;
+                          if (has_terminal) {
+                            parser->pos = last_terminal_pos;
+                            parser->success = true;
+                          }
+                        }
+                      } else {
+                        parser->success = false;
+                        if (has_terminal) {
+                          parser->pos = last_terminal_pos;
+                          parser->success = true;
+                        }
+                      }
+                      break;
+                    default:
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                  } else {
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
               } else {
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected `"
-                                               "true"
-                                               "` at position %zu",
-                        parser->pos);
-#endif
                 parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
               }
             }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        case 100: // "d"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 111: // "o"
+              parser->pos++;
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        case 101: // "e"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 108: // "l"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 115: // "s"
+                  parser->pos++;
+
+                  if (parser->pos < parser->input_len) {
+                    switch (parser->input[parser->pos]) {
+                    case 101: // "e"
+                      parser->pos++;
+                      if (!has_terminal || parser->pos > last_terminal_pos) {
+                        last_terminal_pos = parser->pos;
+                        has_terminal = 1;
+                      }
+                      if (parser->pos < parser->input_len) {
+                        switch (parser->input[parser->pos]) {
+                        case 105: // "i"
+                          parser->pos++;
+
+                          if (parser->pos < parser->input_len) {
+                            switch (parser->input[parser->pos]) {
+                            case 102: // "f"
+                              parser->pos++;
+                              break;
+                            default:
+                              parser->success = false;
+                              if (has_terminal) {
+                                parser->pos = last_terminal_pos;
+                                parser->success = true;
+                              }
+                            }
+                          } else {
+                            parser->success = false;
+                            if (has_terminal) {
+                              parser->pos = last_terminal_pos;
+                              parser->success = true;
+                            }
+                          }
+                          break;
+                        default:
+                          parser->success = false;
+                          if (has_terminal) {
+                            parser->pos = last_terminal_pos;
+                            parser->success = true;
+                          }
+                        }
+                      } else {
+                        parser->success = false;
+                        if (has_terminal) {
+                          parser->pos = last_terminal_pos;
+                          parser->success = true;
+                        }
+                      }
+                      if (!parser->success) {
+                        // Partial match is valid: "else"
+                        parser->success = true;
+                      }
+                      break;
+                    default:
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                  } else {
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            case 110: // "n"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 100: // "d"
+                  parser->pos++;
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        case 102: // "f"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 97: // "a"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 108: // "l"
+                  parser->pos++;
+
+                  if (parser->pos < parser->input_len) {
+                    switch (parser->input[parser->pos]) {
+                    case 115: // "s"
+                      parser->pos++;
+
+                      if (parser->pos < parser->input_len) {
+                        switch (parser->input[parser->pos]) {
+                        case 101: // "e"
+                          parser->pos++;
+                          break;
+                        default:
+                          parser->success = false;
+                          if (has_terminal) {
+                            parser->pos = last_terminal_pos;
+                            parser->success = true;
+                          }
+                        }
+                      } else {
+                        parser->success = false;
+                        if (has_terminal) {
+                          parser->pos = last_terminal_pos;
+                          parser->success = true;
+                        }
+                      }
+                      break;
+                    default:
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                  } else {
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            case 111: // "o"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 114: // "r"
+                  parser->pos++;
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            case 117: // "u"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 110: // "n"
+                  parser->pos++;
+
+                  if (parser->pos < parser->input_len) {
+                    switch (parser->input[parser->pos]) {
+                    case 99: // "c"
+                      parser->pos++;
+
+                      if (parser->pos < parser->input_len) {
+                        switch (parser->input[parser->pos]) {
+                        case 116: // "t"
+                          parser->pos++;
+
+                          if (parser->pos < parser->input_len) {
+                            switch (parser->input[parser->pos]) {
+                            case 105: // "i"
+                              parser->pos++;
+
+                              if (parser->pos < parser->input_len) {
+                                switch (parser->input[parser->pos]) {
+                                case 111: // "o"
+                                  parser->pos++;
+
+                                  if (parser->pos < parser->input_len) {
+                                    switch (parser->input[parser->pos]) {
+                                    case 110: // "n"
+                                      parser->pos++;
+                                      break;
+                                    default:
+                                      parser->success = false;
+                                      if (has_terminal) {
+                                        parser->pos = last_terminal_pos;
+                                        parser->success = true;
+                                      }
+                                    }
+                                  } else {
+                                    parser->success = false;
+                                    if (has_terminal) {
+                                      parser->pos = last_terminal_pos;
+                                      parser->success = true;
+                                    }
+                                  }
+                                  break;
+                                default:
+                                  parser->success = false;
+                                  if (has_terminal) {
+                                    parser->pos = last_terminal_pos;
+                                    parser->success = true;
+                                  }
+                                }
+                              } else {
+                                parser->success = false;
+                                if (has_terminal) {
+                                  parser->pos = last_terminal_pos;
+                                  parser->success = true;
+                                }
+                              }
+                              break;
+                            default:
+                              parser->success = false;
+                              if (has_terminal) {
+                                parser->pos = last_terminal_pos;
+                                parser->success = true;
+                              }
+                            }
+                          } else {
+                            parser->success = false;
+                            if (has_terminal) {
+                              parser->pos = last_terminal_pos;
+                              parser->success = true;
+                            }
+                          }
+                          break;
+                        default:
+                          parser->success = false;
+                          if (has_terminal) {
+                            parser->pos = last_terminal_pos;
+                            parser->success = true;
+                          }
+                        }
+                      } else {
+                        parser->success = false;
+                        if (has_terminal) {
+                          parser->pos = last_terminal_pos;
+                          parser->success = true;
+                        }
+                      }
+                      break;
+                    default:
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                  } else {
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        case 103: // "g"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 111: // "o"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 116: // "t"
+                  parser->pos++;
+
+                  if (parser->pos < parser->input_len) {
+                    switch (parser->input[parser->pos]) {
+                    case 111: // "o"
+                      parser->pos++;
+                      break;
+                    default:
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                  } else {
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        case 105: // "i"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 102: // "f"
+              parser->pos++;
+              break;
+            case 110: // "n"
+              parser->pos++;
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        case 108: // "l"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 111: // "o"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 99: // "c"
+                  parser->pos++;
+
+                  if (parser->pos < parser->input_len) {
+                    switch (parser->input[parser->pos]) {
+                    case 97: // "a"
+                      parser->pos++;
+
+                      if (parser->pos < parser->input_len) {
+                        switch (parser->input[parser->pos]) {
+                        case 108: // "l"
+                          parser->pos++;
+                          break;
+                        default:
+                          parser->success = false;
+                          if (has_terminal) {
+                            parser->pos = last_terminal_pos;
+                            parser->success = true;
+                          }
+                        }
+                      } else {
+                        parser->success = false;
+                        if (has_terminal) {
+                          parser->pos = last_terminal_pos;
+                          parser->success = true;
+                        }
+                      }
+                      break;
+                    default:
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                  } else {
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        case 110: // "n"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 105: // "i"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 108: // "l"
+                  parser->pos++;
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            case 111: // "o"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 116: // "t"
+                  parser->pos++;
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        case 111: // "o"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 114: // "r"
+              parser->pos++;
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        case 114: // "r"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 101: // "e"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 112: // "p"
+                  parser->pos++;
+
+                  if (parser->pos < parser->input_len) {
+                    switch (parser->input[parser->pos]) {
+                    case 101: // "e"
+                      parser->pos++;
+
+                      if (parser->pos < parser->input_len) {
+                        switch (parser->input[parser->pos]) {
+                        case 97: // "a"
+                          parser->pos++;
+
+                          if (parser->pos < parser->input_len) {
+                            switch (parser->input[parser->pos]) {
+                            case 116: // "t"
+                              parser->pos++;
+                              break;
+                            default:
+                              parser->success = false;
+                              if (has_terminal) {
+                                parser->pos = last_terminal_pos;
+                                parser->success = true;
+                              }
+                            }
+                          } else {
+                            parser->success = false;
+                            if (has_terminal) {
+                              parser->pos = last_terminal_pos;
+                              parser->success = true;
+                            }
+                          }
+                          break;
+                        default:
+                          parser->success = false;
+                          if (has_terminal) {
+                            parser->pos = last_terminal_pos;
+                            parser->success = true;
+                          }
+                        }
+                      } else {
+                        parser->success = false;
+                        if (has_terminal) {
+                          parser->pos = last_terminal_pos;
+                          parser->success = true;
+                        }
+                      }
+                      break;
+                    default:
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                  } else {
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                  break;
+                case 116: // "t"
+                  parser->pos++;
+
+                  if (parser->pos < parser->input_len) {
+                    switch (parser->input[parser->pos]) {
+                    case 117: // "u"
+                      parser->pos++;
+
+                      if (parser->pos < parser->input_len) {
+                        switch (parser->input[parser->pos]) {
+                        case 114: // "r"
+                          parser->pos++;
+
+                          if (parser->pos < parser->input_len) {
+                            switch (parser->input[parser->pos]) {
+                            case 110: // "n"
+                              parser->pos++;
+                              break;
+                            default:
+                              parser->success = false;
+                              if (has_terminal) {
+                                parser->pos = last_terminal_pos;
+                                parser->success = true;
+                              }
+                            }
+                          } else {
+                            parser->success = false;
+                            if (has_terminal) {
+                              parser->pos = last_terminal_pos;
+                              parser->success = true;
+                            }
+                          }
+                          break;
+                        default:
+                          parser->success = false;
+                          if (has_terminal) {
+                            parser->pos = last_terminal_pos;
+                            parser->success = true;
+                          }
+                        }
+                      } else {
+                        parser->success = false;
+                        if (has_terminal) {
+                          parser->pos = last_terminal_pos;
+                          parser->success = true;
+                        }
+                      }
+                      break;
+                    default:
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                  } else {
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        case 116: // "t"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 104: // "h"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 101: // "e"
+                  parser->pos++;
+
+                  if (parser->pos < parser->input_len) {
+                    switch (parser->input[parser->pos]) {
+                    case 110: // "n"
+                      parser->pos++;
+                      break;
+                    default:
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                  } else {
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            case 114: // "r"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 117: // "u"
+                  parser->pos++;
+
+                  if (parser->pos < parser->input_len) {
+                    switch (parser->input[parser->pos]) {
+                    case 101: // "e"
+                      parser->pos++;
+                      break;
+                    default:
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                  } else {
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        case 117: // "u"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 110: // "n"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 116: // "t"
+                  parser->pos++;
+
+                  if (parser->pos < parser->input_len) {
+                    switch (parser->input[parser->pos]) {
+                    case 105: // "i"
+                      parser->pos++;
+
+                      if (parser->pos < parser->input_len) {
+                        switch (parser->input[parser->pos]) {
+                        case 108: // "l"
+                          parser->pos++;
+                          break;
+                        default:
+                          parser->success = false;
+                          if (has_terminal) {
+                            parser->pos = last_terminal_pos;
+                            parser->success = true;
+                          }
+                        }
+                      } else {
+                        parser->success = false;
+                        if (has_terminal) {
+                          parser->pos = last_terminal_pos;
+                          parser->success = true;
+                        }
+                      }
+                      break;
+                    default:
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                  } else {
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        case 119: // "w"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 104: // "h"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 105: // "i"
+                  parser->pos++;
+
+                  if (parser->pos < parser->input_len) {
+                    switch (parser->input[parser->pos]) {
+                    case 108: // "l"
+                      parser->pos++;
+
+                      if (parser->pos < parser->input_len) {
+                        switch (parser->input[parser->pos]) {
+                        case 101: // "e"
+                          parser->pos++;
+                          break;
+                        default:
+                          parser->success = false;
+                          if (has_terminal) {
+                            parser->pos = last_terminal_pos;
+                            parser->success = true;
+                          }
+                        }
+                      } else {
+                        parser->success = false;
+                        if (has_terminal) {
+                          parser->pos = last_terminal_pos;
+                          parser->success = true;
+                        }
+                      }
+                      break;
+                    default:
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                  } else {
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        default:
+          parser->success = false;
+          if (has_terminal) {
+            parser->pos = last_terminal_pos;
+            parser->success = true;
           }
         }
-
-        if (!parser->success) {
+      } else {
+        parser->success = false;
+        if (has_terminal) {
+          parser->pos = last_terminal_pos;
           parser->success = true;
-          { // Match literal "until"
-            if (parser->pos + 5 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "until", 5) == 0) {
-              parser->pos += 5;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected `"
-                                             "until"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
         }
       }
-
       if (!parser->success) {
-        parser->success = true;
-        { // Match literal "while"
-          if (parser->pos + 5 <= parser->input_len &&
-              memcmp(parser->input + parser->pos, "while", 5) == 0) {
-            parser->pos += 5;
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected `"
-                                           "while"
-                                           "` at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
-          }
-        }
+        RESTORE_POSITION(parser, trie_start);
       }
     }
     if (parser->success) {
@@ -8346,78 +9017,81 @@ static bool parse_unop(Parser *parser) {
 
   { // Capture
     size_t start_pos = parser->pos;
-    {       // Choice
-      {     // Choice
-        {   // Choice
-          { // Match single character "-"
-            if (parser->pos < parser->input_len &&
-                parser->input[parser->pos] == 45) {
-              parser->pos++;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected character `"
-                                             "-"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
+    { // Trie match for: "-", "not", "#", "~"
+      REMEMBER_POSITION(parser, trie_start);
+      size_t last_terminal_pos = 0;
+      int has_terminal = 0;
 
-          if (!parser->success) {
-            parser->success = true;
-            { // Match literal "not"
-              if (parser->pos + 3 <= parser->input_len &&
-                  memcmp(parser->input + parser->pos, "not", 3) == 0) {
-                parser->pos += 3;
+      if (parser->pos < parser->input_len) {
+        switch (parser->input[parser->pos]) {
+        case 35: // "#"
+          parser->pos++;
+          break;
+        case 45: // "-"
+          parser->pos++;
+          break;
+        case 110: // "n"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 111: // "o"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 116: // "t"
+                  parser->pos++;
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
               } else {
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected `"
-                                               "not"
-                                               "` at position %zu",
-                        parser->pos);
-#endif
                 parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
               }
             }
-          }
-        }
-
-        if (!parser->success) {
-          parser->success = true;
-          { // Match single character "#"
-            if (parser->pos < parser->input_len &&
-                parser->input[parser->pos] == 35) {
-              parser->pos++;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected character `"
-                                             "#"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
             }
           }
-        }
-      }
-
-      if (!parser->success) {
-        parser->success = true;
-        { // Match single character "~"
-          if (parser->pos < parser->input_len &&
-              parser->input[parser->pos] == 126) {
-            parser->pos++;
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected character `"
-                                           "~"
-                                           "` at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
+          break;
+        case 126: // "~"
+          parser->pos++;
+          break;
+        default:
+          parser->success = false;
+          if (has_terminal) {
+            parser->pos = last_terminal_pos;
+            parser->success = true;
           }
         }
+      } else {
+        parser->success = false;
+        if (has_terminal) {
+          parser->pos = last_terminal_pos;
+          parser->success = true;
+        }
+      }
+      if (!parser->success) {
+        RESTORE_POSITION(parser, trie_start);
       }
     }
 

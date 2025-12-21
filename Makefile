@@ -28,7 +28,7 @@ clean-spec-parsers:
 	rm spec/parsers/*.{c,so}
 
 spec/parsers/%.c: spec/parsers/%.lua $(PGEN_LUA_FILES)
-	./pgen_cli.lua --no-optimize -o $@ -n $* $< --pgen-errors
+	./pgen_cli.lua -o $@ -n $* $< --pgen-errors
 	clang-format $(CLANG_FORMAT_ARGS) -i $@
 
 spec/parsers/%.so: spec/parsers/%.c

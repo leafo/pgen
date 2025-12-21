@@ -252,78 +252,161 @@ static bool parse_test1(Parser *parser) {
 
   { // Capture
     size_t start_pos = parser->pos;
-    {       // Choice
-      {     // Choice
-        {   // Choice
-          { // Match literal "foo"
-            if (parser->pos + 3 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "foo", 3) == 0) {
-              parser->pos += 3;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected `"
-                                             "foo"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
+    { // Trie match for: "foo", "bar", "baz", "qux"
+      REMEMBER_POSITION(parser, trie_start);
+      size_t last_terminal_pos = 0;
+      int has_terminal = 0;
 
-          if (!parser->success) {
-            parser->success = true;
-            { // Match literal "bar"
-              if (parser->pos + 3 <= parser->input_len &&
-                  memcmp(parser->input + parser->pos, "bar", 3) == 0) {
-                parser->pos += 3;
+      if (parser->pos < parser->input_len) {
+        switch (parser->input[parser->pos]) {
+        case 98: // "b"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 97: // "a"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 114: // "r"
+                  parser->pos++;
+                  break;
+                case 122: // "z"
+                  parser->pos++;
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
               } else {
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected `"
-                                               "bar"
-                                               "` at position %zu",
-                        parser->pos);
-#endif
                 parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
               }
             }
-          }
-        }
-
-        if (!parser->success) {
-          parser->success = true;
-          { // Match literal "baz"
-            if (parser->pos + 3 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "baz", 3) == 0) {
-              parser->pos += 3;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected `"
-                                             "baz"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
             }
           }
-        }
-      }
+          break;
+        case 102: // "f"
+          parser->pos++;
 
-      if (!parser->success) {
-        parser->success = true;
-        { // Match literal "qux"
-          if (parser->pos + 3 <= parser->input_len &&
-              memcmp(parser->input + parser->pos, "qux", 3) == 0) {
-            parser->pos += 3;
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 111: // "o"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 111: // "o"
+                  parser->pos++;
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
           } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected `"
-                                           "qux"
-                                           "` at position %zu",
-                    parser->pos);
-#endif
             parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        case 113: // "q"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 117: // "u"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 120: // "x"
+                  parser->pos++;
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
+            }
+          }
+          break;
+        default:
+          parser->success = false;
+          if (has_terminal) {
+            parser->pos = last_terminal_pos;
+            parser->success = true;
           }
         }
+      } else {
+        parser->success = false;
+        if (has_terminal) {
+          parser->pos = last_terminal_pos;
+          parser->success = true;
+        }
+      }
+      if (!parser->success) {
+        RESTORE_POSITION(parser, trie_start);
       }
     }
 
@@ -358,58 +441,82 @@ static bool parse_test2(Parser *parser) {
   {   // Choice
     { // Capture
       size_t start_pos = parser->pos;
-      {     // Choice
-        {   // Choice
-          { // Match literal "abd"
-            if (parser->pos + 3 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "abd", 3) == 0) {
-              parser->pos += 3;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected `"
-                                             "abd"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
+      { // Trie match for: "abd", "abc", "ab"
+        REMEMBER_POSITION(parser, trie_start);
+        size_t last_terminal_pos = 0;
+        int has_terminal = 0;
 
-          if (!parser->success) {
-            parser->success = true;
-            { // Match literal "abc"
-              if (parser->pos + 3 <= parser->input_len &&
-                  memcmp(parser->input + parser->pos, "abc", 3) == 0) {
-                parser->pos += 3;
-              } else {
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected `"
-                                               "abc"
-                                               "` at position %zu",
-                        parser->pos);
-#endif
+        if (parser->pos < parser->input_len) {
+          switch (parser->input[parser->pos]) {
+          case 97: // "a"
+            parser->pos++;
+
+            if (parser->pos < parser->input_len) {
+              switch (parser->input[parser->pos]) {
+              case 98: // "b"
+                parser->pos++;
+                if (!has_terminal || parser->pos > last_terminal_pos) {
+                  last_terminal_pos = parser->pos;
+                  has_terminal = 1;
+                }
+                if (parser->pos < parser->input_len) {
+                  switch (parser->input[parser->pos]) {
+                  case 99: // "c"
+                    parser->pos++;
+                    break;
+                  case 100: // "d"
+                    parser->pos++;
+                    break;
+                  default:
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                } else {
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+                if (!parser->success) {
+                  // Partial match is valid: "ab"
+                  parser->success = true;
+                }
+                break;
+              default:
                 parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+            } else {
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
               }
             }
-          }
-        }
-
-        if (!parser->success) {
-          parser->success = true;
-          { // Match literal "ab"
-            if (parser->pos + 2 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "ab", 2) == 0) {
-              parser->pos += 2;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected `"
-                                             "ab"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
+            break;
+          default:
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
             }
           }
+        } else {
+          parser->success = false;
+          if (has_terminal) {
+            parser->pos = last_terminal_pos;
+            parser->success = true;
+          }
+        }
+        if (!parser->success) {
+          RESTORE_POSITION(parser, trie_start);
         }
       }
 
@@ -471,58 +578,102 @@ static bool parse_test3(Parser *parser) {
 
   { // Capture
     size_t start_pos = parser->pos;
-    {     // Choice
-      {   // Choice
-        { // Match literal "fork"
-          if (parser->pos + 4 <= parser->input_len &&
-              memcmp(parser->input + parser->pos, "fork", 4) == 0) {
-            parser->pos += 4;
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected `"
-                                           "fork"
-                                           "` at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
-          }
-        }
+    { // Trie match for: "fork", "foo", "for"
+      REMEMBER_POSITION(parser, trie_start);
+      size_t last_terminal_pos = 0;
+      int has_terminal = 0;
 
-        if (!parser->success) {
-          parser->success = true;
-          { // Match literal "foo"
-            if (parser->pos + 3 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "foo", 3) == 0) {
-              parser->pos += 3;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected `"
-                                             "foo"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
+      if (parser->pos < parser->input_len) {
+        switch (parser->input[parser->pos]) {
+        case 102: // "f"
+          parser->pos++;
+
+          if (parser->pos < parser->input_len) {
+            switch (parser->input[parser->pos]) {
+            case 111: // "o"
+              parser->pos++;
+
+              if (parser->pos < parser->input_len) {
+                switch (parser->input[parser->pos]) {
+                case 111: // "o"
+                  parser->pos++;
+                  break;
+                case 114: // "r"
+                  parser->pos++;
+                  if (!has_terminal || parser->pos > last_terminal_pos) {
+                    last_terminal_pos = parser->pos;
+                    has_terminal = 1;
+                  }
+                  if (parser->pos < parser->input_len) {
+                    switch (parser->input[parser->pos]) {
+                    case 107: // "k"
+                      parser->pos++;
+                      break;
+                    default:
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                  } else {
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                  if (!parser->success) {
+                    // Partial match is valid: "for"
+                    parser->success = true;
+                  }
+                  break;
+                default:
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+              } else {
+                parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+              break;
+            default:
               parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
+              }
+            }
+          } else {
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
             }
           }
-        }
-      }
-
-      if (!parser->success) {
-        parser->success = true;
-        { // Match literal "for"
-          if (parser->pos + 3 <= parser->input_len &&
-              memcmp(parser->input + parser->pos, "for", 3) == 0) {
-            parser->pos += 3;
-          } else {
-#ifdef PGEN_ERRORS
-            sprintf(parser->error_message, "Expected `"
-                                           "for"
-                                           "` at position %zu",
-                    parser->pos);
-#endif
-            parser->success = false;
+          break;
+        default:
+          parser->success = false;
+          if (has_terminal) {
+            parser->pos = last_terminal_pos;
+            parser->success = true;
           }
         }
+      } else {
+        parser->success = false;
+        if (has_terminal) {
+          parser->pos = last_terminal_pos;
+          parser->success = true;
+        }
+      }
+      if (!parser->success) {
+        RESTORE_POSITION(parser, trie_start);
       }
     }
 
@@ -559,58 +710,58 @@ static bool parse_test4(Parser *parser) {
 
     { // Capture
       size_t start_pos = parser->pos;
-      {     // Choice
-        {   // Choice
-          { // Match literal "xx"
-            if (parser->pos + 2 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "xx", 2) == 0) {
-              parser->pos += 2;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected `"
-                                             "xx"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
+      { // Trie match for: "xx", "xy", "xz"
+        REMEMBER_POSITION(parser, trie_start);
+        size_t last_terminal_pos = 0;
+        int has_terminal = 0;
 
-          if (!parser->success) {
-            parser->success = true;
-            { // Match literal "xy"
-              if (parser->pos + 2 <= parser->input_len &&
-                  memcmp(parser->input + parser->pos, "xy", 2) == 0) {
-                parser->pos += 2;
-              } else {
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected `"
-                                               "xy"
-                                               "` at position %zu",
-                        parser->pos);
-#endif
+        if (parser->pos < parser->input_len) {
+          switch (parser->input[parser->pos]) {
+          case 120: // "x"
+            parser->pos++;
+
+            if (parser->pos < parser->input_len) {
+              switch (parser->input[parser->pos]) {
+              case 120: // "x"
+                parser->pos++;
+                break;
+              case 121: // "y"
+                parser->pos++;
+                break;
+              case 122: // "z"
+                parser->pos++;
+                break;
+              default:
                 parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+            } else {
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
               }
             }
-          }
-        }
-
-        if (!parser->success) {
-          parser->success = true;
-          { // Match literal "xz"
-            if (parser->pos + 2 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "xz", 2) == 0) {
-              parser->pos += 2;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected `"
-                                             "xz"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
+            break;
+          default:
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
             }
           }
+        } else {
+          parser->success = false;
+          if (has_terminal) {
+            parser->pos = last_terminal_pos;
+            parser->success = true;
+          }
+        }
+        if (!parser->success) {
+          RESTORE_POSITION(parser, trie_start);
         }
       }
 
@@ -689,58 +840,102 @@ static bool parse_test5(Parser *parser) {
 
     { // Capture
       size_t start_pos = parser->pos;
-      {     // Choice
-        {   // Choice
-          { // Match literal "abcd"
-            if (parser->pos + 4 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "abcd", 4) == 0) {
-              parser->pos += 4;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected `"
-                                             "abcd"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
+      { // Trie match for: "abcd", "ab", "ax"
+        REMEMBER_POSITION(parser, trie_start);
+        size_t last_terminal_pos = 0;
+        int has_terminal = 0;
 
-          if (!parser->success) {
-            parser->success = true;
-            { // Match literal "ab"
-              if (parser->pos + 2 <= parser->input_len &&
-                  memcmp(parser->input + parser->pos, "ab", 2) == 0) {
-                parser->pos += 2;
-              } else {
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected `"
-                                               "ab"
-                                               "` at position %zu",
-                        parser->pos);
-#endif
+        if (parser->pos < parser->input_len) {
+          switch (parser->input[parser->pos]) {
+          case 97: // "a"
+            parser->pos++;
+
+            if (parser->pos < parser->input_len) {
+              switch (parser->input[parser->pos]) {
+              case 98: // "b"
+                parser->pos++;
+                if (!has_terminal || parser->pos > last_terminal_pos) {
+                  last_terminal_pos = parser->pos;
+                  has_terminal = 1;
+                }
+                if (parser->pos < parser->input_len) {
+                  switch (parser->input[parser->pos]) {
+                  case 99: // "c"
+                    parser->pos++;
+
+                    if (parser->pos < parser->input_len) {
+                      switch (parser->input[parser->pos]) {
+                      case 100: // "d"
+                        parser->pos++;
+                        break;
+                      default:
+                        parser->success = false;
+                        if (has_terminal) {
+                          parser->pos = last_terminal_pos;
+                          parser->success = true;
+                        }
+                      }
+                    } else {
+                      parser->success = false;
+                      if (has_terminal) {
+                        parser->pos = last_terminal_pos;
+                        parser->success = true;
+                      }
+                    }
+                    break;
+                  default:
+                    parser->success = false;
+                    if (has_terminal) {
+                      parser->pos = last_terminal_pos;
+                      parser->success = true;
+                    }
+                  }
+                } else {
+                  parser->success = false;
+                  if (has_terminal) {
+                    parser->pos = last_terminal_pos;
+                    parser->success = true;
+                  }
+                }
+                if (!parser->success) {
+                  // Partial match is valid: "ab"
+                  parser->success = true;
+                }
+                break;
+              case 120: // "x"
+                parser->pos++;
+                break;
+              default:
                 parser->success = false;
+                if (has_terminal) {
+                  parser->pos = last_terminal_pos;
+                  parser->success = true;
+                }
+              }
+            } else {
+              parser->success = false;
+              if (has_terminal) {
+                parser->pos = last_terminal_pos;
+                parser->success = true;
               }
             }
-          }
-        }
-
-        if (!parser->success) {
-          parser->success = true;
-          { // Match literal "ax"
-            if (parser->pos + 2 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "ax", 2) == 0) {
-              parser->pos += 2;
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected `"
-                                             "ax"
-                                             "` at position %zu",
-                      parser->pos);
-#endif
-              parser->success = false;
+            break;
+          default:
+            parser->success = false;
+            if (has_terminal) {
+              parser->pos = last_terminal_pos;
+              parser->success = true;
             }
           }
+        } else {
+          parser->success = false;
+          if (has_terminal) {
+            parser->pos = last_terminal_pos;
+            parser->success = true;
+          }
+        }
+        if (!parser->success) {
+          RESTORE_POSITION(parser, trie_start);
         }
       }
 
