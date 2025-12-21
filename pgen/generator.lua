@@ -352,7 +352,7 @@ function generator.generate_pattern_code(pattern)
   elseif t == 5 then -- C (capture)
     return generator.generate_capture_code(pattern.value)
   elseif t == 6 then -- Ct (capture table)
-    return generator.generate_capture_table_code(pattern.value)
+    return generator.generate_capture_table_code(pattern.value, pattern.array_only)
   elseif t == 7 then -- Cp (capture position)
     return generator.generate_position_capture_code()
   elseif t == 8 then -- Cc (constant capture)
@@ -688,7 +688,37 @@ end
 
 -- Generate code for a capture table (Ct)
 -- Handles both regular captures (array part) and named captures via Cg (hash part)
-function generator.generate_capture_table_code(body)
+function generator.generate_capture_table_code(body, array_only)
+  if array_only then
+    return template_code([[{ // Capture Table (array-only)
+  int initial_stack_size = lua_gettop(parser->L);
+  $BODY$
+
+  if (parser->success) {
+    int new_stack_size = lua_gettop(parser->L);
+    int items_start = initial_stack_size + 1;
+    int array_count = new_stack_size - initial_stack_size;
+
+    lua_createtable(parser->L, array_count, 0);
+    int table_idx = lua_gettop(parser->L);
+
+    int array_idx = 1;
+    for (int i = items_start; i < table_idx; i++) {
+      lua_pushvalue(parser->L, i);
+      lua_rawseti(parser->L, table_idx, array_idx++);
+    }
+
+    // Remove all items except table, move table to correct position
+    if (items_start <= new_stack_size) {
+      lua_replace(parser->L, items_start);
+      lua_settop(parser->L, items_start);
+    }
+  }
+}]], {
+      BODY = generator.generate_pattern_code(body)
+    })
+  end
+
   return template_code([[{ // Capture Table
   int initial_stack_size = lua_gettop(parser->L);
   $BODY$

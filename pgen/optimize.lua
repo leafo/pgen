@@ -51,6 +51,78 @@ local function is_trie_eligible(alternatives)
   return true
 end
 
+local function contains_cg_in_pattern(pattern, rules, memo, visiting)
+  if not pattern or type(pattern) ~= "table" then
+    return false
+  end
+
+  local t = pattern.type
+  if t == 10 then
+    return true
+  end
+
+  if t == 4 then
+    local name = pattern.value
+    if memo[name] ~= nil then
+      return memo[name]
+    end
+    if visiting[name] then
+      -- Conservative: recursion could contain Cg in other branch
+      return true
+    end
+
+    local rule = rules[name]
+    if type(rule) ~= "table" then
+      -- Unknown rule, avoid optimizing
+      return true
+    end
+
+    visiting[name] = true
+    local result = contains_cg_in_pattern(rule, rules, memo, visiting)
+    visiting[name] = nil
+    memo[name] = result
+    return result
+  end
+
+  if t == 5 or t == 6 or t == 9 or t == 10 or t == 11 then
+    return contains_cg_in_pattern(pattern.value, rules, memo, visiting)
+  end
+
+  if t == "sequence" or t == "choice" then
+    for _, child in ipairs(pattern) do
+      if contains_cg_in_pattern(child, rules, memo, visiting) then
+        return true
+      end
+    end
+    return false
+  end
+
+  if t == "repeat" or t == "negate" then
+    return contains_cg_in_pattern(pattern[1], rules, memo, visiting)
+  end
+
+  return false
+end
+
+-- Mark Ct nodes that don't contain any Cg nodes
+function optimize.capture_table_optimization(grammar)
+  local pgen = require("pgen")
+  local memo = {}
+  local visiting = {}
+
+  return pgen.visit_grammar(grammar, function(node, replace)
+    if node.type ~= 6 then return end
+    if node.array_only then return end
+    if contains_cg_in_pattern(node.value, grammar, memo, visiting) then return end
+
+    replace(pgen._make({
+      type = 6,
+      value = node.value,
+      array_only = true
+    }))
+  end)
+end
+
 -- Build trie data structure from list of strings
 -- Returns: {children = {char -> node}, is_terminal = bool, word = string|nil}
 function optimize.build_trie(strings)
@@ -105,6 +177,7 @@ end
 -- Main entry point: apply all optimization passes
 function optimize.optimize_grammar(grammar)
   grammar = optimize.trie_optimization(grammar)
+  grammar = optimize.capture_table_optimization(grammar)
   -- Future: add more optimization passes here
   return grammar
 end
