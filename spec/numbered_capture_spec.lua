@@ -47,6 +47,29 @@ describe("numbered capture (patt/n) parser", function()
     -- Inner /2 selects "b", outer /1 selects "b" (only one capture at that point)
     assert.equal("b", result)
   end)
+
+  describe("Cn skips Cg sentinels", function()
+    it("selects only visible captures, skipping Cg", function()
+      -- Cg(Cc("one"), "a") * Cc("two") * Cg(Cc("three"), "b") / 1
+      -- Only Cc("two") is visible, so /1 returns "two"
+      local result = parser.parse("9:")
+      assert.equal("two", result)
+    end)
+
+    it("returns nil when index exceeds visible captures", function()
+      -- Cg(Cc("one"), "a") * Cc("two") * Cg(Cc("three"), "b") / 2
+      -- Only 1 visible capture, so /2 returns nil
+      local result = parser.parse("10:")
+      assert.is_nil(result)
+    end)
+
+    it("correctly counts visible captures with mixed C and Cg", function()
+      -- C(P"x") * Cg(C(P"y"), "name") * C(P"z") / 2
+      -- Visible: "x" (1), "z" (2) - Cg("y") is skipped
+      local result = parser.parse("11:xyz")
+      assert.equal("z", result)
+    end)
+  end)
 end)
 
 describe("numbered capture construction errors", function()

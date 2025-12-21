@@ -1,5 +1,5 @@
 local pgen = require "pgen"
-local P, V, C, Ct = pgen.P, pgen.V, pgen.C, pgen.Ct
+local P, V, C, Ct, Cg, Cc = pgen.P, pgen.V, pgen.C, pgen.Ct, pgen.Cg, pgen.Cc
 
 -- Test grammar for numbered capture (patt/n) functionality
 -- Use prefix to select test: "1:...", "2:...", etc.
@@ -13,7 +13,10 @@ return {
          P"5:" * V"test5" +
          P"6:" * V"test6" +
          P"7:" * V"test7" +
-         P"8:" * V"test8",
+         P"8:" * V"test8" +
+         P"9:" * V"test9" +
+         P"10:" * V"test10" +
+         P"11:" * V"test11",
 
   -- Test 1: Select first capture from multiple
   test1 = (C(P"a") * C(P"b") * C(P"c")) / 1,
@@ -38,4 +41,13 @@ return {
 
   -- Test 8: Nested numbered captures
   test8 = ((C(P"a") * C(P"b") * C(P"c")) / 2) / 1,
+
+  -- Test 9: Cn skips Cg sentinels - /1 selects the only visible capture ("two")
+  test9 = (Cg(Cc("one"), "a") * Cc("two") * Cg(Cc("three"), "b")) / 1,
+
+  -- Test 10: Cn skips Cg sentinels - /2 should return nil (only 1 visible capture)
+  test10 = (Cg(Cc("one"), "a") * Cc("two") * Cg(Cc("three"), "b")) / 2,
+
+  -- Test 11: Cn with mixed C and Cg - /2 selects "z" (skipping Cg)
+  test11 = (C(P"x") * Cg(C(P"y"), "name") * C(P"z")) / 2,
 }

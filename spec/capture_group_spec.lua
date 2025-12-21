@@ -53,4 +53,26 @@ describe("capture group (Cg) parser", function()
       greeting = "hi"
     }, result)
   end)
+
+  describe("Cg outside Ct", function()
+    it("returns only position when Cg is alone (sentinel stripped)", function()
+      -- Cg(C(P"hello"), "name") - Cg captures should be invisible outside Ct
+      local result = parser.parse("7:hello")
+      assert.equals(8, result)  -- position after "7:hello" (7 chars, position 8)
+    end)
+
+    it("returns only regular captures when mixed with Cg", function()
+      -- C(P"hello") * Cg(Cc("named"), "name") * C(P"world")
+      local r1, r2, r3 = parser.parse("8:helloworld")
+      assert.equals("hello", r1)
+      assert.equals("world", r2)
+      assert.is_nil(r3)  -- no third value, Cg is stripped
+    end)
+
+    it("returns only position when Cg with Cc (no other captures)", function()
+      -- P"x" * Cg(Cc("value"), "key") * P"y" - no captures except Cg which is stripped
+      local result = parser.parse("9:xy")
+      assert.equals(5, result)  -- position after "9:xy" (4 chars + 1 = 5)
+    end)
+  end)
 end)

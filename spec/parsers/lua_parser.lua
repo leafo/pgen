@@ -202,8 +202,8 @@ return {
   -- String literals
   String = Ct(Cc("string") * (
     -- Long string [[ ... ]] or [=[ ... ]=] with matched equals
-    -- Use Cg to capture equals, Cmb to match in closing, /3 to select only the C capture
-    (C(P"[" * Cg(P"="^0, "eq") * P"[" * (P(1) - (P"]" * Cmb("eq") * P"]"))^0 * P"]" * Cmb("eq") * P"]")) / 3 +
+    -- Use Cg to capture equals, Cmb to match in closing, /1 to select only the C capture
+    (C(P"[" * Cg(P"="^0, "eq") * P"[" * (P(1) - (P"]" * Cmb("eq") * P"]"))^0 * P"]" * Cmb("eq") * P"]")) / 1 +
     -- Single quoted string
     C(P"'" * (P"\\" * P(1) + (P(1) - P"'"))^0 * P"'") +
     -- Double quoted string

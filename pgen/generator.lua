@@ -909,10 +909,25 @@ function generator.generate_numbered_capture_code(body, n)
   $BODY$
 
   if (parser->success) {
-    int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+    int final_stack = lua_gettop(parser->L);
 
-    if ($N$ <= captures_produced) {
-      lua_pushvalue(parser->L, cn_stack_start + $N$);
+    // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
+    int count = 0;
+    int target_idx = 0;
+    for (int i = cn_stack_start + 1; i <= final_stack; i++) {
+      if (lua_islightuserdata(parser->L, i) && is_cg_sentinel(lua_touserdata(parser->L, i))) {
+        i++; // skip sentinel's value too
+        continue;
+      }
+      count++;
+      if (count == $N$) {
+        target_idx = i;
+        break;
+      }
+    }
+
+    if (target_idx > 0) {
+      lua_pushvalue(parser->L, target_idx);
       lua_replace(parser->L, cn_stack_start + 1);
       lua_settop(parser->L, cn_stack_start + 1);
     } else {
@@ -1037,6 +1052,27 @@ static int l_$PARSER_NAME$_parse(lua_State *L) {
     lua_pushstring(L, parser->error_message);
     $PARSER_NAME$_free(parser);
     return 2; // Return nil and error message
+  }
+
+  // Strip Cg sentinel+value pairs from stack (they only matter inside Ct)
+  if (final_stack_size > initial_stack_size) {
+    int read_idx = initial_stack_size + 1;
+    int write_idx = initial_stack_size + 1;
+    while (read_idx <= final_stack_size) {
+      if (lua_islightuserdata(L, read_idx) && is_cg_sentinel(lua_touserdata(L, read_idx))) {
+        // Skip sentinel and its value
+        read_idx += 2;
+      } else {
+        if (read_idx != write_idx) {
+          lua_pushvalue(L, read_idx);
+          lua_replace(L, write_idx);
+        }
+        read_idx++;
+        write_idx++;
+      }
+    }
+    lua_settop(L, write_idx - 1);
+    final_stack_size = lua_gettop(L);
   }
 
   // If stack size has changed, use new items as return values

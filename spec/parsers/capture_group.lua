@@ -11,7 +11,10 @@ return {
          P"3:" * V"test3" +
          P"4:" * V"test4" +
          P"5:" * V"test5" +
-         P"6:" * V"test6",
+         P"6:" * V"test6" +
+         P"7:" * V"test7" +
+         P"8:" * V"test8" +
+         P"9:" * V"test9",
 
   -- Test 1: Named capture becomes named field in Ct
   test1 = Ct(Cg(P"hello", "greeting") * P" " * C(P"world")),
@@ -30,4 +33,13 @@ return {
 
   -- Test 6: Multiple captures inside Cg - only first is used
   test6 = Ct(Cg(C(P"hi") * P" " * C(P"there"), "greeting")),
+
+  -- Test 7: Cg outside Ct - should return only position (sentinel stripped)
+  test7 = Cg(C(P"hello"), "name"),
+
+  -- Test 8: Cg mixed with regular captures outside Ct - only C captures returned
+  test8 = C(P"hello") * Cg(Cc("named"), "name") * C(P"world"),
+
+  -- Test 9: Cg with Cc outside Ct - only position returned (no captures)
+  test9 = P"x" * Cg(Cc("value"), "key") * P"y",
 }
