@@ -1,7 +1,7 @@
 local pgen = {}
 
 -- Pattern types
-local P, R, S, V, C, Ct, Cp, Cc, L, Cg = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+local P, R, S, V, C, Ct, Cp, Cc, L, Cg, Cn = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 
 local mt = {}
 
@@ -93,6 +93,14 @@ function pgen.Cg(patt, name)
   return pattern(Cg, coerce_pattern(patt), name)
 end
 
+-- Numbered capture (select nth capture from inner pattern)
+function pgen.Cn(patt, n)
+  assert(type(n) == "number", "Cn requires a number index")
+  assert(n >= 0, "Cn index must be non-negative")
+  assert(math.floor(n) == n, "Cn index must be an integer")
+  return pattern(Cn, coerce_pattern(patt), n)
+end
+
 function mt.__add(a, b)
   return make{
     type = "choice",
@@ -153,6 +161,14 @@ function mt.__len(a)
   return pgen.L(a)
 end
 
+-- Division operator for numbered capture
+function mt.__div(a, b)
+  if type(b) == "number" then
+    return pgen.Cn(a, b)
+  end
+  error("Pattern division only supports number argument (numbered capture)")
+end
+
 -- Visit every node in a pattern tree, calling visitor on each
 function pgen.visit_pattern(pattern, visitor)
   if not pattern or type(pattern) ~= "table" then
@@ -162,7 +178,7 @@ function pgen.visit_pattern(pattern, visitor)
   visitor(pattern)
 
   local t = pattern.type
-  if t == C or t == Ct or t == L or t == Cg then
+  if t == C or t == Ct or t == L or t == Cg or t == Cn then
     pgen.visit_pattern(pattern.value, visitor)
   elseif t == "sequence" or t == "choice" then
     for _, child in ipairs(pattern) do

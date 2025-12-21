@@ -342,6 +342,8 @@ function generator.generate_pattern_code(pattern)
     return generator.generate_lookahead_code(pattern.value)
   elseif t == 10 then -- Cg (capture group)
     return generator.generate_capture_group_code(pattern.value, pattern.name)
+  elseif t == 11 then -- Cn (numbered capture)
+    return generator.generate_numbered_capture_code(pattern.value, pattern.name)
   elseif t == "sequence" then
     return generator.generate_sequence_code(unpack(pattern))
   elseif t == "choice" then
@@ -819,6 +821,45 @@ function generator.generate_capture_group_code(body, name)
 }]], {
     BODY = generator.generate_pattern_code(body),
     NAME = name
+  })
+end
+
+-- Generate code for a numbered capture (Cn)
+-- Selects the nth capture from inner pattern, or no captures if n=0
+-- If n > capture count, returns nil
+function generator.generate_numbered_capture_code(body, n)
+  if n == 0 then
+    return template_code([[{ // Numbered Capture (discard all)
+  int cn_stack_start = lua_gettop(parser->L);
+  $BODY$
+
+  if (parser->success) {
+    lua_settop(parser->L, cn_stack_start);
+  }
+}]], {
+      BODY = generator.generate_pattern_code(body)
+    })
+  end
+
+  return template_code([[{ // Numbered Capture (select $N$)
+  int cn_stack_start = lua_gettop(parser->L);
+  $BODY$
+
+  if (parser->success) {
+    int captures_produced = lua_gettop(parser->L) - cn_stack_start;
+
+    if ($N$ <= captures_produced) {
+      lua_pushvalue(parser->L, cn_stack_start + $N$);
+      lua_replace(parser->L, cn_stack_start + 1);
+      lua_settop(parser->L, cn_stack_start + 1);
+    } else {
+      lua_settop(parser->L, cn_stack_start);
+      lua_pushnil(parser->L);
+    }
+  }
+}]], {
+    BODY = generator.generate_pattern_code(body),
+    N = n
   })
 end
 
