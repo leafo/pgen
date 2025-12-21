@@ -806,18 +806,35 @@ function generator.generate_lookahead_code(body)
 end
 
 -- Generate code for a capture group (Cg)
--- Pushes two values to the stack: a sentinel (light userdata) and the captured string
+-- Pushes two values to the stack: a sentinel (light userdata) and the captured value
+-- If inner pattern produces captures, uses the first capture; otherwise captures matched text
 function generator.generate_capture_group_code(body, name)
   return template_code([[{ // Capture Group "$NAME$"
+  int cg_stack_start = lua_gettop(parser->L);
   size_t start_pos = parser->pos;
   $BODY$
 
   if (parser->success) {
-    size_t capture_len = parser->pos - start_pos;
-    // Push sentinel (identifies this as named capture "$NAME$")
-    lua_pushlightuserdata(parser->L, (void*)__cg_sentinel_$NAME$);
-    // Push captured value
-    lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+    int cg_stack_end = lua_gettop(parser->L);
+    int captures_produced = cg_stack_end - cg_stack_start;
+
+    if (captures_produced > 0) {
+      // Inner pattern produced captures - use the first one
+      // Push sentinel (identifies this as named capture "$NAME$")
+      lua_pushlightuserdata(parser->L, (void*)__cg_sentinel_$NAME$);
+      // Move sentinel before the first capture
+      lua_insert(parser->L, cg_stack_start + 1);
+      // Now stack is: sentinel, first_capture, [other_captures...]
+      // Remove any extra captures (keep only sentinel + first capture)
+      lua_settop(parser->L, cg_stack_start + 2);
+    } else {
+      // No captures - capture the matched text span
+      size_t capture_len = parser->pos - start_pos;
+      // Push sentinel (identifies this as named capture "$NAME$")
+      lua_pushlightuserdata(parser->L, (void*)__cg_sentinel_$NAME$);
+      // Push captured value
+      lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+    }
   }
 }]], {
     BODY = generator.generate_pattern_code(body),
