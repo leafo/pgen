@@ -71,26 +71,37 @@ local function collect_cg_names(grammar)
 end
 
 -- Collect all Cmt nodes from a grammar, assigning each a unique ID
--- Returns array of {id, code} and a new grammar with cmt_id fields set
+-- Returns array of {id, code} for unique codes, and a new grammar with cmt_id fields set
+-- Identical code strings share the same ID (deduplication)
 local function collect_cmt_codes(grammar)
   local visitor = require("pgen.visitor")
   local pgen = require("pgen")
-  local codes = {}
-  local id = 0
+  local codes = {}           -- Array of {id, code} for unique codes only
+  local code_to_id = {}      -- Map: code string -> id (for deduplication)
+  local next_id = 0
 
   local new_grammar = visitor.visit_grammar(grammar, function(node, replace)
     -- Only replace Cmt nodes that don't already have an ID assigned
     -- (avoids infinite loop since replacement is also visited)
     if node.type == types.Cmt and node.cmt_id == nil then
-      -- Create a copy of the node with cmt_id assigned
+      local code = node.code
+      local id = code_to_id[code]
+
+      if id == nil then
+        -- First time seeing this code, assign new ID
+        id = next_id
+        code_to_id[code] = id
+        table.insert(codes, {id = id, code = code})
+        next_id = next_id + 1
+      end
+
+      -- Create a copy of the node with cmt_id assigned (possibly shared)
       replace(pgen._make({
         type = types.Cmt,
         value = node.value,
-        code = node.code,
+        code = code,
         cmt_id = id
       }))
-      table.insert(codes, {id = id, code = node.code})
-      id = id + 1
     end
   end)
 
