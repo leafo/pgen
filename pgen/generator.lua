@@ -46,12 +46,12 @@ local function escape_c_literal(str, delim)
   return delim .. escaped .. delim
 end
 
--- Collect all Cg names from a grammar
+-- Collect all Cg and Cmb names from a grammar (both use sentinels)
 local function collect_cg_names(grammar)
   local visitor = require("pgen.visitor")
   local names = {}
   visitor.visit_grammar(grammar, function(node)
-    if node.type == types.Cg then -- Cg
+    if node.type == types.Cg or node.type == types.Cmb then
       names[node.name] = true
     end
   end)
@@ -364,6 +364,8 @@ function generator.generate_pattern_code(pattern)
     return generator.generate_capture_group_code(pattern.value, pattern.name)
   elseif t == types.Cn then -- Cn (numbered capture)
     return generator.generate_numbered_capture_code(pattern.value, pattern.name)
+  elseif t == types.Cmb then -- Cmb (capture match back)
+    return generator.generate_capture_match_back_code(pattern.name)
   elseif t == "sequence" then
     return generator.generate_sequence_code(unpack(pattern))
   elseif t == "choice" then
@@ -912,6 +914,42 @@ function generator.generate_numbered_capture_code(body, n)
 }]], {
     BODY = generator.generate_pattern_code(body),
     N = n
+  })
+end
+
+-- Generate code for capture match back (Cmb)
+-- Searches backward through stack for named capture sentinel and matches its string value
+function generator.generate_capture_match_back_code(name)
+  return template_code([[{ // Capture Match Back "$NAME$"
+  parser->success = false;
+
+  // Search backward through stack for sentinel "$NAME$"
+  for (int i = lua_gettop(parser->L); i >= 1; i--) {
+    if (lua_islightuserdata(parser->L, i)) {
+      void* ptr = lua_touserdata(parser->L, i);
+      if (ptr == (void*)__cg_sentinel_$NAME$) {
+        // Found sentinel - value is at i+1 (use only if it's already a string)
+        if (i + 1 <= lua_gettop(parser->L) && lua_type(parser->L, i + 1) == LUA_TSTRING) {
+          size_t match_len;
+          const char* match_str = lua_tolstring(parser->L, i + 1, &match_len);
+          // Try to match at current position
+          if (parser->pos + match_len <= parser->input_len &&
+              memcmp(parser->input + parser->pos, match_str, match_len) == 0) {
+            parser->pos += match_len;
+            parser->success = true;
+          }
+        }
+        break;  // Found sentinel, stop searching regardless of match result
+      }
+    }
+  }
+#ifdef PGEN_ERRORS
+  if (!parser->success) {
+    sprintf(parser->error_message, "Capture match back '$NAME$' failed at position %zu", parser->pos);
+  }
+#endif
+}]], {
+    NAME = name
   })
 end
 

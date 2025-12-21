@@ -103,6 +103,12 @@ function pgen.Cn(patt, n)
   return pattern(types.Cn, coerce_pattern(patt), n)
 end
 
+-- Capture match back (backreference - match value of named capture)
+function pgen.Cmb(name)
+  assert(type(name) == "string", "Cmb requires a string name")
+  return pattern(types.Cmb, nil, name)
+end
+
 function mt.__add(a, b)
   return make{
     type = "choice",

@@ -9,7 +9,8 @@ local types = {
   Cc = 8,
   L = 9,
   Cg = 10,
-  Cn = 11
+  Cn = 11,
+  Cmb = 12
 }
 
 return types
