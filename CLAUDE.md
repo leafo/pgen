@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> Last updated at commit: `086feaf02c32539679fccd5e403362cc5ad11bb5`
+> Last updated at commit: `c48c4881ce56e050cda9515ab3c44ac04e7d078d`
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -38,7 +38,7 @@ pgen/
 ### Key Components
 
 1. **pgen.lua**: Core module with pattern constructors and compilation functions
-2. **pgen/generator.lua**: C code generator (~800 lines) that transforms grammar into parser code
+2. **pgen/generator.lua**: C code generator (~1400 lines) that transforms grammar into parser code
 3. **pgen/optimize.lua**: Grammar optimizer (trie optimization for literal alternatives, choice flattening)
 4. **pgen/visitor.lua**: Generic visitor pattern for AST traversal and transformation
 5. **pgen/types.lua**: Type constants for pattern types
@@ -74,10 +74,37 @@ parser.parse("input string")
 - `L(patt)` - Lookahead (match without consuming input)
 - `Cg(patt, name)` - Capture group (creates named field in parent Ct)
 - `Cn(patt, n)` - Numbered capture (select nth capture from inner pattern)
+- `Cmb(name)` - Match backreference: matches the same text captured by `Cg(patt, name)`
+- `Cmt(patt, code)` - Match-time capture: evaluates Lua code during matching. Code receives `(subject, pos, ...)` where `...` are captures from inner pattern. Return position to advance, `true` to succeed, `false`/`nil` to fail, or position + values for extra captures
 
 If you are adding a new type, please ensure that **pgen/visitor.lua** knows how
 to traverse it. Additionally, it might be worth scanning **pgen/optimize.lua**
 to ensure the new type doesn't interfere with any optimizers.
+
+### Using the Visitor Module
+
+The `pgen.visitor` module provides utilities for traversing and transforming grammar ASTs:
+
+```lua
+local visitor = require("pgen.visitor")
+
+-- Visit all nodes in a grammar, optionally replacing them
+local new_grammar = visitor.visit_grammar(grammar, function(node, replace)
+  -- Inspect node.type, node.value, etc.
+  -- Call replace(new_node) to substitute this node
+  if node.type == types.P and node.value == "old" then
+    replace(visitor.copy_node(node, {value = "new"}))
+  end
+end)
+
+-- Visit a single pattern tree
+local new_pattern = visitor.visit_pattern(pattern, visitor_fn)
+
+-- Copy a node with optional property overrides
+local new_node = visitor.copy_node(node, {value = "modified"})
+```
+
+The visitor uses copy-on-write semantics: when a node is replaced, all ancestor nodes are copied to preserve immutability of the original grammar. The original grammar/pattern is never mutated.
 
 ### Operators
 

@@ -1,15 +1,15 @@
-parser generator in Lua that takes LPEG-like pattern definitions written in Lua
+parser generator in Lua that takes LPeg-like pattern definitions written in Lua
 and generates a Lua module written in C that can parse input strings.
 
 This is just an experiment that will eventually find its way into [moonparse](https://github.com/leafo/moonparse)
 
 ## Features
 
-- LPEG-inspired syntax for defining grammars
+- LPeg-inspired syntax for defining grammars
 - Generates parser in pure C
 - Supports common pattern types: literals, character ranges, character sets
 - Operators for sequences, choices, repetition and optional patterns
-- Supports captures, table captures, and constant captures
+- Supports captures, table captures, constant captures, named captures, and match-time captures
 
 ## Usage
 
@@ -31,7 +31,7 @@ local grammar = {
   float = V"integer" * P"." * V"integer"
 }
 
--- Compile to C
+-- Print out generated C code
 print(pgen.compile(grammar, {
   parser_name = "my_parser"
 }))
@@ -51,6 +51,17 @@ See [Compilation](#compilation) for more details on how to compile the generated
 - `Cp()` - Capture current position without consuming input
 - `Cc(...)` - Constant capture, consumes no input and always matches (appends the given values as captures)
 - `L(patt)` - Lookahead pattern (matches without consuming input)
+- `Cg(patt, name)` - Named capture group (creates named field in parent `Ct`)
+- `Cmt(patt, code)` - Match-time capture (evaluates Lua code during matching)
+
+### Extensions and Differences
+
+Patterns specific to this library that aren't in LPeg:
+
+- `Cn(patt, n)` - Numbered capture (select the nth capture from inner pattern, use `n=0` to discard all captures)
+- `Cmb(name)` - Match backreference (matches the same text captured by `Cg` with the given name)
+
+Unlike LPeg's `Cmt` which takes a function, pgen's `Cmt(patt, code)` takes a **string of Lua code**. This code is embedded into the generated C parser and executed via the Lua C API during parsing. The code receives `(subject, pos, ...)` where `...` are any captures from the inner pattern, and should return a position (to advance), `true` (to succeed), or `false`/`nil` (to fail).
 
 ## Operators
 
@@ -59,8 +70,9 @@ See [Compilation](#compilation) for more details on how to compile the generated
 - `-a` - Negative predicate, continue only if a can't be matched
 - `a^n` - Matches at least n repetitions of pattern
 - `a^-n` - Matches at most n repetitions of pattern
-- `a - b` - Difference: match a only if it's not followed by b (implemented as `-b * a`)
+- `a - b` - Difference: match a only if b doesn't match at current position (implemented as `-b * a`)
 - `#a` - Lookahead: matches a without consuming input (shorthand for `L(a)`)
+- `a / n` - Numbered capture: shorthand for `Cn(a, n)`
 
 ## Compilation
 
@@ -84,4 +96,17 @@ To compile the generated C code as a Lua module, follow these steps:
    local my_parser = require "<module_name>"
    local result = my_parser.parse("your input string")
    ```
+
+For development and testing, you can use `pgen.require(module_name, opts)` to
+dynamically compile and load grammars. This will `os.execute` to GCC to compile
+the grammar to a shared library in `/tmp/` and then load it immediately with
+`package.loadlib`. In production environments it recommended to compile to C
+ahead of time and build shared modules with your build system to avoid
+expensive start-up time.
+
+```lua
+local pgen = require "pgen"
+local parser = pgen.require("path.to.grammar") -- uses same search path as require()
+local result = parser.parse("input string")
+```
 
