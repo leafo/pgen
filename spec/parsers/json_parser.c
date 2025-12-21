@@ -25,14 +25,14 @@ typedef struct {
   int stack_size;
 } ParserPosition;
 
-#define REMEMBER_POSITION(parser, pos)                                         \
-  ParserPosition pos;                                                          \
-  (pos).pos = (parser)->pos;                                                   \
+#define REMEMBER_POSITION(parser, pos) \
+  ParserPosition pos;                  \
+  (pos).pos = (parser)->pos;           \
   (pos).stack_size = lua_gettop((parser)->L);
 
 // Restore parser position
-#define RESTORE_POSITION(parser, pos)                                          \
-  (parser)->pos = (pos).pos;                                                   \
+#define RESTORE_POSITION(parser, pos) \
+  (parser)->pos = (pos).pos;          \
   lua_settop((parser)->L, (pos).stack_size);
 
 #ifdef PGEN_DEBUG
@@ -84,8 +84,7 @@ static bool parse_number(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "number", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "number", start);
 #endif
 
   { // Capture Table
@@ -94,8 +93,7 @@ static bool parse_number(Parser *parser) {
       REMEMBER_POSITION(parser, pos);
 
       { // Constant Capture
-        // A constant capture matches the empty string and produces all given
-        // values
+        // A constant capture matches the empty string and produces all given values
         lua_pushlstring(parser->L, "number", 6);
       }
       if (parser->success) {
@@ -117,10 +115,9 @@ static bool parse_number(Parser *parser) {
                       parser->pos++;
                     } else {
 #ifdef PGEN_ERRORS
-                      sprintf(parser->error_message,
-                              "Expected character `"
-                              "-"
-                              "` at position %zu",
+                      sprintf(parser->error_message, "Expected character `"
+                                                     "-"
+                                                     "` at position %zu",
                               parser->pos);
 #endif
                       parser->success = false;
@@ -145,10 +142,9 @@ static bool parse_number(Parser *parser) {
                     parser->pos++;
                   } else {
 #ifdef PGEN_ERRORS
-                    sprintf(parser->error_message,
-                            "Expected character `"
-                            "0"
-                            "` at position %zu",
+                    sprintf(parser->error_message, "Expected character `"
+                                                   "0"
+                                                   "` at position %zu",
                             parser->pos);
 #endif
                     parser->success = false;
@@ -162,17 +158,15 @@ static bool parse_number(Parser *parser) {
 
                     { // Match character range: "19"
                       if (parser->pos < parser->input_len &&
-                          ((parser->input[parser->pos] >= 49 &&
-                            parser->input[parser->pos] <= 57))) {
+                          ((parser->input[parser->pos] >= 49 && parser->input[parser->pos] <= 57))) {
                         parser->pos++;
                       } else {
 #ifdef PGEN_ERRORS
-                        sprintf(parser->error_message,
-                                "Expected character in ranges ["
-                                "1"
-                                " - "
-                                "9"
-                                "] at position %zu",
+                        sprintf(parser->error_message, "Expected character in ranges ["
+                                                       "1"
+                                                       " - "
+                                                       "9"
+                                                       "] at position %zu",
                                 parser->pos);
 #endif
                         parser->success = false;
@@ -183,17 +177,15 @@ static bool parse_number(Parser *parser) {
                         while (true) {
                           { // Match character range: "09"
                             if (parser->pos < parser->input_len &&
-                                ((parser->input[parser->pos] >= 48 &&
-                                  parser->input[parser->pos] <= 57))) {
+                                ((parser->input[parser->pos] >= 48 && parser->input[parser->pos] <= 57))) {
                               parser->pos++;
                             } else {
 #ifdef PGEN_ERRORS
-                              sprintf(parser->error_message,
-                                      "Expected character in ranges ["
-                                      "0"
-                                      " - "
-                                      "9"
-                                      "] at position %zu",
+                              sprintf(parser->error_message, "Expected character in ranges ["
+                                                             "0"
+                                                             " - "
+                                                             "9"
+                                                             "] at position %zu",
                                       parser->pos);
 #endif
                               parser->success = false;
@@ -229,10 +221,9 @@ static bool parse_number(Parser *parser) {
                             parser->pos++;
                           } else {
 #ifdef PGEN_ERRORS
-                            sprintf(parser->error_message,
-                                    "Expected character `"
-                                    "."
-                                    "` at position %zu",
+                            sprintf(parser->error_message, "Expected character `"
+                                                           "."
+                                                           "` at position %zu",
                                     parser->pos);
 #endif
                             parser->success = false;
@@ -246,17 +237,15 @@ static bool parse_number(Parser *parser) {
                             while (true) {
                               { // Match character range: "09"
                                 if (parser->pos < parser->input_len &&
-                                    ((parser->input[parser->pos] >= 48 &&
-                                      parser->input[parser->pos] <= 57))) {
+                                    ((parser->input[parser->pos] >= 48 && parser->input[parser->pos] <= 57))) {
                                   parser->pos++;
                                 } else {
 #ifdef PGEN_ERRORS
-                                  sprintf(parser->error_message,
-                                          "Expected character in ranges ["
-                                          "0"
-                                          " - "
-                                          "9"
-                                          "] at position %zu",
+                                  sprintf(parser->error_message, "Expected character in ranges ["
+                                                                 "0"
+                                                                 " - "
+                                                                 "9"
+                                                                 "] at position %zu",
                                           parser->pos);
 #endif
                                   parser->success = false;
@@ -275,9 +264,7 @@ static bool parse_number(Parser *parser) {
                             } else {
                               RESTORE_POSITION(parser, pos);
 #ifdef PGEN_ERRORS
-                              sprintf(parser->error_message,
-                                      "Expected 1 repetitions at position %zu",
-                                      parser->pos);
+                              sprintf(parser->error_message, "Expected 1 repetitions at position %zu", parser->pos);
 #endif
                             }
                           }
@@ -317,22 +304,19 @@ static bool parse_number(Parser *parser) {
                                 break;
                               default:
 #ifdef PGEN_ERRORS
-                                sprintf(parser->error_message,
-                                        "Expected one of "
-                                        "\"eE\""
-                                        " at position %zu",
+                                sprintf(parser->error_message, "Expected one of "
+                                                               "\"eE\""
+                                                               " at position %zu",
                                         parser->pos);
 #endif
                                 parser->success = false;
                               }
                             } else {
 #ifdef PGEN_ERRORS
-                              sprintf(
-                                  parser->error_message,
-                                  "Expected one of "
-                                  "\"eE\""
-                                  " at position %zu but reached end of input",
-                                  parser->pos);
+                              sprintf(parser->error_message, "Expected one of "
+                                                             "\"eE\""
+                                                             " at position %zu but reached end of input",
+                                      parser->pos);
 #endif
                               parser->success = false;
                             }
@@ -354,21 +338,18 @@ static bool parse_number(Parser *parser) {
                                         break;
                                       default:
 #ifdef PGEN_ERRORS
-                                        sprintf(parser->error_message,
-                                                "Expected one of "
-                                                "\"+-\""
-                                                " at position %zu",
+                                        sprintf(parser->error_message, "Expected one of "
+                                                                       "\"+-\""
+                                                                       " at position %zu",
                                                 parser->pos);
 #endif
                                         parser->success = false;
                                       }
                                     } else {
 #ifdef PGEN_ERRORS
-                                      sprintf(parser->error_message,
-                                              "Expected one of "
-                                              "\"+-\""
-                                              " at position %zu but reached "
-                                              "end of input",
+                                      sprintf(parser->error_message, "Expected one of "
+                                                                     "\"+-\""
+                                                                     " at position %zu but reached end of input",
                                               parser->pos);
 #endif
                                       parser->success = false;
@@ -376,8 +357,7 @@ static bool parse_number(Parser *parser) {
                                   }
                                 }
 
-                                if (!parser->success ||
-                                    before_pos == parser->pos) {
+                                if (!parser->success || before_pos == parser->pos) {
                                   // Break on failure or zero-width match
                                   parser->success = true;
                                   break;
@@ -394,17 +374,15 @@ static bool parse_number(Parser *parser) {
                                 while (true) {
                                   { // Match character range: "09"
                                     if (parser->pos < parser->input_len &&
-                                        ((parser->input[parser->pos] >= 48 &&
-                                          parser->input[parser->pos] <= 57))) {
+                                        ((parser->input[parser->pos] >= 48 && parser->input[parser->pos] <= 57))) {
                                       parser->pos++;
                                     } else {
 #ifdef PGEN_ERRORS
-                                      sprintf(parser->error_message,
-                                              "Expected character in ranges ["
-                                              "0"
-                                              " - "
-                                              "9"
-                                              "] at position %zu",
+                                      sprintf(parser->error_message, "Expected character in ranges ["
+                                                                     "0"
+                                                                     " - "
+                                                                     "9"
+                                                                     "] at position %zu",
                                               parser->pos);
 #endif
                                       parser->success = false;
@@ -423,10 +401,7 @@ static bool parse_number(Parser *parser) {
                                 } else {
                                   RESTORE_POSITION(parser, pos);
 #ifdef PGEN_ERRORS
-                                  sprintf(
-                                      parser->error_message,
-                                      "Expected 1 repetitions at position %zu",
-                                      parser->pos);
+                                  sprintf(parser->error_message, "Expected 1 repetitions at position %zu", parser->pos);
 #endif
                                 }
                               }
@@ -458,8 +433,7 @@ static bool parse_number(Parser *parser) {
           if (parser->success) {
             size_t capture_length = parser->pos - start_pos;
             // TODO: ensure stack has enough space for push
-            lua_pushlstring(parser->L, parser->input + start_pos,
-                            capture_length);
+            lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
           }
         }
         if (!parser->success) {
@@ -486,13 +460,10 @@ static bool parse_number(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "number", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "number", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "number", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "number", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -505,22 +476,21 @@ static bool parse_string(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "string", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "string", start);
 #endif
 
   { // Sequence with 3 patterns
     REMEMBER_POSITION(parser, pos);
 
     { // Match single character "\""
-      if (parser->pos < parser->input_len && parser->input[parser->pos] == 34) {
+      if (parser->pos < parser->input_len &&
+          parser->input[parser->pos] == 34) {
         parser->pos++;
       } else {
 #ifdef PGEN_ERRORS
-        sprintf(parser->error_message,
-                "Expected character `"
-                "\\\""
-                "` at position %zu",
+        sprintf(parser->error_message, "Expected character `"
+                                       "\\\""
+                                       "` at position %zu",
                 parser->pos);
 #endif
         parser->success = false;
@@ -533,8 +503,7 @@ static bool parse_string(Parser *parser) {
           REMEMBER_POSITION(parser, pos);
 
           { // Constant Capture
-            // A constant capture matches the empty string and produces all
-            // given values
+            // A constant capture matches the empty string and produces all given values
             lua_pushlstring(parser->L, "string", 6);
           }
           if (parser->success) {
@@ -553,8 +522,7 @@ static bool parse_string(Parser *parser) {
               if (parser->success) {
                 size_t capture_length = parser->pos - start_pos;
                 // TODO: ensure stack has enough space for push
-                lua_pushlstring(parser->L, parser->input + start_pos,
-                                capture_length);
+                lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
               }
             }
             if (!parser->success) {
@@ -585,10 +553,9 @@ static bool parse_string(Parser *parser) {
             parser->pos++;
           } else {
 #ifdef PGEN_ERRORS
-            sprintf(parser->error_message,
-                    "Expected character `"
-                    "\\\""
-                    "` at position %zu",
+            sprintf(parser->error_message, "Expected character `"
+                                           "\\\""
+                                           "` at position %zu",
                     parser->pos);
 #endif
             parser->success = false;
@@ -603,13 +570,10 @@ static bool parse_string(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "string", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "string", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "string", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "string", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -622,8 +586,7 @@ static bool parse_ws(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "ws", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "ws", start);
 #endif
 
   { // Zero or more repetitions
@@ -639,20 +602,18 @@ static bool parse_ws(Parser *parser) {
             break;
           default:
 #ifdef PGEN_ERRORS
-            sprintf(parser->error_message,
-                    "Expected one of "
-                    "\" \\t\\n\\r\""
-                    " at position %zu",
+            sprintf(parser->error_message, "Expected one of "
+                                           "\" \\t\\n\\r\""
+                                           " at position %zu",
                     parser->pos);
 #endif
             parser->success = false;
           }
         } else {
 #ifdef PGEN_ERRORS
-          sprintf(parser->error_message,
-                  "Expected one of "
-                  "\" \\t\\n\\r\""
-                  " at position %zu but reached end of input",
+          sprintf(parser->error_message, "Expected one of "
+                                         "\" \\t\\n\\r\""
+                                         " at position %zu but reached end of input",
                   parser->pos);
 #endif
           parser->success = false;
@@ -667,13 +628,10 @@ static bool parse_ws(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "ws", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "ws", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "ws", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "ws", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -686,22 +644,21 @@ static bool parse_escape(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "escape", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "escape", start);
 #endif
 
   { // Sequence with 2 patterns
     REMEMBER_POSITION(parser, pos);
 
     { // Match single character "\\"
-      if (parser->pos < parser->input_len && parser->input[parser->pos] == 92) {
+      if (parser->pos < parser->input_len &&
+          parser->input[parser->pos] == 92) {
         parser->pos++;
       } else {
 #ifdef PGEN_ERRORS
-        sprintf(parser->error_message,
-                "Expected character `"
-                "\\\\"
-                "` at position %zu",
+        sprintf(parser->error_message, "Expected character `"
+                                       "\\\\"
+                                       "` at position %zu",
                 parser->pos);
 #endif
         parser->success = false;
@@ -724,20 +681,18 @@ static bool parse_escape(Parser *parser) {
               break;
             default:
 #ifdef PGEN_ERRORS
-              sprintf(parser->error_message,
-                      "Expected one of "
-                      "\"\\\"\\\\/bfnrt\""
-                      " at position %zu",
+              sprintf(parser->error_message, "Expected one of "
+                                             "\"\\\"\\\\/bfnrt\""
+                                             " at position %zu",
                       parser->pos);
 #endif
               parser->success = false;
             }
           } else {
 #ifdef PGEN_ERRORS
-            sprintf(parser->error_message,
-                    "Expected one of "
-                    "\"\\\"\\\\/bfnrt\""
-                    " at position %zu but reached end of input",
+            sprintf(parser->error_message, "Expected one of "
+                                           "\"\\\"\\\\/bfnrt\""
+                                           " at position %zu but reached end of input",
                     parser->pos);
 #endif
             parser->success = false;
@@ -757,13 +712,10 @@ static bool parse_escape(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "escape", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "escape", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "escape", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "escape", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -776,8 +728,7 @@ static bool parse_false(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "false", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "false", start);
 #endif
 
   { // Sequence with 2 patterns
@@ -789,10 +740,9 @@ static bool parse_false(Parser *parser) {
         parser->pos += 5;
       } else {
 #ifdef PGEN_ERRORS
-        sprintf(parser->error_message,
-                "Expected `"
-                "false"
-                "` at position %zu",
+        sprintf(parser->error_message, "Expected `"
+                                       "false"
+                                       "` at position %zu",
                 parser->pos);
 #endif
         parser->success = false;
@@ -805,14 +755,12 @@ static bool parse_false(Parser *parser) {
           REMEMBER_POSITION(parser, pos);
 
           { // Constant Capture
-            // A constant capture matches the empty string and produces all
-            // given values
+            // A constant capture matches the empty string and produces all given values
             lua_pushlstring(parser->L, "boolean", 7);
           }
           if (parser->success) {
             { // Constant Capture
-              // A constant capture matches the empty string and produces all
-              // given values
+              // A constant capture matches the empty string and produces all given values
               lua_pushboolean(parser->L, 0);
             }
             if (!parser->success) {
@@ -844,13 +792,10 @@ static bool parse_false(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "false", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "false", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "false", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "false", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -863,8 +808,7 @@ static bool parse_member(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "member", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "member", start);
 #endif
 
   { // Capture Table
@@ -873,8 +817,7 @@ static bool parse_member(Parser *parser) {
       REMEMBER_POSITION(parser, pos);
 
       { // Constant Capture
-        // A constant capture matches the empty string and produces all given
-        // values
+        // A constant capture matches the empty string and produces all given values
         lua_pushlstring(parser->L, "member", 6);
       }
       if (parser->success) {
@@ -888,10 +831,9 @@ static bool parse_member(Parser *parser) {
                 parser->pos++;
               } else {
 #ifdef PGEN_ERRORS
-                sprintf(parser->error_message,
-                        "Expected character `"
-                        ":"
-                        "` at position %zu",
+                sprintf(parser->error_message, "Expected character `"
+                                               ":"
+                                               "` at position %zu",
                         parser->pos);
 #endif
                 parser->success = false;
@@ -929,13 +871,10 @@ static bool parse_member(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "member", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "member", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "member", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "member", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -948,35 +887,28 @@ static bool parse_hex(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "hex", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "hex", start);
 #endif
 
   { // Match character range: "09,af,AF"
     if (parser->pos < parser->input_len &&
-        ((parser->input[parser->pos] >= 48 &&
-          parser->input[parser->pos] <= 57) ||
-         (parser->input[parser->pos] >= 97 &&
-          parser->input[parser->pos] <= 102) ||
-         (parser->input[parser->pos] >= 65 &&
-          parser->input[parser->pos] <= 70))) {
+        ((parser->input[parser->pos] >= 48 && parser->input[parser->pos] <= 57) || (parser->input[parser->pos] >= 97 && parser->input[parser->pos] <= 102) || (parser->input[parser->pos] >= 65 && parser->input[parser->pos] <= 70))) {
       parser->pos++;
     } else {
 #ifdef PGEN_ERRORS
-      sprintf(parser->error_message,
-              "Expected character in ranges ["
-              "0"
-              " - "
-              "9"
-              ", "
-              "a"
-              " - "
-              "f"
-              ", "
-              "A"
-              " - "
-              "F"
-              "] at position %zu",
+      sprintf(parser->error_message, "Expected character in ranges ["
+                                     "0"
+                                     " - "
+                                     "9"
+                                     ", "
+                                     "a"
+                                     " - "
+                                     "f"
+                                     ", "
+                                     "A"
+                                     " - "
+                                     "F"
+                                     "] at position %zu",
               parser->pos);
 #endif
       parser->success = false;
@@ -985,13 +917,10 @@ static bool parse_hex(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "hex", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "hex", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "hex", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "hex", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -1004,8 +933,7 @@ static bool parse_char(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "char", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "char", start);
 #endif
 
   { // Choice
@@ -1028,20 +956,18 @@ static bool parse_char(Parser *parser) {
                 break;
               default:
 #ifdef PGEN_ERRORS
-                sprintf(parser->error_message,
-                        "Expected one of "
-                        "\"\\\"\\\\\""
-                        " at position %zu",
+                sprintf(parser->error_message, "Expected one of "
+                                               "\"\\\"\\\\\""
+                                               " at position %zu",
                         parser->pos);
 #endif
                 parser->success = false;
               }
             } else {
 #ifdef PGEN_ERRORS
-              sprintf(parser->error_message,
-                      "Expected one of "
-                      "\"\\\"\\\\\""
-                      " at position %zu but reached end of input",
+              sprintf(parser->error_message, "Expected one of "
+                                             "\"\\\"\\\\\""
+                                             " at position %zu but reached end of input",
                       parser->pos);
 #endif
               parser->success = false;
@@ -1053,17 +979,12 @@ static bool parse_char(Parser *parser) {
             RESTORE_POSITION(parser, pos);
             parser->success = false;
 #ifdef PGEN_ERRORS
-            sprintf(parser->error_message,
-                    "Negated pattern unexpectedly matched at position %zu",
-                    pos.pos);
+            sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
 #endif
           } else {
             // Pattern failed, so negate succeeds
             parser->success = true;
-            RESTORE_POSITION(parser,
-                             pos); // Restore original position (technically not
-                                   // necessary since failed pattern should make
-                                   // no changes to position)
+            RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
           }
         }
         if (parser->success) {
@@ -1072,9 +993,7 @@ static bool parse_char(Parser *parser) {
               parser->pos += 1;
             } else {
 #ifdef PGEN_ERRORS
-              sprintf(parser->error_message,
-                      "Expected at least 1 more characters at position %zu",
-                      parser->pos);
+              sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
 #endif
               parser->success = false;
             }
@@ -1089,13 +1008,10 @@ static bool parse_char(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "char", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "char", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "char", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "char", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -1108,8 +1024,7 @@ static bool parse_true(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "true", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "true", start);
 #endif
 
   { // Sequence with 2 patterns
@@ -1121,10 +1036,9 @@ static bool parse_true(Parser *parser) {
         parser->pos += 4;
       } else {
 #ifdef PGEN_ERRORS
-        sprintf(parser->error_message,
-                "Expected `"
-                "true"
-                "` at position %zu",
+        sprintf(parser->error_message, "Expected `"
+                                       "true"
+                                       "` at position %zu",
                 parser->pos);
 #endif
         parser->success = false;
@@ -1137,14 +1051,12 @@ static bool parse_true(Parser *parser) {
           REMEMBER_POSITION(parser, pos);
 
           { // Constant Capture
-            // A constant capture matches the empty string and produces all
-            // given values
+            // A constant capture matches the empty string and produces all given values
             lua_pushlstring(parser->L, "boolean", 7);
           }
           if (parser->success) {
             { // Constant Capture
-              // A constant capture matches the empty string and produces all
-              // given values
+              // A constant capture matches the empty string and produces all given values
               lua_pushboolean(parser->L, 1);
             }
             if (!parser->success) {
@@ -1176,13 +1088,10 @@ static bool parse_true(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "true", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "true", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "true", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "true", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -1195,8 +1104,7 @@ static bool parse_object(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "object", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "object", start);
 #endif
 
   { // Sequence with 5 patterns
@@ -1208,10 +1116,9 @@ static bool parse_object(Parser *parser) {
         parser->pos++;
       } else {
 #ifdef PGEN_ERRORS
-        sprintf(parser->error_message,
-                "Expected character `"
-                "{"
-                "` at position %zu",
+        sprintf(parser->error_message, "Expected character `"
+                                       "{"
+                                       "` at position %zu",
                 parser->pos);
 #endif
         parser->success = false;
@@ -1226,8 +1133,7 @@ static bool parse_object(Parser *parser) {
             REMEMBER_POSITION(parser, pos);
 
             { // Constant Capture
-              // A constant capture matches the empty string and produces all
-              // given values
+              // A constant capture matches the empty string and produces all given values
               lua_pushlstring(parser->L, "object", 6);
             }
             if (parser->success) {
@@ -1256,10 +1162,9 @@ static bool parse_object(Parser *parser) {
                                     parser->pos++;
                                   } else {
 #ifdef PGEN_ERRORS
-                                    sprintf(parser->error_message,
-                                            "Expected character `"
-                                            ","
-                                            "` at position %zu",
+                                    sprintf(parser->error_message, "Expected character `"
+                                                                   ","
+                                                                   "` at position %zu",
                                             parser->pos);
 #endif
                                     parser->success = false;
@@ -1328,10 +1233,9 @@ static bool parse_object(Parser *parser) {
                 parser->pos++;
               } else {
 #ifdef PGEN_ERRORS
-                sprintf(parser->error_message,
-                        "Expected character `"
-                        "}"
-                        "` at position %zu",
+                sprintf(parser->error_message, "Expected character `"
+                                               "}"
+                                               "` at position %zu",
                         parser->pos);
 #endif
                 parser->success = false;
@@ -1348,13 +1252,10 @@ static bool parse_object(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "object", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "object", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "object", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "object", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -1367,8 +1268,7 @@ static bool parse_unicode(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "unicode", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "unicode", start);
 #endif
 
   { // Sequence with 5 patterns
@@ -1380,10 +1280,9 @@ static bool parse_unicode(Parser *parser) {
         parser->pos++;
       } else {
 #ifdef PGEN_ERRORS
-        sprintf(parser->error_message,
-                "Expected character `"
-                "u"
-                "` at position %zu",
+        sprintf(parser->error_message, "Expected character `"
+                                       "u"
+                                       "` at position %zu",
                 parser->pos);
 #endif
         parser->success = false;
@@ -1408,13 +1307,10 @@ static bool parse_unicode(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "unicode", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "unicode", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "unicode", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "unicode", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -1427,8 +1323,7 @@ static bool parse_value(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "value", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "value", start);
 #endif
 
   {           // Choice
@@ -1477,13 +1372,10 @@ static bool parse_value(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "value", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "value", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "value", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "value", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -1496,22 +1388,21 @@ static bool parse_array(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "array", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "array", start);
 #endif
 
   { // Sequence with 5 patterns
     REMEMBER_POSITION(parser, pos);
 
     { // Match single character "["
-      if (parser->pos < parser->input_len && parser->input[parser->pos] == 91) {
+      if (parser->pos < parser->input_len &&
+          parser->input[parser->pos] == 91) {
         parser->pos++;
       } else {
 #ifdef PGEN_ERRORS
-        sprintf(parser->error_message,
-                "Expected character `"
-                "["
-                "` at position %zu",
+        sprintf(parser->error_message, "Expected character `"
+                                       "["
+                                       "` at position %zu",
                 parser->pos);
 #endif
         parser->success = false;
@@ -1526,8 +1417,7 @@ static bool parse_array(Parser *parser) {
             REMEMBER_POSITION(parser, pos);
 
             { // Constant Capture
-              // A constant capture matches the empty string and produces all
-              // given values
+              // A constant capture matches the empty string and produces all given values
               lua_pushlstring(parser->L, "array", 5);
             }
             if (parser->success) {
@@ -1556,10 +1446,9 @@ static bool parse_array(Parser *parser) {
                                     parser->pos++;
                                   } else {
 #ifdef PGEN_ERRORS
-                                    sprintf(parser->error_message,
-                                            "Expected character `"
-                                            ","
-                                            "` at position %zu",
+                                    sprintf(parser->error_message, "Expected character `"
+                                                                   ","
+                                                                   "` at position %zu",
                                             parser->pos);
 #endif
                                     parser->success = false;
@@ -1628,10 +1517,9 @@ static bool parse_array(Parser *parser) {
                 parser->pos++;
               } else {
 #ifdef PGEN_ERRORS
-                sprintf(parser->error_message,
-                        "Expected character `"
-                        "]"
-                        "` at position %zu",
+                sprintf(parser->error_message, "Expected character `"
+                                               "]"
+                                               "` at position %zu",
                         parser->pos);
 #endif
                 parser->success = false;
@@ -1648,13 +1536,10 @@ static bool parse_array(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "array", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "array", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "array", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "array", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -1667,8 +1552,7 @@ static bool parse_null(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "null", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "null", start);
 #endif
 
   { // Sequence with 2 patterns
@@ -1680,10 +1564,9 @@ static bool parse_null(Parser *parser) {
         parser->pos += 4;
       } else {
 #ifdef PGEN_ERRORS
-        sprintf(parser->error_message,
-                "Expected `"
-                "null"
-                "` at position %zu",
+        sprintf(parser->error_message, "Expected `"
+                                       "null"
+                                       "` at position %zu",
                 parser->pos);
 #endif
         parser->success = false;
@@ -1693,8 +1576,7 @@ static bool parse_null(Parser *parser) {
       { // Capture Table
         int initial_stack_size = lua_gettop(parser->L);
         { // Constant Capture
-          // A constant capture matches the empty string and produces all given
-          // values
+          // A constant capture matches the empty string and produces all given values
           lua_pushlstring(parser->L, "null", 4);
         }
 
@@ -1721,13 +1603,10 @@ static bool parse_null(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "null", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "null", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "null", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "null", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -1740,8 +1619,7 @@ static bool parse_json(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "json", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "json", start);
 #endif
 
   { // Sequence with 4 patterns
@@ -1755,8 +1633,7 @@ static bool parse_json(Parser *parser) {
           REMEMBER_POSITION(parser, pos);
 
           { // Constant Capture
-            // A constant capture matches the empty string and produces all
-            // given values
+            // A constant capture matches the empty string and produces all given values
             lua_pushlstring(parser->L, "json", 4);
           }
           if (parser->success) {
@@ -1793,9 +1670,7 @@ static bool parse_json(Parser *parser) {
                 parser->pos += 1;
               } else {
 #ifdef PGEN_ERRORS
-                sprintf(parser->error_message,
-                        "Expected at least 1 more characters at position %zu",
-                        parser->pos);
+                sprintf(parser->error_message, "Expected at least 1 more characters at position %zu", parser->pos);
 #endif
                 parser->success = false;
               }
@@ -1806,17 +1681,12 @@ static bool parse_json(Parser *parser) {
               RESTORE_POSITION(parser, pos);
               parser->success = false;
 #ifdef PGEN_ERRORS
-              sprintf(parser->error_message,
-                      "Negated pattern unexpectedly matched at position %zu",
-                      pos.pos);
+              sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
 #endif
             } else {
               // Pattern failed, so negate succeeds
               parser->success = true;
-              RESTORE_POSITION(parser,
-                               pos); // Restore original position (technically
-                                     // not necessary since failed pattern
-                                     // should make no changes to position)
+              RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
             }
           }
         }
@@ -1829,13 +1699,10 @@ static bool parse_json(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "json", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "json", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "json", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "json", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -1898,8 +1765,7 @@ static int l_json_parser_parse(lua_State *L) {
 
   // Return nil and error message on failure, true on success
   if (!parser->success) {
-    assert(final_stack_size == initial_stack_size &&
-           "Unexpected stack size change on parse failure.");
+    assert(final_stack_size == initial_stack_size && "Unexpected stack size change on parse failure.");
     lua_pushnil(L);
     lua_pushstring(L, parser->error_message);
     json_parser_free(parser);
@@ -1920,9 +1786,8 @@ static int l_json_parser_parse(lua_State *L) {
 
 // Lua module function registration table
 static const struct luaL_Reg json_parser_module[] = {
-    {"parse",
-     l_json_parser_parse}, // Expose l_parsername_parse as "parse" in Lua
-    {NULL, NULL}           // Sentinel
+    {"parse", l_json_parser_parse}, // Expose l_parsername_parse as "parse" in Lua
+    {NULL, NULL}                    // Sentinel
 };
 
 // Lua module entry point (compatible with Lua 5.1+)
@@ -1936,17 +1801,14 @@ int luaopen_json_parser(lua_State *L) {
 #else
 // Lua 5.1 uses luaL_register
 int luaopen_json_parser(lua_State *L) {
-  luaL_register(L, "json_parser",
-                json_parser_module); // Registers functions in global table (or
-                                     // package table)
+  luaL_register(L, "json_parser", json_parser_module); // Registers functions in global table (or package table)
   return 1;
 }
 #endif
 
 /*
 To compile as a Lua module:
-gcc -shared -o json_parser.so -fPIC json_parser.c `pkg-config --cflags --libs
-lua5.1`
+gcc -shared -o json_parser.so -fPIC json_parser.c `pkg-config --cflags --libs lua5.1`
 
 To use in Lua:
 local json_parser = require "json_parser"

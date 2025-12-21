@@ -25,14 +25,14 @@ typedef struct {
   int stack_size;
 } ParserPosition;
 
-#define REMEMBER_POSITION(parser, pos)                                         \
-  ParserPosition pos;                                                          \
-  (pos).pos = (parser)->pos;                                                   \
+#define REMEMBER_POSITION(parser, pos) \
+  ParserPosition pos;                  \
+  (pos).pos = (parser)->pos;           \
   (pos).stack_size = lua_gettop((parser)->L);
 
 // Restore parser position
-#define RESTORE_POSITION(parser, pos)                                          \
-  (parser)->pos = (pos).pos;                                                   \
+#define RESTORE_POSITION(parser, pos) \
+  (parser)->pos = (pos).pos;          \
   lua_settop((parser)->L, (pos).stack_size);
 
 #ifdef PGEN_DEBUG
@@ -70,8 +70,7 @@ static bool parse_main(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth,
-          "", "main", start);
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "main", start);
 #endif
 
   { // Sequence with 5 patterns
@@ -83,10 +82,9 @@ static bool parse_main(Parser *parser) {
         parser->pos += 4;
       } else {
 #ifdef PGEN_ERRORS
-        sprintf(parser->error_message,
-                "Expected `"
-                "test"
-                "` at position %zu",
+        sprintf(parser->error_message, "Expected `"
+                                       "test"
+                                       "` at position %zu",
                 parser->pos);
 #endif
         parser->success = false;
@@ -94,26 +92,22 @@ static bool parse_main(Parser *parser) {
     }
     if (parser->success) {
       { // Constant Capture
-        // A constant capture matches the empty string and produces all given
-        // values
+        // A constant capture matches the empty string and produces all given values
         lua_pushnumber(parser->L, 42);
       }
       if (parser->success) {
         { // Constant Capture
-          // A constant capture matches the empty string and produces all given
-          // values
+          // A constant capture matches the empty string and produces all given values
           lua_pushlstring(parser->L, "test_field", 10);
         }
         if (parser->success) {
           { // Constant Capture
-            // A constant capture matches the empty string and produces all
-            // given values
+            // A constant capture matches the empty string and produces all given values
             lua_pushnil(parser->L);
           }
           if (parser->success) {
             { // Constant Capture
-              // A constant capture matches the empty string and produces all
-              // given values
+              // A constant capture matches the empty string and produces all given values
               lua_pushboolean(parser->L, 1);
             }
           }
@@ -127,13 +121,10 @@ static bool parse_main(Parser *parser) {
 
 #ifdef PGEN_DEBUG
   if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth,
-            "", "main", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "",
-            (int)(parser->pos - start), parser->input + start);
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "main", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth,
-            "", "main", parser->pos);
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "main", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -196,8 +187,7 @@ static int l_multiple_constants_parse(lua_State *L) {
 
   // Return nil and error message on failure, true on success
   if (!parser->success) {
-    assert(final_stack_size == initial_stack_size &&
-           "Unexpected stack size change on parse failure.");
+    assert(final_stack_size == initial_stack_size && "Unexpected stack size change on parse failure.");
     lua_pushnil(L);
     lua_pushstring(L, parser->error_message);
     multiple_constants_free(parser);
@@ -218,9 +208,8 @@ static int l_multiple_constants_parse(lua_State *L) {
 
 // Lua module function registration table
 static const struct luaL_Reg multiple_constants_module[] = {
-    {"parse",
-     l_multiple_constants_parse}, // Expose l_parsername_parse as "parse" in Lua
-    {NULL, NULL}                  // Sentinel
+    {"parse", l_multiple_constants_parse}, // Expose l_parsername_parse as "parse" in Lua
+    {NULL, NULL}                           // Sentinel
 };
 
 // Lua module entry point (compatible with Lua 5.1+)
@@ -228,24 +217,20 @@ static const struct luaL_Reg multiple_constants_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_multiple_constants(lua_State *L) {
-  luaL_newlib(
-      L, multiple_constants_module); // Creates table and registers functions
+  luaL_newlib(L, multiple_constants_module); // Creates table and registers functions
   return 1;
 }
 #else
 // Lua 5.1 uses luaL_register
 int luaopen_multiple_constants(lua_State *L) {
-  luaL_register(L, "multiple_constants",
-                multiple_constants_module); // Registers functions in global
-                                            // table (or package table)
+  luaL_register(L, "multiple_constants", multiple_constants_module); // Registers functions in global table (or package table)
   return 1;
 }
 #endif
 
 /*
 To compile as a Lua module:
-gcc -shared -o multiple_constants.so -fPIC multiple_constants.c `pkg-config
---cflags --libs lua5.1`
+gcc -shared -o multiple_constants.so -fPIC multiple_constants.c `pkg-config --cflags --libs lua5.1`
 
 To use in Lua:
 local multiple_constants = require "multiple_constants"
