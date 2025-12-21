@@ -425,12 +425,14 @@ static const struct luaL_Reg range_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_range(lua_State *L) {
+
   luaL_newlib(L, range_module); // Creates table and registers functions
   return 1;
 }
 #else
 // Lua 5.1 uses luaL_register
 int luaopen_range(lua_State *L) {
+
   luaL_register(L, "range", range_module); // Registers functions in global table (or package table)
   return 1;
 }

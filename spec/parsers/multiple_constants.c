@@ -244,12 +244,14 @@ static const struct luaL_Reg multiple_constants_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_multiple_constants(lua_State *L) {
+
   luaL_newlib(L, multiple_constants_module); // Creates table and registers functions
   return 1;
 }
 #else
 // Lua 5.1 uses luaL_register
 int luaopen_multiple_constants(lua_State *L) {
+
   luaL_register(L, "multiple_constants", multiple_constants_module); // Registers functions in global table (or package table)
   return 1;
 }

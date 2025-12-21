@@ -911,12 +911,14 @@ static const struct luaL_Reg constant_capture_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_constant_capture(lua_State *L) {
+
   luaL_newlib(L, constant_capture_module); // Creates table and registers functions
   return 1;
 }
 #else
 // Lua 5.1 uses luaL_register
 int luaopen_constant_capture(lua_State *L) {
+
   luaL_register(L, "constant_capture", constant_capture_module); // Registers functions in global table (or package table)
   return 1;
 }

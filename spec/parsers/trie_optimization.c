@@ -1085,12 +1085,14 @@ static const struct luaL_Reg trie_optimization_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_trie_optimization(lua_State *L) {
+
   luaL_newlib(L, trie_optimization_module); // Creates table and registers functions
   return 1;
 }
 #else
 // Lua 5.1 uses luaL_register
 int luaopen_trie_optimization(lua_State *L) {
+
   luaL_register(L, "trie_optimization", trie_optimization_module); // Registers functions in global table (or package table)
   return 1;
 }
