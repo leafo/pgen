@@ -174,7 +174,7 @@ static bool parse_Name(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "Name", start);
 #endif
 
-  { // Capture Table
+  { // Capture Table (array-only)
     int initial_stack_size = lua_gettop(parser->L);
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
@@ -230,45 +230,18 @@ static bool parse_Name(Parser *parser) {
     if (parser->success) {
       int new_stack_size = lua_gettop(parser->L);
       int items_start = initial_stack_size + 1;
+      int array_count = new_stack_size - initial_stack_size;
 
-      // Count array items and named items separately
-      // Named captures are sentinel (light userdata) + value pairs
-      int array_count = 0;
-      int named_count = 0;
-      for (int i = items_start; i <= new_stack_size; i++) {
-        if (lua_islightuserdata(parser->L, i) &&
-            is_cg_sentinel(lua_touserdata(parser->L, i))) {
-          named_count++;
-          i++; // skip the value that follows the sentinel
-        } else {
-          array_count++;
-        }
-      }
-
-      lua_createtable(parser->L, array_count, named_count);
+      lua_createtable(parser->L, array_count, 0);
       int table_idx = lua_gettop(parser->L);
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
-        if (lua_islightuserdata(parser->L, i)) {
-          void *ptr = lua_touserdata(parser->L, i);
-          if (is_cg_sentinel(ptr)) {
-            // Named capture: sentinel at i, value at i+1
-            const char *name = (const char *)ptr;
-            lua_pushstring(parser->L, name);
-            lua_pushvalue(parser->L, i + 1);
-            lua_rawset(parser->L, table_idx);
-            i++; // skip value
-            continue;
-          }
-        }
-        // Regular capture (including non-sentinel light userdata): add to array part
         lua_pushvalue(parser->L, i);
         lua_rawseti(parser->L, table_idx, array_idx++);
       }
 
       // Remove all items except table, move table to correct position
-      // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
         lua_settop(parser->L, items_start);
@@ -297,7 +270,7 @@ static bool parse_Number(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "Number", start);
 #endif
 
-  { // Capture Table
+  { // Capture Table (array-only)
     int initial_stack_size = lua_gettop(parser->L);
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
@@ -1099,45 +1072,18 @@ static bool parse_Number(Parser *parser) {
     if (parser->success) {
       int new_stack_size = lua_gettop(parser->L);
       int items_start = initial_stack_size + 1;
+      int array_count = new_stack_size - initial_stack_size;
 
-      // Count array items and named items separately
-      // Named captures are sentinel (light userdata) + value pairs
-      int array_count = 0;
-      int named_count = 0;
-      for (int i = items_start; i <= new_stack_size; i++) {
-        if (lua_islightuserdata(parser->L, i) &&
-            is_cg_sentinel(lua_touserdata(parser->L, i))) {
-          named_count++;
-          i++; // skip the value that follows the sentinel
-        } else {
-          array_count++;
-        }
-      }
-
-      lua_createtable(parser->L, array_count, named_count);
+      lua_createtable(parser->L, array_count, 0);
       int table_idx = lua_gettop(parser->L);
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
-        if (lua_islightuserdata(parser->L, i)) {
-          void *ptr = lua_touserdata(parser->L, i);
-          if (is_cg_sentinel(ptr)) {
-            // Named capture: sentinel at i, value at i+1
-            const char *name = (const char *)ptr;
-            lua_pushstring(parser->L, name);
-            lua_pushvalue(parser->L, i + 1);
-            lua_rawset(parser->L, table_idx);
-            i++; // skip value
-            continue;
-          }
-        }
-        // Regular capture (including non-sentinel light userdata): add to array part
         lua_pushvalue(parser->L, i);
         lua_rawseti(parser->L, table_idx, array_idx++);
       }
 
       // Remove all items except table, move table to correct position
-      // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
         lua_settop(parser->L, items_start);
@@ -1166,7 +1112,7 @@ static bool parse_String(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "String", start);
 #endif
 
-  { // Capture Table
+  { // Capture Table (array-only)
     int initial_stack_size = lua_gettop(parser->L);
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
@@ -1720,45 +1666,18 @@ static bool parse_String(Parser *parser) {
     if (parser->success) {
       int new_stack_size = lua_gettop(parser->L);
       int items_start = initial_stack_size + 1;
+      int array_count = new_stack_size - initial_stack_size;
 
-      // Count array items and named items separately
-      // Named captures are sentinel (light userdata) + value pairs
-      int array_count = 0;
-      int named_count = 0;
-      for (int i = items_start; i <= new_stack_size; i++) {
-        if (lua_islightuserdata(parser->L, i) &&
-            is_cg_sentinel(lua_touserdata(parser->L, i))) {
-          named_count++;
-          i++; // skip the value that follows the sentinel
-        } else {
-          array_count++;
-        }
-      }
-
-      lua_createtable(parser->L, array_count, named_count);
+      lua_createtable(parser->L, array_count, 0);
       int table_idx = lua_gettop(parser->L);
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
-        if (lua_islightuserdata(parser->L, i)) {
-          void *ptr = lua_touserdata(parser->L, i);
-          if (is_cg_sentinel(ptr)) {
-            // Named capture: sentinel at i, value at i+1
-            const char *name = (const char *)ptr;
-            lua_pushstring(parser->L, name);
-            lua_pushvalue(parser->L, i + 1);
-            lua_rawset(parser->L, table_idx);
-            i++; // skip value
-            continue;
-          }
-        }
-        // Regular capture (including non-sentinel light userdata): add to array part
         lua_pushvalue(parser->L, i);
         lua_rawseti(parser->L, table_idx, array_idx++);
       }
 
       // Remove all items except table, move table to correct position
-      // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
         lua_settop(parser->L, items_start);
@@ -1887,7 +1806,7 @@ static bool parse_attnamelist(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "attnamelist", start);
 #endif
 
-  { // Capture Table
+  { // Capture Table (array-only)
     int initial_stack_size = lua_gettop(parser->L);
     { // Sequence with 4 patterns
       REMEMBER_POSITION(parser, pos);
@@ -1989,45 +1908,18 @@ static bool parse_attnamelist(Parser *parser) {
     if (parser->success) {
       int new_stack_size = lua_gettop(parser->L);
       int items_start = initial_stack_size + 1;
+      int array_count = new_stack_size - initial_stack_size;
 
-      // Count array items and named items separately
-      // Named captures are sentinel (light userdata) + value pairs
-      int array_count = 0;
-      int named_count = 0;
-      for (int i = items_start; i <= new_stack_size; i++) {
-        if (lua_islightuserdata(parser->L, i) &&
-            is_cg_sentinel(lua_touserdata(parser->L, i))) {
-          named_count++;
-          i++; // skip the value that follows the sentinel
-        } else {
-          array_count++;
-        }
-      }
-
-      lua_createtable(parser->L, array_count, named_count);
+      lua_createtable(parser->L, array_count, 0);
       int table_idx = lua_gettop(parser->L);
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
-        if (lua_islightuserdata(parser->L, i)) {
-          void *ptr = lua_touserdata(parser->L, i);
-          if (is_cg_sentinel(ptr)) {
-            // Named capture: sentinel at i, value at i+1
-            const char *name = (const char *)ptr;
-            lua_pushstring(parser->L, name);
-            lua_pushvalue(parser->L, i + 1);
-            lua_rawset(parser->L, table_idx);
-            i++; // skip value
-            continue;
-          }
-        }
-        // Regular capture (including non-sentinel light userdata): add to array part
         lua_pushvalue(parser->L, i);
         lua_rawseti(parser->L, table_idx, array_idx++);
       }
 
       // Remove all items except table, move table to correct position
-      // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
         lua_settop(parser->L, items_start);
@@ -2061,7 +1953,7 @@ static bool parse_attrib(Parser *parser) {
 
     parse_ws(parser);
     if (parser->success) {
-      { // Capture Table
+      { // Capture Table (array-only)
         int initial_stack_size = lua_gettop(parser->L);
         { // Sequence with 6 patterns
           REMEMBER_POSITION(parser, pos);
@@ -2119,45 +2011,18 @@ static bool parse_attrib(Parser *parser) {
         if (parser->success) {
           int new_stack_size = lua_gettop(parser->L);
           int items_start = initial_stack_size + 1;
+          int array_count = new_stack_size - initial_stack_size;
 
-          // Count array items and named items separately
-          // Named captures are sentinel (light userdata) + value pairs
-          int array_count = 0;
-          int named_count = 0;
-          for (int i = items_start; i <= new_stack_size; i++) {
-            if (lua_islightuserdata(parser->L, i) &&
-                is_cg_sentinel(lua_touserdata(parser->L, i))) {
-              named_count++;
-              i++; // skip the value that follows the sentinel
-            } else {
-              array_count++;
-            }
-          }
-
-          lua_createtable(parser->L, array_count, named_count);
+          lua_createtable(parser->L, array_count, 0);
           int table_idx = lua_gettop(parser->L);
 
           int array_idx = 1;
           for (int i = items_start; i < table_idx; i++) {
-            if (lua_islightuserdata(parser->L, i)) {
-              void *ptr = lua_touserdata(parser->L, i);
-              if (is_cg_sentinel(ptr)) {
-                // Named capture: sentinel at i, value at i+1
-                const char *name = (const char *)ptr;
-                lua_pushstring(parser->L, name);
-                lua_pushvalue(parser->L, i + 1);
-                lua_rawset(parser->L, table_idx);
-                i++; // skip value
-                continue;
-              }
-            }
-            // Regular capture (including non-sentinel light userdata): add to array part
             lua_pushvalue(parser->L, i);
             lua_rawseti(parser->L, table_idx, array_idx++);
           }
 
           // Remove all items except table, move table to correct position
-          // Only needed if there were items to remove (items_start <= new_stack_size)
           if (items_start <= new_stack_size) {
             lua_replace(parser->L, items_start);
             lua_settop(parser->L, items_start);
@@ -2191,7 +2056,7 @@ static bool parse_binop(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "binop", start);
 #endif
 
-  { // Capture Table
+  { // Capture Table (array-only)
     int initial_stack_size = lua_gettop(parser->L);
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
@@ -2503,45 +2368,18 @@ static bool parse_binop(Parser *parser) {
     if (parser->success) {
       int new_stack_size = lua_gettop(parser->L);
       int items_start = initial_stack_size + 1;
+      int array_count = new_stack_size - initial_stack_size;
 
-      // Count array items and named items separately
-      // Named captures are sentinel (light userdata) + value pairs
-      int array_count = 0;
-      int named_count = 0;
-      for (int i = items_start; i <= new_stack_size; i++) {
-        if (lua_islightuserdata(parser->L, i) &&
-            is_cg_sentinel(lua_touserdata(parser->L, i))) {
-          named_count++;
-          i++; // skip the value that follows the sentinel
-        } else {
-          array_count++;
-        }
-      }
-
-      lua_createtable(parser->L, array_count, named_count);
+      lua_createtable(parser->L, array_count, 0);
       int table_idx = lua_gettop(parser->L);
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
-        if (lua_islightuserdata(parser->L, i)) {
-          void *ptr = lua_touserdata(parser->L, i);
-          if (is_cg_sentinel(ptr)) {
-            // Named capture: sentinel at i, value at i+1
-            const char *name = (const char *)ptr;
-            lua_pushstring(parser->L, name);
-            lua_pushvalue(parser->L, i + 1);
-            lua_rawset(parser->L, table_idx);
-            i++; // skip value
-            continue;
-          }
-        }
-        // Regular capture (including non-sentinel light userdata): add to array part
         lua_pushvalue(parser->L, i);
         lua_rawseti(parser->L, table_idx, array_idx++);
       }
 
       // Remove all items except table, move table to correct position
-      // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
         lua_settop(parser->L, items_start);
@@ -4014,7 +3852,7 @@ static bool parse_funcname(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "funcname", start);
 #endif
 
-  { // Capture Table
+  { // Capture Table (array-only)
     int initial_stack_size = lua_gettop(parser->L);
     { // Sequence with 4 patterns
       REMEMBER_POSITION(parser, pos);
@@ -4124,45 +3962,18 @@ static bool parse_funcname(Parser *parser) {
     if (parser->success) {
       int new_stack_size = lua_gettop(parser->L);
       int items_start = initial_stack_size + 1;
+      int array_count = new_stack_size - initial_stack_size;
 
-      // Count array items and named items separately
-      // Named captures are sentinel (light userdata) + value pairs
-      int array_count = 0;
-      int named_count = 0;
-      for (int i = items_start; i <= new_stack_size; i++) {
-        if (lua_islightuserdata(parser->L, i) &&
-            is_cg_sentinel(lua_touserdata(parser->L, i))) {
-          named_count++;
-          i++; // skip the value that follows the sentinel
-        } else {
-          array_count++;
-        }
-      }
-
-      lua_createtable(parser->L, array_count, named_count);
+      lua_createtable(parser->L, array_count, 0);
       int table_idx = lua_gettop(parser->L);
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
-        if (lua_islightuserdata(parser->L, i)) {
-          void *ptr = lua_touserdata(parser->L, i);
-          if (is_cg_sentinel(ptr)) {
-            // Named capture: sentinel at i, value at i+1
-            const char *name = (const char *)ptr;
-            lua_pushstring(parser->L, name);
-            lua_pushvalue(parser->L, i + 1);
-            lua_rawset(parser->L, table_idx);
-            i++; // skip value
-            continue;
-          }
-        }
-        // Regular capture (including non-sentinel light userdata): add to array part
         lua_pushvalue(parser->L, i);
         lua_rawseti(parser->L, table_idx, array_idx++);
       }
 
       // Remove all items except table, move table to correct position
-      // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
         lua_settop(parser->L, items_start);
@@ -5783,7 +5594,7 @@ static bool parse_namelist(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "namelist", start);
 #endif
 
-  { // Capture Table
+  { // Capture Table (array-only)
     int initial_stack_size = lua_gettop(parser->L);
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
@@ -5843,45 +5654,18 @@ static bool parse_namelist(Parser *parser) {
     if (parser->success) {
       int new_stack_size = lua_gettop(parser->L);
       int items_start = initial_stack_size + 1;
+      int array_count = new_stack_size - initial_stack_size;
 
-      // Count array items and named items separately
-      // Named captures are sentinel (light userdata) + value pairs
-      int array_count = 0;
-      int named_count = 0;
-      for (int i = items_start; i <= new_stack_size; i++) {
-        if (lua_islightuserdata(parser->L, i) &&
-            is_cg_sentinel(lua_touserdata(parser->L, i))) {
-          named_count++;
-          i++; // skip the value that follows the sentinel
-        } else {
-          array_count++;
-        }
-      }
-
-      lua_createtable(parser->L, array_count, named_count);
+      lua_createtable(parser->L, array_count, 0);
       int table_idx = lua_gettop(parser->L);
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
-        if (lua_islightuserdata(parser->L, i)) {
-          void *ptr = lua_touserdata(parser->L, i);
-          if (is_cg_sentinel(ptr)) {
-            // Named capture: sentinel at i, value at i+1
-            const char *name = (const char *)ptr;
-            lua_pushstring(parser->L, name);
-            lua_pushvalue(parser->L, i + 1);
-            lua_rawset(parser->L, table_idx);
-            i++; // skip value
-            continue;
-          }
-        }
-        // Regular capture (including non-sentinel light userdata): add to array part
         lua_pushvalue(parser->L, i);
         lua_rawseti(parser->L, table_idx, array_idx++);
       }
 
       // Remove all items except table, move table to correct position
-      // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
         lua_settop(parser->L, items_start);
@@ -6013,7 +5797,7 @@ static bool parse_parlist(Parser *parser) {
                 }
               }
               if (parser->success) {
-                { // Capture Table
+                { // Capture Table (array-only)
                   int initial_stack_size = lua_gettop(parser->L);
                   { // Constant Capture
                     // A constant capture matches the empty string and produces all given values
@@ -6023,45 +5807,18 @@ static bool parse_parlist(Parser *parser) {
                   if (parser->success) {
                     int new_stack_size = lua_gettop(parser->L);
                     int items_start = initial_stack_size + 1;
+                    int array_count = new_stack_size - initial_stack_size;
 
-                    // Count array items and named items separately
-                    // Named captures are sentinel (light userdata) + value pairs
-                    int array_count = 0;
-                    int named_count = 0;
-                    for (int i = items_start; i <= new_stack_size; i++) {
-                      if (lua_islightuserdata(parser->L, i) &&
-                          is_cg_sentinel(lua_touserdata(parser->L, i))) {
-                        named_count++;
-                        i++; // skip the value that follows the sentinel
-                      } else {
-                        array_count++;
-                      }
-                    }
-
-                    lua_createtable(parser->L, array_count, named_count);
+                    lua_createtable(parser->L, array_count, 0);
                     int table_idx = lua_gettop(parser->L);
 
                     int array_idx = 1;
                     for (int i = items_start; i < table_idx; i++) {
-                      if (lua_islightuserdata(parser->L, i)) {
-                        void *ptr = lua_touserdata(parser->L, i);
-                        if (is_cg_sentinel(ptr)) {
-                          // Named capture: sentinel at i, value at i+1
-                          const char *name = (const char *)ptr;
-                          lua_pushstring(parser->L, name);
-                          lua_pushvalue(parser->L, i + 1);
-                          lua_rawset(parser->L, table_idx);
-                          i++; // skip value
-                          continue;
-                        }
-                      }
-                      // Regular capture (including non-sentinel light userdata): add to array part
                       lua_pushvalue(parser->L, i);
                       lua_rawseti(parser->L, table_idx, array_idx++);
                     }
 
                     // Remove all items except table, move table to correct position
-                    // Only needed if there were items to remove (items_start <= new_stack_size)
                     if (items_start <= new_stack_size) {
                       lua_replace(parser->L, items_start);
                       lua_settop(parser->L, items_start);
@@ -6613,7 +6370,7 @@ static bool parse_simple_exp(Parser *parser) {
                         }
                       }
                       if (parser->success) {
-                        { // Capture Table
+                        { // Capture Table (array-only)
                           int initial_stack_size = lua_gettop(parser->L);
                           { // Constant Capture
                             // A constant capture matches the empty string and produces all given values
@@ -6623,45 +6380,18 @@ static bool parse_simple_exp(Parser *parser) {
                           if (parser->success) {
                             int new_stack_size = lua_gettop(parser->L);
                             int items_start = initial_stack_size + 1;
+                            int array_count = new_stack_size - initial_stack_size;
 
-                            // Count array items and named items separately
-                            // Named captures are sentinel (light userdata) + value pairs
-                            int array_count = 0;
-                            int named_count = 0;
-                            for (int i = items_start; i <= new_stack_size; i++) {
-                              if (lua_islightuserdata(parser->L, i) &&
-                                  is_cg_sentinel(lua_touserdata(parser->L, i))) {
-                                named_count++;
-                                i++; // skip the value that follows the sentinel
-                              } else {
-                                array_count++;
-                              }
-                            }
-
-                            lua_createtable(parser->L, array_count, named_count);
+                            lua_createtable(parser->L, array_count, 0);
                             int table_idx = lua_gettop(parser->L);
 
                             int array_idx = 1;
                             for (int i = items_start; i < table_idx; i++) {
-                              if (lua_islightuserdata(parser->L, i)) {
-                                void *ptr = lua_touserdata(parser->L, i);
-                                if (is_cg_sentinel(ptr)) {
-                                  // Named capture: sentinel at i, value at i+1
-                                  const char *name = (const char *)ptr;
-                                  lua_pushstring(parser->L, name);
-                                  lua_pushvalue(parser->L, i + 1);
-                                  lua_rawset(parser->L, table_idx);
-                                  i++; // skip value
-                                  continue;
-                                }
-                              }
-                              // Regular capture (including non-sentinel light userdata): add to array part
                               lua_pushvalue(parser->L, i);
                               lua_rawseti(parser->L, table_idx, array_idx++);
                             }
 
                             // Remove all items except table, move table to correct position
-                            // Only needed if there were items to remove (items_start <= new_stack_size)
                             if (items_start <= new_stack_size) {
                               lua_replace(parser->L, items_start);
                               lua_settop(parser->L, items_start);
@@ -6694,7 +6424,7 @@ static bool parse_simple_exp(Parser *parser) {
                           }
                         }
                         if (parser->success) {
-                          { // Capture Table
+                          { // Capture Table (array-only)
                             int initial_stack_size = lua_gettop(parser->L);
                             { // Constant Capture
                               // A constant capture matches the empty string and produces all given values
@@ -6705,45 +6435,18 @@ static bool parse_simple_exp(Parser *parser) {
                             if (parser->success) {
                               int new_stack_size = lua_gettop(parser->L);
                               int items_start = initial_stack_size + 1;
+                              int array_count = new_stack_size - initial_stack_size;
 
-                              // Count array items and named items separately
-                              // Named captures are sentinel (light userdata) + value pairs
-                              int array_count = 0;
-                              int named_count = 0;
-                              for (int i = items_start; i <= new_stack_size; i++) {
-                                if (lua_islightuserdata(parser->L, i) &&
-                                    is_cg_sentinel(lua_touserdata(parser->L, i))) {
-                                  named_count++;
-                                  i++; // skip the value that follows the sentinel
-                                } else {
-                                  array_count++;
-                                }
-                              }
-
-                              lua_createtable(parser->L, array_count, named_count);
+                              lua_createtable(parser->L, array_count, 0);
                               int table_idx = lua_gettop(parser->L);
 
                               int array_idx = 1;
                               for (int i = items_start; i < table_idx; i++) {
-                                if (lua_islightuserdata(parser->L, i)) {
-                                  void *ptr = lua_touserdata(parser->L, i);
-                                  if (is_cg_sentinel(ptr)) {
-                                    // Named capture: sentinel at i, value at i+1
-                                    const char *name = (const char *)ptr;
-                                    lua_pushstring(parser->L, name);
-                                    lua_pushvalue(parser->L, i + 1);
-                                    lua_rawset(parser->L, table_idx);
-                                    i++; // skip value
-                                    continue;
-                                  }
-                                }
-                                // Regular capture (including non-sentinel light userdata): add to array part
                                 lua_pushvalue(parser->L, i);
                                 lua_rawseti(parser->L, table_idx, array_idx++);
                               }
 
                               // Remove all items except table, move table to correct position
-                              // Only needed if there were items to remove (items_start <= new_stack_size)
                               if (items_start <= new_stack_size) {
                                 lua_replace(parser->L, items_start);
                                 lua_settop(parser->L, items_start);
@@ -6778,7 +6481,7 @@ static bool parse_simple_exp(Parser *parser) {
                         }
                       }
                       if (parser->success) {
-                        { // Capture Table
+                        { // Capture Table (array-only)
                           int initial_stack_size = lua_gettop(parser->L);
                           { // Constant Capture
                             // A constant capture matches the empty string and produces all given values
@@ -6789,45 +6492,18 @@ static bool parse_simple_exp(Parser *parser) {
                           if (parser->success) {
                             int new_stack_size = lua_gettop(parser->L);
                             int items_start = initial_stack_size + 1;
+                            int array_count = new_stack_size - initial_stack_size;
 
-                            // Count array items and named items separately
-                            // Named captures are sentinel (light userdata) + value pairs
-                            int array_count = 0;
-                            int named_count = 0;
-                            for (int i = items_start; i <= new_stack_size; i++) {
-                              if (lua_islightuserdata(parser->L, i) &&
-                                  is_cg_sentinel(lua_touserdata(parser->L, i))) {
-                                named_count++;
-                                i++; // skip the value that follows the sentinel
-                              } else {
-                                array_count++;
-                              }
-                            }
-
-                            lua_createtable(parser->L, array_count, named_count);
+                            lua_createtable(parser->L, array_count, 0);
                             int table_idx = lua_gettop(parser->L);
 
                             int array_idx = 1;
                             for (int i = items_start; i < table_idx; i++) {
-                              if (lua_islightuserdata(parser->L, i)) {
-                                void *ptr = lua_touserdata(parser->L, i);
-                                if (is_cg_sentinel(ptr)) {
-                                  // Named capture: sentinel at i, value at i+1
-                                  const char *name = (const char *)ptr;
-                                  lua_pushstring(parser->L, name);
-                                  lua_pushvalue(parser->L, i + 1);
-                                  lua_rawset(parser->L, table_idx);
-                                  i++; // skip value
-                                  continue;
-                                }
-                              }
-                              // Regular capture (including non-sentinel light userdata): add to array part
                               lua_pushvalue(parser->L, i);
                               lua_rawseti(parser->L, table_idx, array_idx++);
                             }
 
                             // Remove all items except table, move table to correct position
-                            // Only needed if there were items to remove (items_start <= new_stack_size)
                             if (items_start <= new_stack_size) {
                               lua_replace(parser->L, items_start);
                               lua_settop(parser->L, items_start);
@@ -6874,7 +6550,7 @@ static bool parse_simple_exp(Parser *parser) {
                   }
                 }
                 if (parser->success) {
-                  { // Capture Table
+                  { // Capture Table (array-only)
                     int initial_stack_size = lua_gettop(parser->L);
                     { // Constant Capture
                       // A constant capture matches the empty string and produces all given values
@@ -6884,45 +6560,18 @@ static bool parse_simple_exp(Parser *parser) {
                     if (parser->success) {
                       int new_stack_size = lua_gettop(parser->L);
                       int items_start = initial_stack_size + 1;
+                      int array_count = new_stack_size - initial_stack_size;
 
-                      // Count array items and named items separately
-                      // Named captures are sentinel (light userdata) + value pairs
-                      int array_count = 0;
-                      int named_count = 0;
-                      for (int i = items_start; i <= new_stack_size; i++) {
-                        if (lua_islightuserdata(parser->L, i) &&
-                            is_cg_sentinel(lua_touserdata(parser->L, i))) {
-                          named_count++;
-                          i++; // skip the value that follows the sentinel
-                        } else {
-                          array_count++;
-                        }
-                      }
-
-                      lua_createtable(parser->L, array_count, named_count);
+                      lua_createtable(parser->L, array_count, 0);
                       int table_idx = lua_gettop(parser->L);
 
                       int array_idx = 1;
                       for (int i = items_start; i < table_idx; i++) {
-                        if (lua_islightuserdata(parser->L, i)) {
-                          void *ptr = lua_touserdata(parser->L, i);
-                          if (is_cg_sentinel(ptr)) {
-                            // Named capture: sentinel at i, value at i+1
-                            const char *name = (const char *)ptr;
-                            lua_pushstring(parser->L, name);
-                            lua_pushvalue(parser->L, i + 1);
-                            lua_rawset(parser->L, table_idx);
-                            i++; // skip value
-                            continue;
-                          }
-                        }
-                        // Regular capture (including non-sentinel light userdata): add to array part
                         lua_pushvalue(parser->L, i);
                         lua_rawseti(parser->L, table_idx, array_idx++);
                       }
 
                       // Remove all items except table, move table to correct position
-                      // Only needed if there were items to remove (items_start <= new_stack_size)
                       if (items_start <= new_stack_size) {
                         lua_replace(parser->L, items_start);
                         lua_settop(parser->L, items_start);
@@ -7089,7 +6738,7 @@ static bool parse_stat(Parser *parser) {
                                       }
                                     }
                                     if (parser->success) {
-                                      { // Capture Table
+                                      { // Capture Table (array-only)
                                         int initial_stack_size = lua_gettop(parser->L);
                                         { // Constant Capture
                                           // A constant capture matches the empty string and produces all given values
@@ -7099,45 +6748,18 @@ static bool parse_stat(Parser *parser) {
                                         if (parser->success) {
                                           int new_stack_size = lua_gettop(parser->L);
                                           int items_start = initial_stack_size + 1;
+                                          int array_count = new_stack_size - initial_stack_size;
 
-                                          // Count array items and named items separately
-                                          // Named captures are sentinel (light userdata) + value pairs
-                                          int array_count = 0;
-                                          int named_count = 0;
-                                          for (int i = items_start; i <= new_stack_size; i++) {
-                                            if (lua_islightuserdata(parser->L, i) &&
-                                                is_cg_sentinel(lua_touserdata(parser->L, i))) {
-                                              named_count++;
-                                              i++; // skip the value that follows the sentinel
-                                            } else {
-                                              array_count++;
-                                            }
-                                          }
-
-                                          lua_createtable(parser->L, array_count, named_count);
+                                          lua_createtable(parser->L, array_count, 0);
                                           int table_idx = lua_gettop(parser->L);
 
                                           int array_idx = 1;
                                           for (int i = items_start; i < table_idx; i++) {
-                                            if (lua_islightuserdata(parser->L, i)) {
-                                              void *ptr = lua_touserdata(parser->L, i);
-                                              if (is_cg_sentinel(ptr)) {
-                                                // Named capture: sentinel at i, value at i+1
-                                                const char *name = (const char *)ptr;
-                                                lua_pushstring(parser->L, name);
-                                                lua_pushvalue(parser->L, i + 1);
-                                                lua_rawset(parser->L, table_idx);
-                                                i++; // skip value
-                                                continue;
-                                              }
-                                            }
-                                            // Regular capture (including non-sentinel light userdata): add to array part
                                             lua_pushvalue(parser->L, i);
                                             lua_rawseti(parser->L, table_idx, array_idx++);
                                           }
 
                                           // Remove all items except table, move table to correct position
-                                          // Only needed if there were items to remove (items_start <= new_stack_size)
                                           if (items_start <= new_stack_size) {
                                             lua_replace(parser->L, items_start);
                                             lua_settop(parser->L, items_start);
@@ -7253,7 +6875,7 @@ static bool parse_stat(Parser *parser) {
 
                               if (!parser->success) {
                                 parser->success = true;
-                                { // Capture Table
+                                { // Capture Table (array-only)
                                   int initial_stack_size = lua_gettop(parser->L);
                                   { // Sequence with 6 patterns
                                     REMEMBER_POSITION(parser, pos);
@@ -7311,45 +6933,18 @@ static bool parse_stat(Parser *parser) {
                                   if (parser->success) {
                                     int new_stack_size = lua_gettop(parser->L);
                                     int items_start = initial_stack_size + 1;
+                                    int array_count = new_stack_size - initial_stack_size;
 
-                                    // Count array items and named items separately
-                                    // Named captures are sentinel (light userdata) + value pairs
-                                    int array_count = 0;
-                                    int named_count = 0;
-                                    for (int i = items_start; i <= new_stack_size; i++) {
-                                      if (lua_islightuserdata(parser->L, i) &&
-                                          is_cg_sentinel(lua_touserdata(parser->L, i))) {
-                                        named_count++;
-                                        i++; // skip the value that follows the sentinel
-                                      } else {
-                                        array_count++;
-                                      }
-                                    }
-
-                                    lua_createtable(parser->L, array_count, named_count);
+                                    lua_createtable(parser->L, array_count, 0);
                                     int table_idx = lua_gettop(parser->L);
 
                                     int array_idx = 1;
                                     for (int i = items_start; i < table_idx; i++) {
-                                      if (lua_islightuserdata(parser->L, i)) {
-                                        void *ptr = lua_touserdata(parser->L, i);
-                                        if (is_cg_sentinel(ptr)) {
-                                          // Named capture: sentinel at i, value at i+1
-                                          const char *name = (const char *)ptr;
-                                          lua_pushstring(parser->L, name);
-                                          lua_pushvalue(parser->L, i + 1);
-                                          lua_rawset(parser->L, table_idx);
-                                          i++; // skip value
-                                          continue;
-                                        }
-                                      }
-                                      // Regular capture (including non-sentinel light userdata): add to array part
                                       lua_pushvalue(parser->L, i);
                                       lua_rawseti(parser->L, table_idx, array_idx++);
                                     }
 
                                     // Remove all items except table, move table to correct position
-                                    // Only needed if there were items to remove (items_start <= new_stack_size)
                                     if (items_start <= new_stack_size) {
                                       lua_replace(parser->L, items_start);
                                       lua_settop(parser->L, items_start);
@@ -7361,7 +6956,7 @@ static bool parse_stat(Parser *parser) {
 
                             if (!parser->success) {
                               parser->success = true;
-                              { // Capture Table
+                              { // Capture Table (array-only)
                                 int initial_stack_size = lua_gettop(parser->L);
                                 { // Sequence with 2 patterns
                                   REMEMBER_POSITION(parser, pos);
@@ -7394,45 +6989,18 @@ static bool parse_stat(Parser *parser) {
                                 if (parser->success) {
                                   int new_stack_size = lua_gettop(parser->L);
                                   int items_start = initial_stack_size + 1;
+                                  int array_count = new_stack_size - initial_stack_size;
 
-                                  // Count array items and named items separately
-                                  // Named captures are sentinel (light userdata) + value pairs
-                                  int array_count = 0;
-                                  int named_count = 0;
-                                  for (int i = items_start; i <= new_stack_size; i++) {
-                                    if (lua_islightuserdata(parser->L, i) &&
-                                        is_cg_sentinel(lua_touserdata(parser->L, i))) {
-                                      named_count++;
-                                      i++; // skip the value that follows the sentinel
-                                    } else {
-                                      array_count++;
-                                    }
-                                  }
-
-                                  lua_createtable(parser->L, array_count, named_count);
+                                  lua_createtable(parser->L, array_count, 0);
                                   int table_idx = lua_gettop(parser->L);
 
                                   int array_idx = 1;
                                   for (int i = items_start; i < table_idx; i++) {
-                                    if (lua_islightuserdata(parser->L, i)) {
-                                      void *ptr = lua_touserdata(parser->L, i);
-                                      if (is_cg_sentinel(ptr)) {
-                                        // Named capture: sentinel at i, value at i+1
-                                        const char *name = (const char *)ptr;
-                                        lua_pushstring(parser->L, name);
-                                        lua_pushvalue(parser->L, i + 1);
-                                        lua_rawset(parser->L, table_idx);
-                                        i++; // skip value
-                                        continue;
-                                      }
-                                    }
-                                    // Regular capture (including non-sentinel light userdata): add to array part
                                     lua_pushvalue(parser->L, i);
                                     lua_rawseti(parser->L, table_idx, array_idx++);
                                   }
 
                                   // Remove all items except table, move table to correct position
-                                  // Only needed if there were items to remove (items_start <= new_stack_size)
                                   if (items_start <= new_stack_size) {
                                     lua_replace(parser->L, items_start);
                                     lua_settop(parser->L, items_start);
@@ -7444,7 +7012,7 @@ static bool parse_stat(Parser *parser) {
 
                           if (!parser->success) {
                             parser->success = true;
-                            { // Capture Table
+                            { // Capture Table (array-only)
                               int initial_stack_size = lua_gettop(parser->L);
                               { // Sequence with 4 patterns
                                 REMEMBER_POSITION(parser, pos);
@@ -7483,45 +7051,18 @@ static bool parse_stat(Parser *parser) {
                               if (parser->success) {
                                 int new_stack_size = lua_gettop(parser->L);
                                 int items_start = initial_stack_size + 1;
+                                int array_count = new_stack_size - initial_stack_size;
 
-                                // Count array items and named items separately
-                                // Named captures are sentinel (light userdata) + value pairs
-                                int array_count = 0;
-                                int named_count = 0;
-                                for (int i = items_start; i <= new_stack_size; i++) {
-                                  if (lua_islightuserdata(parser->L, i) &&
-                                      is_cg_sentinel(lua_touserdata(parser->L, i))) {
-                                    named_count++;
-                                    i++; // skip the value that follows the sentinel
-                                  } else {
-                                    array_count++;
-                                  }
-                                }
-
-                                lua_createtable(parser->L, array_count, named_count);
+                                lua_createtable(parser->L, array_count, 0);
                                 int table_idx = lua_gettop(parser->L);
 
                                 int array_idx = 1;
                                 for (int i = items_start; i < table_idx; i++) {
-                                  if (lua_islightuserdata(parser->L, i)) {
-                                    void *ptr = lua_touserdata(parser->L, i);
-                                    if (is_cg_sentinel(ptr)) {
-                                      // Named capture: sentinel at i, value at i+1
-                                      const char *name = (const char *)ptr;
-                                      lua_pushstring(parser->L, name);
-                                      lua_pushvalue(parser->L, i + 1);
-                                      lua_rawset(parser->L, table_idx);
-                                      i++; // skip value
-                                      continue;
-                                    }
-                                  }
-                                  // Regular capture (including non-sentinel light userdata): add to array part
                                   lua_pushvalue(parser->L, i);
                                   lua_rawseti(parser->L, table_idx, array_idx++);
                                 }
 
                                 // Remove all items except table, move table to correct position
-                                // Only needed if there were items to remove (items_start <= new_stack_size)
                                 if (items_start <= new_stack_size) {
                                   lua_replace(parser->L, items_start);
                                   lua_settop(parser->L, items_start);
@@ -9320,7 +8861,7 @@ static bool parse_var_suffix(Parser *parser) {
 
     if (!parser->success) {
       parser->success = true;
-      { // Capture Table
+      { // Capture Table (array-only)
         int initial_stack_size = lua_gettop(parser->L);
         { // Sequence with 5 patterns
           REMEMBER_POSITION(parser, pos);
@@ -9362,45 +8903,18 @@ static bool parse_var_suffix(Parser *parser) {
         if (parser->success) {
           int new_stack_size = lua_gettop(parser->L);
           int items_start = initial_stack_size + 1;
+          int array_count = new_stack_size - initial_stack_size;
 
-          // Count array items and named items separately
-          // Named captures are sentinel (light userdata) + value pairs
-          int array_count = 0;
-          int named_count = 0;
-          for (int i = items_start; i <= new_stack_size; i++) {
-            if (lua_islightuserdata(parser->L, i) &&
-                is_cg_sentinel(lua_touserdata(parser->L, i))) {
-              named_count++;
-              i++; // skip the value that follows the sentinel
-            } else {
-              array_count++;
-            }
-          }
-
-          lua_createtable(parser->L, array_count, named_count);
+          lua_createtable(parser->L, array_count, 0);
           int table_idx = lua_gettop(parser->L);
 
           int array_idx = 1;
           for (int i = items_start; i < table_idx; i++) {
-            if (lua_islightuserdata(parser->L, i)) {
-              void *ptr = lua_touserdata(parser->L, i);
-              if (is_cg_sentinel(ptr)) {
-                // Named capture: sentinel at i, value at i+1
-                const char *name = (const char *)ptr;
-                lua_pushstring(parser->L, name);
-                lua_pushvalue(parser->L, i + 1);
-                lua_rawset(parser->L, table_idx);
-                i++; // skip value
-                continue;
-              }
-            }
-            // Regular capture (including non-sentinel light userdata): add to array part
             lua_pushvalue(parser->L, i);
             lua_rawseti(parser->L, table_idx, array_idx++);
           }
 
           // Remove all items except table, move table to correct position
-          // Only needed if there were items to remove (items_start <= new_stack_size)
           if (items_start <= new_stack_size) {
             lua_replace(parser->L, items_start);
             lua_settop(parser->L, items_start);
