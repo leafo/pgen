@@ -227,19 +227,25 @@ function pgen.require(module_name, options)
 
   local function log_time(stage_name, start_time)
     if show_timing and socket then
-      io.stderr:write(string.format("%s took %.2f seconds\n", stage_name, socket.gettime() - start_time))
+      io.stderr:write(string.format("[%.2fs] %s\n", socket.gettime() - start_time, stage_name))
     end
   end
 
   -- Load the grammar module
   local start_time = show_timing and socket.gettime()
   local grammar = require(module_name)
-  log_time("Loading grammar module", start_time)
-
+  log_time("Loaded grammar module", start_time)
 
   -- Check if the result is a table (grammar)
   if type(grammar) ~= "table" then
     error("Error: Module must return a grammar table")
+  end
+
+  -- Apply transform if provided
+  if options.transform then
+    start_time = show_timing and socket.gettime()
+    grammar = assert(options.transform(grammar))
+    log_time("Applied grammar transform", start_time)
   end
 
   -- Compile the grammar into C code
@@ -249,7 +255,7 @@ function pgen.require(module_name, options)
     parser_name = parser_name,
     optimize = options.optimize
   })
-  log_time("Compiling grammar to C code (" .. tostring(#output) .. " bytes)", start_time)
+  log_time("Compiled grammar to C code (" .. tostring(#output) .. " bytes)", start_time)
 
   if not output then
     error("Error generating parser: " .. (err or "unknown error"))
@@ -272,12 +278,12 @@ function pgen.require(module_name, options)
   end
   gcc_process:write(output)
   gcc_process:close()
-  log_time("Compiling C code to shared object", start_time)
+  log_time("Compiled C code to shared object", start_time)
 
   -- Load the compiled shared object
   start_time = show_timing and socket.gettime()
   local parser = assert(package.loadlib(tmp_so, "luaopen_" .. parser_name))
-  log_time("Loading compiled shared object", start_time)
+  log_time("Loaded compiled shared object", start_time)
 
   -- Cleanup temporary files
   os.remove(tmp_so)
