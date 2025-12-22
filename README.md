@@ -63,6 +63,77 @@ Patterns specific to this library that aren't in LPeg:
 
 Unlike LPeg's `Cmt` which takes a function, pgen's `Cmt(patt, code)` takes a **string of Lua code**. This code is embedded into the generated C parser and executed via the Lua C API during parsing. The code receives `(subject, pos, ...)` where `...` are any captures from the inner pattern, and should return a position (to advance), `true` (to succeed), or `false`/`nil` (to fail).
 
+## Labeled Failures
+
+Use `T(label)` to throw a labeled failure with a descriptive error name. Unlike regular failures, labeled failures propagate through choice (`+`) and repeat (`^`) operators, allowing you to signal unrecoverable errors.
+
+- `T(label)` - Throw a labeled failure with the given label string
+
+When a labeled failure occurs, `parse()` returns three values: `nil, label, position`
+
+Example grammar with error labels:
+
+```lua
+local pgen = require "pgen"
+local P, R, V, T, C = pgen.P, pgen.R, pgen.V, pgen.T, pgen.C
+
+return {
+  "json",
+  json = V"value" * (P(-1) + T"expected_eof"),
+  value = V"string" + V"number" + T"expected_value",
+  string = P'"' * C((P(1) - P'"')^0) * (P'"' + T"expected_closing_quote"),
+  number = C(P"-"^-1 * R"09"^1)
+}
+```
+
+## Error Formatting
+
+The `pgen.errors` module formats labeled failures from `T()` into human-readable messages. It requires the `pos` (position) value returned by a labeled failure.
+
+```lua
+local errors = require "pgen.errors"
+
+local result, label, pos = parser.parse(input)
+if not result then
+  if pos then
+    -- Labeled failure from T()
+    print(errors.format(input, pos, label))
+  else
+    -- Regular parse failure (no position available)
+    print("Parse error")
+  end
+end
+```
+
+Output:
+
+```
+expected_closing_quote at line 3, column 15:
+  {"name": "test
+                ^
+```
+
+### Options
+
+- `color` - Use ANSI colors for terminal output
+- `context` - Number of lines to show above and below the error line
+
+```lua
+errors.format(input, pos, label, {color = true, context = 2})
+```
+
+Output with context:
+
+```
+expected_colon at line 5, column 8:
+3 |   "name": "test",
+4 |   "items": [
+5 |     {"key" "value"}
+             ^
+6 |   ]
+7 | }
+```
+
 ## Operators
 
 - `a * b` - Sequence: match a followed by b

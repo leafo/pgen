@@ -83,5 +83,70 @@ describe("pgen.errors", function()
       assert.truthy(msg:match("test"))
       assert.truthy(msg:match("%^"))
     end)
+
+    it("shows context lines with context option", function()
+      local input = "line one\nline two\nline three\nline four\nline five"
+      -- Error on line 3, column 6 ('t' in 'three')
+      -- Position: "line one\nline two\n" = 18 chars, then "line " = 5, so pos 24
+      local msg = errors.format(input, 24, "test_error", {context = 1})
+      assert.equal([[test_error at line 3, column 6:
+2 | line two
+3 | line three
+         ^
+4 | line four]], msg)
+    end)
+
+    it("shows context lines at start of file", function()
+      local input = "line one\nline two\nline three"
+      -- Error on line 1, column 5
+      local msg = errors.format(input, 5, "test_error", {context = 2})
+      assert.equal([[test_error at line 1, column 5:
+1 | line one
+        ^
+2 | line two
+3 | line three]], msg)
+    end)
+
+    it("shows context lines at end of file", function()
+      local input = "line one\nline two\nline three"
+      -- Error on line 3, column 6 ('t' in 'three')
+      -- Position: 9 + 9 + 6 = 24
+      local msg = errors.format(input, 24, "test_error", {context = 2})
+      assert.equal([[test_error at line 3, column 6:
+1 | line one
+2 | line two
+3 | line three
+         ^]], msg)
+    end)
+
+    it("pads line numbers for alignment", function()
+      -- Create input with 10+ lines to test padding
+      local lines = {}
+      for i = 1, 12 do
+        lines[i] = "line " .. i
+      end
+      local input = table.concat(lines, "\n")
+      -- Error on line 10, column 1
+      -- Position: sum of "line X\n" for lines 1-9
+      local pos = 0
+      for i = 1, 9 do
+        pos = pos + #("line " .. i) + 1  -- +1 for newline
+      end
+      pos = pos + 1  -- column 1 of line 10
+      local msg = errors.format(input, pos, "test_error", {context = 1})
+      assert.equal([[test_error at line 10, column 1:
+ 9 | line 9
+10 | line 10
+     ^
+11 | line 11]], msg)
+    end)
+
+    it("context = 0 behaves like no context option", function()
+      local input = "line one\nline two\nline three"
+      -- Error on line 2, column 5
+      local msg_no_context = errors.format(input, 14, "test_error")
+      local msg_zero_context = errors.format(input, 14, "test_error", {context = 0})
+      assert.equal(msg_no_context, msg_zero_context)
+    end)
   end)
 end)

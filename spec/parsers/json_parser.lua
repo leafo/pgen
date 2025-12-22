@@ -6,7 +6,7 @@ return {
   "json", -- initial rule name
 
   -- Main JSON entry rule - either an object or array
-  json = V"ws" * Ct(Cc("json") * V"value") * V"ws" * (-1 + T("expected_eof")),
+  json = V"ws" * Ct(Cc("json") * (V"value" + T("expected_value"))) * V"ws" * (-1 + T("expected_eof")),
 
   -- Whitespace: optional spaces, tabs, newlines
   ws = (S" \t\n\r")^0,
