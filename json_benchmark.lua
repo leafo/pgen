@@ -3,7 +3,12 @@ local MODULE = "examples.json_parser"
 MODULE = "spec.parsers.json_parser"
 
 local pgen = require "pgen"
-local parser = pgen.require(MODULE)
+local parser = pgen.require(MODULE, {
+  show_timing = true,
+
+  -- for benchmarking capture performance hit
+  -- transform = require("pgen.debug").strip_captures
+})
 
 local lpeg = require "lpeg"
 -- Stub T() for lpeg (labeled failures not supported, just fail)
@@ -34,11 +39,15 @@ local socket = require("socket")
 local gettime = socket.gettime
 
 local BENCHMARK = true
-local BENCHMARK_COUNT = 10000
+local BENCHMARK_COUNT = 100000
 
 local lpeg_time = 0
 local pgen_time = 0
 local cjson_time = 0
+
+-- Record memory usage before benchmark
+collectgarbage("collect")
+local mem_before = collectgarbage("count")
 
 -- Run test cases
 for i, test in ipairs(test_cases) do
@@ -79,8 +88,16 @@ for i, test in ipairs(test_cases) do
   print()
 end
 
+-- Record memory usage after benchmark
+collectgarbage("collect")
+local mem_after = collectgarbage("count")
+
 if BENCHMARK then
   print("pgen_time", pgen_time)
   print("lpeg_time", lpeg_time)
   print("cjson_time", cjson_time)
+  print()
+  print(string.format("Memory before: %.2f KB", mem_before))
+  print(string.format("Memory after: %.2f KB", mem_after))
+  print(string.format("Memory delta: %.2f KB", mem_after - mem_before))
 end
