@@ -82,7 +82,6 @@ local function collect_cmt_codes(grammar)
 
   local new_grammar = visitor.visit_grammar(grammar, function(node, replace)
     -- Only replace Cmt nodes that don't already have an ID assigned
-    -- (avoids infinite loop since replacement is also visited)
     if node.type == types.Cmt and node.cmt_id == nil then
       local code = node.code
       local id = code_to_id[code]

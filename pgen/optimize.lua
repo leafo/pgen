@@ -52,58 +52,57 @@ local function is_trie_eligible(alternatives)
   return true
 end
 
--- TODO: implement this with visitor so we aren't duplicating traversal logic
 local function contains_cg_in_pattern(pattern, rules, memo, visiting)
+  local visitor = require("pgen.visitor")
+
   if not pattern or type(pattern) ~= "table" then
     return false
   end
 
-  local t = pattern.type
-  if t == types.Cg then
-    return true
-  end
+  local found = false
 
-  if t == types.V then
-    local name = pattern.value
-    if memo[name] ~= nil then
-      return memo[name]
-    end
-    if visiting[name] then
-      -- Conservative: recursion could contain Cg in other branch
-      return true
+  visitor.visit_pattern(pattern, function(node)
+    if node.type == types.Cg then
+      found = true
+      return visitor.STOP
     end
 
-    local rule = rules[name]
-    if type(rule) ~= "table" then
-      -- Unknown rule, avoid optimizing
-      return true
-    end
+    if node.type == types.V then
+      local name = node.value
+      if memo[name] ~= nil then
+        if memo[name] then
+          found = true
+          return visitor.STOP
+        end
+        return
+      end
+      if visiting[name] then
+        -- Conservative: recursion could contain Cg in other branch
+        found = true
+        return visitor.STOP
+      end
 
-    visiting[name] = true
-    local result = contains_cg_in_pattern(rule, rules, memo, visiting)
-    visiting[name] = nil
-    memo[name] = result
-    return result
-  end
+      local rule = rules[name]
+      if type(rule) ~= "table" then
+        -- Unknown rule, avoid optimizing
+        found = true
+        return visitor.STOP
+      end
 
-  if t == types.C or t == types.Ct or t == types.L or t == types.Cg or t == types.Cn or t == types.Cmt then
-    return contains_cg_in_pattern(pattern.value, rules, memo, visiting)
-  end
+      visiting[name] = true
+      if contains_cg_in_pattern(rule, rules, memo, visiting) then
+        found = true
+      end
+      visiting[name] = nil
+      memo[name] = found
 
-  if t == "sequence" or t == "choice" then
-    for _, child in ipairs(pattern) do
-      if contains_cg_in_pattern(child, rules, memo, visiting) then
-        return true
+      if found then
+        return visitor.STOP
       end
     end
-    return false
-  end
+  end)
 
-  if t == "repeat" or t == "negate" then
-    return contains_cg_in_pattern(pattern[1], rules, memo, visiting)
-  end
-
-  return false
+  return found
 end
 
 -- Mark Ct nodes that don't contain any Cg nodes
@@ -115,9 +114,7 @@ function optimize.capture_table_optimization(grammar)
 
   return visitor.visit_grammar(grammar, function(node, replace)
     if node.type ~= types.Ct then return end
-    if node.array_only then return end
     if contains_cg_in_pattern(node.value, grammar, memo, visiting) then return end
-
     replace(visitor.copy_node(node, {array_only = true}))
   end)
 end
