@@ -119,6 +119,33 @@ function pgen.Cmt(patt, code)
   }
 end
 
+function pgen.layout(options)
+  options = options or {}
+  local policy = {
+    tab_width = options.tab_width or 2,
+    allow_tabs = options.allow_tabs ~= false,
+    allow_mixed = options.allow_mixed ~= false
+  }
+
+  local function layout_pattern(kind)
+    return make{
+      type = types.Layout,
+      value = {
+        kind = kind,
+        policy = policy
+      }
+    }
+  end
+
+  return {
+    NL = layout_pattern("nl"),
+    Indent = layout_pattern("indent"),
+    Dedent = layout_pattern("dedent"),
+    SameIndent = layout_pattern("same"),
+    BlankLine = layout_pattern("blank")
+  }
+end
+
 -- Throw labeled failure
 function pgen.T(label)
   assert(type(label) == "string", "T requires a string label")

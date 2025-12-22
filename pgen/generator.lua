@@ -102,6 +102,41 @@ local function collect_cmt_codes(grammar)
   return codes, new_grammar
 end
 
+local function layout_policy_key(policy)
+  return table.concat({
+    policy.tab_width or 0,
+    policy.allow_tabs and 1 or 0,
+    policy.allow_mixed and 1 or 0
+  }, ":")
+end
+
+-- Collect all layout policies from a grammar, assigning each a unique ID
+local function collect_layout_policies(grammar)
+  local visitor = require("pgen.visitor")
+  local codes = {}
+  local key_to_id = {}
+  local next_id = 0
+
+  local new_grammar = visitor.visit_grammar(grammar, function(node, replace)
+    if node.type == types.Layout and node.layout_id == nil then
+      local policy = node.value.policy or {}
+      local key = layout_policy_key(policy)
+      local id = key_to_id[key]
+
+      if id == nil then
+        id = next_id
+        key_to_id[key] = id
+        table.insert(codes, {id = id, policy = policy})
+        next_id = next_id + 1
+      end
+
+      replace(visitor.copy_node(node, {layout_id = id}))
+    end
+  end)
+
+  return codes, new_grammar
+end
+
 local function template_code(template, vars)
   -- Use gsub to find placeholders like $VARNAME
   -- The pattern matches '$' followed by UPPER_CASE letters
@@ -146,12 +181,13 @@ function generator.generate(grammar, parser_name, options)
 
   -- Collect Cmt codes and get transformed grammar with cmt_id assigned
   local cmt_codes, transformed_grammar = collect_cmt_codes(grammar)
+  local layout_policies, layout_grammar = collect_layout_policies(transformed_grammar)
 
   local rules = {}
   local start_rule = nil
 
   -- Extract rules from transformed grammar (which has cmt_id on Cmt nodes)
-  for name, pattern in pairs(transformed_grammar) do
+  for name, pattern in pairs(layout_grammar) do
     local skip = false
     if not start_rule then
       if type(pattern) == "string" and name == 1 then
@@ -178,10 +214,10 @@ function generator.generate(grammar, parser_name, options)
 
   -- Generate the C code
   local c_chunks = {
-    generator.generate_parser_header(parser_name, cg_names, cmt_codes),
+    generator.generate_parser_header(parser_name, cg_names, cmt_codes, layout_policies),
     generator.generate_forward_declarations(rules, start_rule),
     generator.generate_rule_functions(rules, start_rule),
-    generator.generate_parser_main(parser_name, start_rule, cmt_codes),
+    generator.generate_parser_main(parser_name, start_rule, cmt_codes, layout_policies),
     -- Add compilation instructions as a comment
     template_code([[/*
 To compile as a Lua module:
@@ -294,8 +330,29 @@ static void __cmt_init(lua_State *L) {]])
 end
 
 -- Generate parser header
-function generator.generate_parser_header(parser_name, cg_names, cmt_codes)
+function generator.generate_parser_header(parser_name, cg_names, cmt_codes, layout_policies)
   cg_names = cg_names or {}
+  layout_policies = layout_policies or {}
+
+  local layout_state_def = ""
+  local layout_state_field = ""
+  local layout_helpers = ""
+
+  if #layout_policies > 0 then
+    layout_state_def = [[typedef struct {
+  int tab_width;
+  bool allow_tabs;
+  bool allow_mixed;
+  size_t stack_len;
+  size_t stack_cap;
+  int *stack;
+} LayoutState;
+
+]]
+    layout_state_field = "  LayoutState layout_states[" .. #layout_policies .. "];\n"
+    layout_helpers = generator.generate_layout_helpers()
+  end
+
   return template_code([[#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -307,6 +364,7 @@ function generator.generate_parser_header(parser_name, cg_names, cmt_codes)
 
 // $PARSER_NAME$ - generated parser
 
+$LAYOUT_STATE_DEF$
 typedef struct {
   const char *input;
   size_t input_len;
@@ -317,6 +375,7 @@ typedef struct {
   size_t throw_pos;         // Position where T() was thrown
   size_t depth;
   lua_State *L;
+$LAYOUT_STATE_FIELD$
 } Parser;
 
 typedef struct {
@@ -334,6 +393,7 @@ typedef struct {
   (parser)->pos = (pp).pos; \
   lua_settop((parser)->L, (pp).stack_size);
 
+$LAYOUT_HELPERS$
 
 #ifdef PGEN_DEBUG
 static void dumpstack (lua_State *L) {
@@ -361,7 +421,108 @@ static void dumpstack (lua_State *L) {
 }
 #endif
 
-]], {PARSER_NAME = parser_name}) .. generate_cg_sentinels(cg_names) .. generate_cmt_infrastructure(cmt_codes or {})
+]], {
+    PARSER_NAME = parser_name,
+    LAYOUT_STATE_DEF = layout_state_def,
+    LAYOUT_STATE_FIELD = layout_state_field,
+    LAYOUT_HELPERS = layout_helpers
+  }) .. generate_cg_sentinels(cg_names) .. generate_cmt_infrastructure(cmt_codes or {})
+end
+
+function generator.generate_layout_helpers()
+  return [[static int layout_top(LayoutState *state) {
+  return state->stack_len > 0 ? state->stack[state->stack_len - 1] : 0;
+}
+
+static bool layout_push(LayoutState *state, int indent) {
+  if (state->stack_len >= state->stack_cap) {
+    size_t new_cap = state->stack_cap ? state->stack_cap * 2 : 8;
+    int *new_stack = (int *)realloc(state->stack, sizeof(int) * new_cap);
+    if (!new_stack) {
+      return false;
+    }
+    state->stack = new_stack;
+    state->stack_cap = new_cap;
+  }
+  state->stack[state->stack_len++] = indent;
+  return true;
+}
+
+static void layout_state_init(LayoutState *state, int tab_width, bool allow_tabs, bool allow_mixed) {
+  state->tab_width = tab_width;
+  state->allow_tabs = allow_tabs;
+  state->allow_mixed = allow_mixed;
+  state->stack_len = 1;
+  state->stack_cap = 8;
+  state->stack = (int *)malloc(sizeof(int) * state->stack_cap);
+  if (state->stack) {
+    state->stack[0] = 0;
+  } else {
+    state->stack_len = 0;
+    state->stack_cap = 0;
+  }
+}
+
+static void layout_state_free(LayoutState *state) {
+  if (state->stack) {
+    free(state->stack);
+  }
+  state->stack = NULL;
+  state->stack_len = 0;
+  state->stack_cap = 0;
+}
+
+static bool layout_is_bol(Parser *parser) {
+  return parser->pos == 0 || parser->input[parser->pos - 1] == '\n';
+}
+
+static bool layout_compute_indent(Parser *parser, LayoutState *state, size_t *indent_out, size_t *pos_out, bool *blank_out) {
+  if (!layout_is_bol(parser)) {
+    return false;
+  }
+
+  size_t pos = parser->pos;
+  size_t indent = 0;
+  bool saw_space = false;
+  bool saw_tab = false;
+
+  while (pos < parser->input_len) {
+    char c = parser->input[pos];
+    if (c == ' ') {
+      indent += 1;
+      saw_space = true;
+      pos++;
+      continue;
+    }
+    if (c == '\t') {
+      if (!state->allow_tabs) {
+        return false;
+      }
+      indent += state->tab_width;
+      saw_tab = true;
+      pos++;
+      continue;
+    }
+    break;
+  }
+
+  if (!state->allow_mixed && saw_space && saw_tab) {
+    return false;
+  }
+
+  if (pos < parser->input_len && parser->input[pos] == '\n') {
+    *blank_out = true;
+    *pos_out = pos + 1;
+    *indent_out = indent;
+    return true;
+  }
+
+  *blank_out = false;
+  *pos_out = pos;
+  *indent_out = indent;
+  return true;
+}
+]]
 end
 
 -- Generate forward declarations for all rules
@@ -457,6 +618,8 @@ function generator.generate_pattern_code(pattern)
     return generator.generate_cmt_code(pattern.value, pattern.cmt_id)
   elseif t == types.T then -- T (labeled failure)
     return generator.generate_labeled_failure_code(pattern.value)
+  elseif t == types.Layout then -- Layout primitives
+    return generator.generate_layout_code(pattern)
   elseif t == "sequence" then
     return generator.generate_sequence_code(unpack(pattern))
   elseif t == "choice" then
@@ -1173,9 +1336,108 @@ function generator.generate_labeled_failure_code(label)
   })
 end
 
+function generator.generate_layout_code(pattern)
+  local kind = pattern.value.kind
+  local layout_id = pattern.layout_id or 0
+
+  if kind == "nl" then
+    return [[{// Match newline (layout NL)
+  if (parser->pos < parser->input_len &&
+      parser->input[parser->pos] == '\n') {
+    parser->pos++;
+  } else {
+    parser->success = false;
+  }
+}]]
+  elseif kind == "blank" then
+    return template_code([[{// Match blank line (layout BlankLine)
+  size_t indent = 0;
+  size_t new_pos = 0;
+  bool is_blank = false;
+  LayoutState *layout = &parser->layout_states[$ID$];
+  if (layout_compute_indent(parser, layout, &indent, &new_pos, &is_blank) && is_blank) {
+    parser->pos = new_pos;
+    parser->success = true;
+  } else {
+    parser->success = false;
+  }
+}]], {ID = layout_id})
+  elseif kind == "same" then
+    return template_code([[{// Match same indentation (layout SameIndent)
+  size_t indent = 0;
+  size_t new_pos = 0;
+  bool is_blank = false;
+  LayoutState *layout = &parser->layout_states[$ID$];
+  if (layout_compute_indent(parser, layout, &indent, &new_pos, &is_blank) && !is_blank &&
+      indent == (size_t)layout_top(layout)) {
+    parser->pos = new_pos;
+    parser->success = true;
+  } else {
+    parser->success = false;
+  }
+}]], {ID = layout_id})
+  elseif kind == "indent" then
+    return template_code([[{// Match increased indentation (layout Indent)
+  size_t indent = 0;
+  size_t new_pos = 0;
+  bool is_blank = false;
+  LayoutState *layout = &parser->layout_states[$ID$];
+  if (layout_compute_indent(parser, layout, &indent, &new_pos, &is_blank) && !is_blank &&
+      indent > (size_t)layout_top(layout) && layout_push(layout, (int)indent)) {
+    parser->success = true;
+  } else {
+    parser->success = false;
+  }
+}]], {ID = layout_id})
+  elseif kind == "dedent" then
+    return template_code([[{// Pop indentation (layout Dedent)
+  LayoutState *layout = &parser->layout_states[$ID$];
+  if (layout->stack_len > 1) {
+    layout->stack_len -= 1;
+  }
+  parser->success = true;
+}]], {ID = layout_id})
+  end
+
+  error("Unknown layout kind: " .. tostring(kind))
+end
+
 -- Generate core C parser functions (_init, _free, _parse)
-function generator.generate_c_core_functions(parser_name, start_rule)
+function generator.generate_c_core_functions(parser_name, start_rule, layout_policies)
+  layout_policies = layout_policies or {}
+  local layout_init = ""
+  local layout_free = ""
+
+  if #layout_policies > 0 then
+    local init_lines = {}
+    local free_lines = {}
+    for _, policy in ipairs(layout_policies) do
+      local allow_tabs = policy.policy.allow_tabs and "true" or "false"
+      local allow_mixed = policy.policy.allow_mixed and "true" or "false"
+      table.insert(init_lines, template_code(
+        "  layout_state_init(&parser->layout_states[$ID$], $TAB_WIDTH$, $ALLOW_TABS$, $ALLOW_MIXED$);\n" ..
+        "  if (!parser->layout_states[$ID$].stack) {\n" ..
+        "    $PARSER_NAME$_free(parser);\n" ..
+        "    return NULL;\n" ..
+        "  }",
+        {
+          ID = policy.id,
+          TAB_WIDTH = policy.policy.tab_width or 0,
+          ALLOW_TABS = allow_tabs,
+          ALLOW_MIXED = allow_mixed,
+          PARSER_NAME = parser_name
+        }
+      ))
+      table.insert(free_lines, template_code("  layout_state_free(&parser->layout_states[$ID$]);", {ID = policy.id}))
+    end
+    layout_init = table.concat(init_lines, "\n")
+    layout_free = table.concat(free_lines, "\n")
+  end
+
   return template_code([[
+// Free parser (forward declaration)
+static void $PARSER_NAME$_free(Parser *parser);
+
 // Initialize parser
 static Parser* $PARSER_NAME$_init(const char *input, lua_State *L) {
   Parser *parser = (Parser*)malloc(sizeof(Parser));
@@ -1192,6 +1454,7 @@ static Parser* $PARSER_NAME$_init(const char *input, lua_State *L) {
   parser->throw_label = NULL;
   parser->throw_pos = 0;
   parser->L = L;
+$LAYOUT_INIT$
   return parser;
 }
 
@@ -1200,12 +1463,15 @@ static Parser* $PARSER_NAME$_init(const char *input, lua_State *L) {
 static void $PARSER_NAME$_free(Parser *parser) {
   // Check for NULL in case _init failed or was called with NULL
   if (parser) {
+$LAYOUT_FREE$
      free(parser);
   }
 }
 ]], {
     PARSER_NAME = parser_name,
-    START_RULE = start_rule
+    START_RULE = start_rule,
+    LAYOUT_INIT = layout_init,
+    LAYOUT_FREE = layout_free
   })
 end
 
@@ -1325,9 +1591,9 @@ static const struct luaL_Reg $PARSER_NAME$_module[] = {
 end
 
 -- Generate the final combined parser main C code
-function generator.generate_parser_main(parser_name, start_rule, cmt_codes)
+function generator.generate_parser_main(parser_name, start_rule, cmt_codes, layout_policies)
   -- core C functions
-  local c_core_code = generator.generate_c_core_functions(parser_name, start_rule)
+  local c_core_code = generator.generate_c_core_functions(parser_name, start_rule, layout_policies)
   -- Lua module interface
   local lua_module_code = generator.generate_lua_module_code(parser_name, start_rule, cmt_codes)
 

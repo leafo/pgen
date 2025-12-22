@@ -20,6 +20,7 @@ typedef struct {
   size_t throw_pos;        // Position where T() was thrown
   size_t depth;
   lua_State *L;
+
 } Parser;
 
 typedef struct {
@@ -1896,6 +1897,9 @@ static bool parse_test9(Parser *parser) {
   return parser->success;
 }
 
+// Free parser (forward declaration)
+static void numbered_capture_free(Parser *parser);
+
 // Initialize parser
 static Parser *numbered_capture_init(const char *input, lua_State *L) {
   Parser *parser = (Parser *)malloc(sizeof(Parser));
@@ -1912,6 +1916,7 @@ static Parser *numbered_capture_init(const char *input, lua_State *L) {
   parser->throw_label = NULL;
   parser->throw_pos = 0;
   parser->L = L;
+
   return parser;
 }
 
@@ -1919,6 +1924,7 @@ static Parser *numbered_capture_init(const char *input, lua_State *L) {
 static void numbered_capture_free(Parser *parser) {
   // Check for NULL in case _init failed or was called with NULL
   if (parser) {
+
     free(parser);
   }
 }

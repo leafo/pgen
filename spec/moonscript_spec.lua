@@ -4,8 +4,6 @@ describe("moonscript parser", function()
   local parser
 
   before_each(function()
-    -- Reset indent state before each test
-    _G._ms_indent = {0}
     parser = pgen.require("spec.parsers.moonscript")
   end)
 
