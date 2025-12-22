@@ -16,6 +16,8 @@ typedef struct {
   size_t pos;
   bool success;
   char error_message[256];
+  const char *throw_label; // Label from T() or NULL for ordinary failure
+  size_t throw_pos;        // Position where T() was thrown
   size_t depth;
   lua_State *L;
 } Parser;
@@ -84,7 +86,8 @@ static bool parse_1(Parser *parser) {
   { // Choice
     parse_positive(parser);
 
-    if (!parser->success) {
+    // Only try alternative if ordinary failure (not labeled failure from T())
+    if (!parser->success && !parser->throw_label) {
       parser->success = true;
       parse_negative(parser);
     }
@@ -160,6 +163,11 @@ static bool parse_negative(Parser *parser) {
           } else {
             // Pattern failed, so negate succeeds
             parser->success = true;
+            // Swallow labeled failures inside predicates (LPegLabel behavior)
+            if (parser->throw_label) {
+              parser->throw_label = NULL;
+              parser->throw_pos = 0;
+            }
             RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
           }
         }
@@ -286,6 +294,11 @@ static bool parse_positive(Parser *parser) {
             } else {
               // Pattern failed, so negate succeeds
               parser->success = true;
+              // Swallow labeled failures inside predicates (LPegLabel behavior)
+              if (parser->throw_label) {
+                parser->throw_label = NULL;
+                parser->throw_pos = 0;
+              }
               RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
             }
           }
@@ -323,6 +336,8 @@ static Parser *lookahead_init(const char *input, lua_State *L) {
   parser->depth = 0;
   parser->success = true;
   parser->error_message[0] = '\0';
+  parser->throw_label = NULL;
+  parser->throw_pos = 0;
   parser->L = L;
   return parser;
 }
@@ -363,13 +378,22 @@ static int l_lookahead_parse(lua_State *L) {
 
   int final_stack_size = lua_gettop(parser->L);
 
-  // Return nil and error message on failure, true on success
+  // Return nil and error info on failure
   if (!parser->success) {
     assert(final_stack_size == initial_stack_size && "Unexpected stack size change on parse failure.");
     lua_pushnil(L);
-    lua_pushstring(L, parser->error_message);
-    lookahead_free(parser);
-    return 2; // Return nil and error message
+    if (parser->throw_label) {
+      // Labeled failure: return nil, label, position
+      lua_pushstring(L, parser->throw_label);
+      lua_pushinteger(L, parser->throw_pos + 1); // 1-indexed for Lua
+      lookahead_free(parser);
+      return 3;
+    } else {
+      // Ordinary failure: return nil, error_message
+      lua_pushstring(L, parser->error_message);
+      lookahead_free(parser);
+      return 2;
+    }
   }
 
   // Strip Cg sentinel+value pairs from stack (they only matter inside Ct)

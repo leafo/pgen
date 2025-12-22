@@ -16,6 +16,8 @@ typedef struct {
   size_t pos;
   bool success;
   char error_message[256];
+  const char *throw_label; // Label from T() or NULL for ordinary failure
+  size_t throw_pos;        // Position where T() was thrown
   size_t depth;
   lua_State *L;
 } Parser;
@@ -109,7 +111,8 @@ static bool parse_test(Parser *parser) {
         }
       }
 
-      if (!parser->success) {
+      // Only try alternative if ordinary failure (not labeled failure from T())
+      if (!parser->success && !parser->throw_label) {
         parser->success = true;
         { // Sequence with 2 patterns
           REMEMBER_POSITION(parser, pos);
@@ -138,7 +141,8 @@ static bool parse_test(Parser *parser) {
       }
     }
 
-    if (!parser->success) {
+    // Only try alternative if ordinary failure (not labeled failure from T())
+    if (!parser->success && !parser->throw_label) {
       parser->success = true;
       { // Sequence with 2 patterns
         REMEMBER_POSITION(parser, pos);
@@ -228,7 +232,10 @@ static bool parse_test1(Parser *parser) {
 
         if (!parser->success || before_pos == parser->pos) {
           // Break on failure or zero-width match
-          parser->success = true;
+          // Only recover from ordinary failure, not labeled failure from T()
+          if (!parser->throw_label) {
+            parser->success = true;
+          }
           break;
         }
 
@@ -316,7 +323,10 @@ static bool parse_test2(Parser *parser) {
 
         if (!parser->success || before_pos == parser->pos) {
           // Break on failure or zero-width match
-          parser->success = true;
+          // Only recover from ordinary failure, not labeled failure from T()
+          if (!parser->throw_label) {
+            parser->success = true;
+          }
           break;
         }
 
@@ -402,7 +412,10 @@ static bool parse_test3(Parser *parser) {
 
         if (!parser->success || before_pos == parser->pos) {
           // Break on failure or zero-width match
-          parser->success = true;
+          // Only recover from ordinary failure, not labeled failure from T()
+          if (!parser->throw_label) {
+            parser->success = true;
+          }
           break;
         }
 
@@ -465,6 +478,8 @@ static Parser *repeat_class_init(const char *input, lua_State *L) {
   parser->depth = 0;
   parser->success = true;
   parser->error_message[0] = '\0';
+  parser->throw_label = NULL;
+  parser->throw_pos = 0;
   parser->L = L;
   return parser;
 }
@@ -505,13 +520,22 @@ static int l_repeat_class_parse(lua_State *L) {
 
   int final_stack_size = lua_gettop(parser->L);
 
-  // Return nil and error message on failure, true on success
+  // Return nil and error info on failure
   if (!parser->success) {
     assert(final_stack_size == initial_stack_size && "Unexpected stack size change on parse failure.");
     lua_pushnil(L);
-    lua_pushstring(L, parser->error_message);
-    repeat_class_free(parser);
-    return 2; // Return nil and error message
+    if (parser->throw_label) {
+      // Labeled failure: return nil, label, position
+      lua_pushstring(L, parser->throw_label);
+      lua_pushinteger(L, parser->throw_pos + 1); // 1-indexed for Lua
+      repeat_class_free(parser);
+      return 3;
+    } else {
+      // Ordinary failure: return nil, error_message
+      lua_pushstring(L, parser->error_message);
+      repeat_class_free(parser);
+      return 2;
+    }
   }
 
   // Strip Cg sentinel+value pairs from stack (they only matter inside Ct)

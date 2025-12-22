@@ -110,7 +110,24 @@ static bool parse_json(Parser *parser) {
             lua_pushlstring(parser->L, "json", 4);
           }
           if (parser->success) {
-            parse_value(parser);
+            { // Choice
+              parse_value(parser);
+
+              // Only try alternative if ordinary failure (not labeled failure from T())
+              if (!parser->success && !parser->throw_label) {
+                parser->success = true;
+                { // Throw labeled failure: expected_value
+                  parser->success = false;
+                  parser->throw_label = "expected_value";
+                  parser->throw_pos = parser->pos;
+#ifdef PGEN_ERRORS
+                  sprintf(parser->error_message, "expected_value"
+                                                 " at position %zu",
+                          parser->pos + 1);
+#endif
+                }
+              }
+            }
             if (!parser->success) {
               RESTORE_POSITION(parser, pos);
             }
