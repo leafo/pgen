@@ -6,6 +6,8 @@ local pgen = require "pgen"
 local parser = pgen.require(MODULE)
 
 local lpeg = require "lpeg"
+-- Stub T() for lpeg (labeled failures not supported, just fail)
+lpeg.T = function() return lpeg.P(false) end
 package.loaded.pgen = lpeg
 package.loaded[MODULE] = nil
 local lpeg_parser = lpeg.P(require(MODULE))

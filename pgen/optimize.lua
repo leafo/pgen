@@ -52,7 +52,7 @@ local function is_trie_eligible(alternatives)
   return true
 end
 
--- TDOO: implement this with visitor so we aren't duplicating traversal logic
+-- TODO: implement this with visitor so we aren't duplicating traversal logic
 local function contains_cg_in_pattern(pattern, rules, memo, visiting)
   if not pattern or type(pattern) ~= "table" then
     return false
