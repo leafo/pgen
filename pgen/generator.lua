@@ -234,6 +234,11 @@ function generator.generate(grammar, parser_name, options)
     error("Grammar does not contain a starting rule")
   end
 
+  -- Reject unbounded repetitions whose body can match the empty string,
+  -- which would loop forever at parse time
+  local analyze = require("pgen.analyze")
+  analyze.check_loops(rules)
+
   -- Collect all Cg (capture group) names for sentinel generation
   local cg_names = collect_cg_names(transformed_grammar)
   for _, name in ipairs(cg_names) do
@@ -259,11 +264,17 @@ local result = $PARSER_NAME$.parse("your input string")
   }
 
   if options.pgen_debug then
-    talbe.insert(c_chunks, 1, "#define PGEN_DEBUG 1")
+    table.insert(c_chunks, 1, "#define PGEN_DEBUG 1")
   end
 
   if options.pgen_errors then
     table.insert(c_chunks, 1, "#define PGEN_ERRORS 1")
+  end
+
+  if options.max_depth then
+    assert(type(options.max_depth) == "number" and options.max_depth >= 1,
+      "max_depth must be a positive number")
+    table.insert(c_chunks, 1, "#define PGEN_MAX_DEPTH " .. math.floor(options.max_depth))
   end
 
   return table.concat(c_chunks, "\n")
@@ -516,6 +527,13 @@ function generator.generate_parser_header(parser_name, cg_names, cmt_codes, inde
 
 // $PARSER_NAME$ - generated parser
 
+// Maximum rule-call recursion depth before the parse is aborted with a Lua
+// error (prevents C stack overflow on deeply nested input). Override with
+// the max_depth compile option or -DPGEN_MAX_DEPTH=n
+#ifndef PGEN_MAX_DEPTH
+#define PGEN_MAX_DEPTH 5000
+#endif
+
 $IND_TYPES$typedef struct {
   const char *input;
   size_t input_len;
@@ -542,6 +560,16 @@ typedef struct {
 #define RESTORE_POSITION(parser, pp) \
   (parser)->pos = (pp).pos; \
   lua_settop((parser)->L, (pp).stack_size);$IND_RESTORE$
+
+// Ensure the Lua stack can hold n more values. Captures are built on the Lua
+// stack, so without this a large parse tree would overflow it (undefined
+// behavior). Raises a Lua error when the stack cannot grow any further
+// (LUAI_MAXCSTACK).
+static void pgen_checkstack(Parser *parser, int n) {
+  if (!lua_checkstack(parser->L, n)) {
+    luaL_error(parser->L, "pgen: Lua stack overflow while building captures");
+  }
+}
 
 $IND_HELPERS$
 
@@ -601,8 +629,14 @@ function generator.generate_rule_function(name, pattern)
   return template_code([[static bool parse_$NAME$(Parser *parser) {
   size_t start = parser->pos;
 
-#ifdef PGEN_DEBUG
   parser->depth += 1;
+  if (parser->depth > PGEN_MAX_DEPTH) {
+    // A Lua error (rather than a match failure) so the overflow can't be
+    // silently converted into a successful parse by a predicate or choice
+    luaL_error(parser->L, "pgen: max recursion depth (%d) exceeded at position %d", (int)PGEN_MAX_DEPTH, (int)(parser->pos + 1));
+  }
+
+#ifdef PGEN_DEBUG
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "$NAME$", start);
 #endif
 
@@ -615,9 +649,9 @@ function generator.generate_rule_function(name, pattern)
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "$NAME$", parser->pos);
   }
-  parser->depth -= 1;
 #endif
 
+  parser->depth -= 1;
   return parser->success;
 }
 
@@ -999,7 +1033,7 @@ function generator.generate_capture_code(body)
 
   if (parser->success) {
     size_t capture_length = parser->pos - start_pos;
-    // TODO: ensure stack has enough space for push
+    pgen_checkstack(parser, 1);
     lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
   }
 }]], {
@@ -1020,6 +1054,7 @@ function generator.generate_capture_table_code(body, array_only)
     int items_start = initial_stack_size + 1;
     int array_count = new_stack_size - initial_stack_size;
 
+    pgen_checkstack(parser, 2); // table + one temporary during fill
     lua_createtable(parser->L, array_count, 0);
     int table_idx = lua_gettop(parser->L);
 
@@ -1062,6 +1097,7 @@ function generator.generate_capture_table_code(body, array_only)
       }
     }
 
+    pgen_checkstack(parser, 3); // table + two temporaries during fill
     lua_createtable(parser->L, array_count, named_count);
     int table_idx = lua_gettop(parser->L);
 
@@ -1100,6 +1136,7 @@ end
 function generator.generate_position_capture_code()
   return template_code([[{ // Position Capture
   // Push current position + 1 (Lua uses 1-based indexing)
+  pgen_checkstack(parser, 1);
   lua_pushinteger(parser->L, parser->pos + 1);
 }]], {})
 end
@@ -1137,9 +1174,10 @@ function generator.generate_constant_capture_code(values)
 
   return template_code([[{ // Constant Capture
   // A constant capture matches the empty string and produces all given values
-$PUSH_CODE$
+  pgen_checkstack(parser, $COUNT$);$PUSH_CODE$
 }]], {
-    PUSH_CODE = push_code
+    PUSH_CODE = push_code,
+    COUNT = values.count
   })
 end
 
@@ -1172,6 +1210,7 @@ function generator.generate_capture_group_code(body, name)
     int cg_stack_end = lua_gettop(parser->L);
     int captures_produced = cg_stack_end - cg_stack_start;
 
+    pgen_checkstack(parser, 2); // sentinel + value
     if (captures_produced > 0) {
       // Inner pattern produced captures - use the first one
       // Push sentinel (identifies this as named capture "$NAME$")
@@ -1219,6 +1258,7 @@ function generator.generate_numbered_capture_code(body, n)
 
   if (parser->success) {
     int final_stack = lua_gettop(parser->L);
+    pgen_checkstack(parser, 1);
 
     // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
     int count = 0;
@@ -1301,6 +1341,9 @@ function generator.generate_cmt_code(inner_pattern, cmt_id)
   if (parser->success) {
     size_t pos_after_inner = parser->pos;
     int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+
+    // function + subject + position + copies of the captures
+    pgen_checkstack(parser, captures_count + 3);
 
     // Get the callback function from registry
     lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[$ID$]);
@@ -1621,6 +1664,7 @@ static int l_$PARSER_NAME$_parse(lua_State *L) {
 
   // Strip Cg sentinel+value pairs from stack (they only matter inside Ct)
   if (final_stack_size > initial_stack_size) {
+    lua_checkstack(L, 1); // one temporary during compaction
     int read_idx = initial_stack_size + 1;
     int write_idx = initial_stack_size + 1;
     while (read_idx <= final_stack_size) {

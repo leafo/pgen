@@ -274,7 +274,8 @@ function pgen.compile(grammar, options)
 
   local generator = require("pgen.generator")
   return generator.generate(grammar, parser_name, {
-    pgen_errors = options.pgen_errors
+    pgen_errors = options.pgen_errors,
+    max_depth = options.max_depth
   })
 end
 
@@ -320,7 +321,8 @@ function pgen.require(module_name, options)
   local output, err = pgen.compile(grammar, {
     -- TODO: generate non-conflicting parser name
     parser_name = parser_name,
-    optimize = options.optimize
+    optimize = options.optimize,
+    max_depth = options.max_depth
   })
   log_time("Compiled grammar to C code (" .. tostring(#output) .. " bytes)", start_time)
 

@@ -62,6 +62,8 @@ Patterns specific to this library that aren't in LPeg:
 - `Cn(patt, n)` - Numbered capture (select the nth capture from inner pattern, use `n=0` to discard all captures)
 - `Cmb(name)` - Match backreference (matches the same text captured by `Cg` with the given name)
 
+**Lua 5.1 compatibility note:** pgen patterns are plain Lua tables, and Lua 5.1's `__len` metamethod only works on userdata, not tables. This means the `#` operator for lookahead doesn't work in Lua 5.1. Use `L(patt)` explicitly instead of `#patt`.
+
 Unlike LPeg's `Cmt` which takes a function, pgen's `Cmt(patt, code)` takes a **string of Lua code**. This code is embedded into the generated C parser and executed via the Lua C API during parsing. The code receives `(subject, pos, ...)` where `...` are any captures from the inner pattern, and should return a position (to advance), `true` (to succeed), or `false`/`nil` (to fail).
 
 ## Indentation-Sensitive Parsing
@@ -280,4 +282,68 @@ local pgen = require "pgen"
 local parser = pgen.require("path.to.grammar") -- uses same search path as require()
 local result = parser.parse("hello")
 ```
+
+## Parser Limits
+
+Generated parsers guard against pathological input and grammars:
+
+- **Recursion depth**: parsing deeply nested input recurses on the C stack.
+  Past a configurable limit (default 5000) the parser raises a Lua error
+  (catch with `pcall`) instead of overflowing the C stack. Configure with the
+  `max_depth` option to `pgen.compile`/`pgen.require`, or override at C
+  compile time with `-DPGEN_MAX_DEPTH=n`.
+- **Capture count**: captures are built on the Lua stack, so the number of
+  simultaneously pending captures is bounded by the Lua build's
+  `LUAI_MAXCSTACK` (8000 in stock Lua 5.1). Exceeding it raises a clean Lua
+  error.
+- **Empty loops**: `pgen.compile` rejects unbounded repetitions (`patt^n` for
+  `n >= 0`) whose body can match the empty string, since such a loop would
+  never advance. This mirrors LPeg's "loop body may accept empty string"
+  error. The check is conservative for recursive rule references: a loop body
+  is rejected unless it provably consumes input.
+
+## Optimizations
+
+The optimizer will transform the grammar before code generation to produce more
+efficient parsers. Optimizations can be disabled with the `--no-optimize` CLI
+flag or `optimize = false` option.
+
+### Trie Optimization
+
+When a choice contains 3 or more string literals, they are combined into a trie
+(prefix tree) data structure. This allows the parser to match keywords and
+operators more efficiently by sharing common prefixes. To take advantage of
+this optimization you must meet the requirements below.
+
+```lua
+-- Before optimization: linear search through alternatives
+local keywords = P"function" + P"for" + P"if" + P"in" + P"local" + P"return"
+
+-- After optimization: single trie lookup with shared prefixes
+-- "f" -> "o" -> "r" (matches "for")
+--              -> "unction" (matches "function")
+-- "i" -> "f" (matches "if")
+--     -> "n" (matches "in")
+-- etc.
+```
+
+**Requirements for trie eligibility:**
+- At least 3 alternatives
+- All alternatives must be string literals (`P"..."`)
+- No empty strings
+- Longer strings must appear before their prefixes (e.g., `P"function" + P"fun"` not `P"fun" + P"function"`)
+
+### Capture Table Optimization
+
+The optimizer analyzes `Ct()` capture tables to determine if they contain any named captures (`Cg(patt, name)`). When a `Ct` only contains positional captures, the generated code can use a more efficient array-based approach instead of checking for named fields.
+
+```lua
+-- Marked as array-only (no Cg inside)
+Ct(C(R"az"^1) * (P"," * C(R"az"^1))^0)
+
+-- Not optimized (contains named capture)
+Ct(Cg(C(R"az"^1), "first") * P"," * C(R"az"^1))
+```
+
+This optimization follows references through `V()` rules to ensure correctness even when captures are defined in other rules.
 

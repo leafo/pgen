@@ -10,6 +10,13 @@
 
 // cmt - generated parser
 
+// Maximum rule-call recursion depth before the parse is aborted with a Lua
+// error (prevents C stack overflow on deeply nested input). Override with
+// the max_depth compile option or -DPGEN_MAX_DEPTH=n
+#ifndef PGEN_MAX_DEPTH
+#define PGEN_MAX_DEPTH 5000
+#endif
+
 typedef struct {
   const char *input;
   size_t input_len;
@@ -36,6 +43,16 @@ typedef struct {
 #define RESTORE_POSITION(parser, pp) \
   (parser)->pos = (pp).pos;          \
   lua_settop((parser)->L, (pp).stack_size);
+
+// Ensure the Lua stack can hold n more values. Captures are built on the Lua
+// stack, so without this a large parse tree would overflow it (undefined
+// behavior). Raises a Lua error when the stack cannot grow any further
+// (LUAI_MAXCSTACK).
+static void pgen_checkstack(Parser *parser, int n) {
+  if (!lua_checkstack(parser->L, n)) {
+    luaL_error(parser->L, "pgen: Lua stack overflow while building captures");
+  }
+}
 
 #ifdef PGEN_DEBUG
 static void dumpstack(lua_State *L) {
@@ -138,8 +155,14 @@ static bool parse_skip_chars(Parser *parser);
 static bool parse_test(Parser *parser) {
   size_t start = parser->pos;
 
-#ifdef PGEN_DEBUG
   parser->depth += 1;
+  if (parser->depth > PGEN_MAX_DEPTH) {
+    // A Lua error (rather than a match failure) so the overflow can't be
+    // silently converted into a successful parse by a predicate or choice
+    luaL_error(parser->L, "pgen: max recursion depth (%d) exceeded at position %d", (int)PGEN_MAX_DEPTH, (int)(parser->pos + 1));
+  }
+
+#ifdef PGEN_DEBUG
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test", start);
 #endif
 
@@ -423,17 +446,23 @@ static bool parse_test(Parser *parser) {
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "test", parser->pos);
   }
-  parser->depth -= 1;
 #endif
 
+  parser->depth -= 1;
   return parser->success;
 }
 
 static bool parse_captures_passed(Parser *parser) {
   size_t start = parser->pos;
 
-#ifdef PGEN_DEBUG
   parser->depth += 1;
+  if (parser->depth > PGEN_MAX_DEPTH) {
+    // A Lua error (rather than a match failure) so the overflow can't be
+    // silently converted into a successful parse by a predicate or choice
+    luaL_error(parser->L, "pgen: max recursion depth (%d) exceeded at position %d", (int)PGEN_MAX_DEPTH, (int)(parser->pos + 1));
+  }
+
+#ifdef PGEN_DEBUG
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "captures_passed", start);
 #endif
 
@@ -466,7 +495,7 @@ static bool parse_captures_passed(Parser *parser) {
 
         if (parser->success) {
           size_t capture_length = parser->pos - start_pos;
-          // TODO: ensure stack has enough space for push
+          pgen_checkstack(parser, 1);
           lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
         }
       }
@@ -490,7 +519,7 @@ static bool parse_captures_passed(Parser *parser) {
 
           if (parser->success) {
             size_t capture_length = parser->pos - start_pos;
-            // TODO: ensure stack has enough space for push
+            pgen_checkstack(parser, 1);
             lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
           }
         }
@@ -503,6 +532,9 @@ static bool parse_captures_passed(Parser *parser) {
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
       int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+
+      // function + subject + position + copies of the captures
+      pgen_checkstack(parser, captures_count + 3);
 
       // Get the callback function from registry
       lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[7]);
@@ -583,17 +615,23 @@ static bool parse_captures_passed(Parser *parser) {
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "captures_passed", parser->pos);
   }
-  parser->depth -= 1;
 #endif
 
+  parser->depth -= 1;
   return parser->success;
 }
 
 static bool parse_inside_ct(Parser *parser) {
   size_t start = parser->pos;
 
-#ifdef PGEN_DEBUG
   parser->depth += 1;
+  if (parser->depth > PGEN_MAX_DEPTH) {
+    // A Lua error (rather than a match failure) so the overflow can't be
+    // silently converted into a successful parse by a predicate or choice
+    luaL_error(parser->L, "pgen: max recursion depth (%d) exceeded at position %d", (int)PGEN_MAX_DEPTH, (int)(parser->pos + 1));
+  }
+
+#ifdef PGEN_DEBUG
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "inside_ct", start);
 #endif
 
@@ -624,6 +662,9 @@ static bool parse_inside_ct(Parser *parser) {
       if (parser->success) {
         size_t pos_after_inner = parser->pos;
         int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+
+        // function + subject + position + copies of the captures
+        pgen_checkstack(parser, captures_count + 3);
 
         // Get the callback function from registry
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[8]);
@@ -702,6 +743,7 @@ static bool parse_inside_ct(Parser *parser) {
       int items_start = initial_stack_size + 1;
       int array_count = new_stack_size - initial_stack_size;
 
+      pgen_checkstack(parser, 2); // table + one temporary during fill
       lua_createtable(parser->L, array_count, 0);
       int table_idx = lua_gettop(parser->L);
 
@@ -726,17 +768,23 @@ static bool parse_inside_ct(Parser *parser) {
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "inside_ct", parser->pos);
   }
-  parser->depth -= 1;
 #endif
 
+  parser->depth -= 1;
   return parser->success;
 }
 
 static bool parse_no_return(Parser *parser) {
   size_t start = parser->pos;
 
-#ifdef PGEN_DEBUG
   parser->depth += 1;
+  if (parser->depth > PGEN_MAX_DEPTH) {
+    // A Lua error (rather than a match failure) so the overflow can't be
+    // silently converted into a successful parse by a predicate or choice
+    luaL_error(parser->L, "pgen: max recursion depth (%d) exceeded at position %d", (int)PGEN_MAX_DEPTH, (int)(parser->pos + 1));
+  }
+
+#ifdef PGEN_DEBUG
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "no_return", start);
 #endif
 
@@ -765,6 +813,9 @@ static bool parse_no_return(Parser *parser) {
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
       int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+
+      // function + subject + position + copies of the captures
+      pgen_checkstack(parser, captures_count + 3);
 
       // Get the callback function from registry
       lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[3]);
@@ -845,17 +896,23 @@ static bool parse_no_return(Parser *parser) {
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "no_return", parser->pos);
   }
-  parser->depth -= 1;
 #endif
 
+  parser->depth -= 1;
   return parser->success;
 }
 
 static bool parse_return_extra_captures(Parser *parser) {
   size_t start = parser->pos;
 
-#ifdef PGEN_DEBUG
   parser->depth += 1;
+  if (parser->depth > PGEN_MAX_DEPTH) {
+    // A Lua error (rather than a match failure) so the overflow can't be
+    // silently converted into a successful parse by a predicate or choice
+    luaL_error(parser->L, "pgen: max recursion depth (%d) exceeded at position %d", (int)PGEN_MAX_DEPTH, (int)(parser->pos + 1));
+  }
+
+#ifdef PGEN_DEBUG
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "return_extra_captures", start);
 #endif
 
@@ -884,6 +941,9 @@ static bool parse_return_extra_captures(Parser *parser) {
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
       int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+
+      // function + subject + position + copies of the captures
+      pgen_checkstack(parser, captures_count + 3);
 
       // Get the callback function from registry
       lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[6]);
@@ -964,17 +1024,23 @@ static bool parse_return_extra_captures(Parser *parser) {
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "return_extra_captures", parser->pos);
   }
-  parser->depth -= 1;
 #endif
 
+  parser->depth -= 1;
   return parser->success;
 }
 
 static bool parse_return_false(Parser *parser) {
   size_t start = parser->pos;
 
-#ifdef PGEN_DEBUG
   parser->depth += 1;
+  if (parser->depth > PGEN_MAX_DEPTH) {
+    // A Lua error (rather than a match failure) so the overflow can't be
+    // silently converted into a successful parse by a predicate or choice
+    luaL_error(parser->L, "pgen: max recursion depth (%d) exceeded at position %d", (int)PGEN_MAX_DEPTH, (int)(parser->pos + 1));
+  }
+
+#ifdef PGEN_DEBUG
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "return_false", start);
 #endif
 
@@ -1003,6 +1069,9 @@ static bool parse_return_false(Parser *parser) {
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
       int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+
+      // function + subject + position + copies of the captures
+      pgen_checkstack(parser, captures_count + 3);
 
       // Get the callback function from registry
       lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[1]);
@@ -1083,17 +1152,23 @@ static bool parse_return_false(Parser *parser) {
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "return_false", parser->pos);
   }
-  parser->depth -= 1;
 #endif
 
+  parser->depth -= 1;
   return parser->success;
 }
 
 static bool parse_return_nil(Parser *parser) {
   size_t start = parser->pos;
 
-#ifdef PGEN_DEBUG
   parser->depth += 1;
+  if (parser->depth > PGEN_MAX_DEPTH) {
+    // A Lua error (rather than a match failure) so the overflow can't be
+    // silently converted into a successful parse by a predicate or choice
+    luaL_error(parser->L, "pgen: max recursion depth (%d) exceeded at position %d", (int)PGEN_MAX_DEPTH, (int)(parser->pos + 1));
+  }
+
+#ifdef PGEN_DEBUG
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "return_nil", start);
 #endif
 
@@ -1122,6 +1197,9 @@ static bool parse_return_nil(Parser *parser) {
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
       int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+
+      // function + subject + position + copies of the captures
+      pgen_checkstack(parser, captures_count + 3);
 
       // Get the callback function from registry
       lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[4]);
@@ -1202,17 +1280,23 @@ static bool parse_return_nil(Parser *parser) {
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "return_nil", parser->pos);
   }
-  parser->depth -= 1;
 #endif
 
+  parser->depth -= 1;
   return parser->success;
 }
 
 static bool parse_return_pos(Parser *parser) {
   size_t start = parser->pos;
 
-#ifdef PGEN_DEBUG
   parser->depth += 1;
+  if (parser->depth > PGEN_MAX_DEPTH) {
+    // A Lua error (rather than a match failure) so the overflow can't be
+    // silently converted into a successful parse by a predicate or choice
+    luaL_error(parser->L, "pgen: max recursion depth (%d) exceeded at position %d", (int)PGEN_MAX_DEPTH, (int)(parser->pos + 1));
+  }
+
+#ifdef PGEN_DEBUG
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "return_pos", start);
 #endif
 
@@ -1241,6 +1325,9 @@ static bool parse_return_pos(Parser *parser) {
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
       int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+
+      // function + subject + position + copies of the captures
+      pgen_checkstack(parser, captures_count + 3);
 
       // Get the callback function from registry
       lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[2]);
@@ -1321,17 +1408,23 @@ static bool parse_return_pos(Parser *parser) {
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "return_pos", parser->pos);
   }
-  parser->depth -= 1;
 #endif
 
+  parser->depth -= 1;
   return parser->success;
 }
 
 static bool parse_return_true(Parser *parser) {
   size_t start = parser->pos;
 
-#ifdef PGEN_DEBUG
   parser->depth += 1;
+  if (parser->depth > PGEN_MAX_DEPTH) {
+    // A Lua error (rather than a match failure) so the overflow can't be
+    // silently converted into a successful parse by a predicate or choice
+    luaL_error(parser->L, "pgen: max recursion depth (%d) exceeded at position %d", (int)PGEN_MAX_DEPTH, (int)(parser->pos + 1));
+  }
+
+#ifdef PGEN_DEBUG
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "return_true", start);
 #endif
 
@@ -1360,6 +1453,9 @@ static bool parse_return_true(Parser *parser) {
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
       int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+
+      // function + subject + position + copies of the captures
+      pgen_checkstack(parser, captures_count + 3);
 
       // Get the callback function from registry
       lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[5]);
@@ -1440,17 +1536,23 @@ static bool parse_return_true(Parser *parser) {
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "return_true", parser->pos);
   }
-  parser->depth -= 1;
 #endif
 
+  parser->depth -= 1;
   return parser->success;
 }
 
 static bool parse_skip_chars(Parser *parser) {
   size_t start = parser->pos;
 
-#ifdef PGEN_DEBUG
   parser->depth += 1;
+  if (parser->depth > PGEN_MAX_DEPTH) {
+    // A Lua error (rather than a match failure) so the overflow can't be
+    // silently converted into a successful parse by a predicate or choice
+    luaL_error(parser->L, "pgen: max recursion depth (%d) exceeded at position %d", (int)PGEN_MAX_DEPTH, (int)(parser->pos + 1));
+  }
+
+#ifdef PGEN_DEBUG
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "skip_chars", start);
 #endif
 
@@ -1482,6 +1584,9 @@ static bool parse_skip_chars(Parser *parser) {
       if (parser->success) {
         size_t pos_after_inner = parser->pos;
         int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+
+        // function + subject + position + copies of the captures
+        pgen_checkstack(parser, captures_count + 3);
 
         // Get the callback function from registry
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[0]);
@@ -1582,9 +1687,9 @@ static bool parse_skip_chars(Parser *parser) {
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "skip_chars", parser->pos);
   }
-  parser->depth -= 1;
 #endif
 
+  parser->depth -= 1;
   return parser->success;
 }
 
@@ -1663,6 +1768,7 @@ static int l_cmt_parse(lua_State *L) {
 
   // Strip Cg sentinel+value pairs from stack (they only matter inside Ct)
   if (final_stack_size > initial_stack_size) {
+    lua_checkstack(L, 1); // one temporary during compaction
     int read_idx = initial_stack_size + 1;
     int write_idx = initial_stack_size + 1;
     while (read_idx <= final_stack_size) {
