@@ -10,6 +10,29 @@
 
 // moonscript - generated parser
 
+#include <limits.h>
+
+// Indenter (match-time integer stack) infrastructure
+#define PGEN_HAS_IND 1
+#define PGEN_IND_STACK_COUNT 1
+// Sentinel pushed by `prevent`: no measured width compares greater than it,
+// so any nested `advance` fails
+#define PGEN_IND_PREVENT_SENTINEL INT_MAX
+
+typedef struct {
+  int *items;
+  int size;
+  int cap;
+} PgenIndStack;
+
+// Undo log entry for transactional stack operations. Rewinding the trail on
+// backtrack reverses every push/pop performed since the choice point.
+typedef struct {
+  unsigned char stack_id;
+  unsigned char op; // 0 = push, 1 = pop
+  int value;        // for pop entries: the value that was popped
+} PgenTrailEntry;
+
 typedef struct {
   const char *input;
   size_t input_len;
@@ -20,22 +43,109 @@ typedef struct {
   size_t throw_pos;        // Position where T() was thrown
   size_t depth;
   lua_State *L;
+  PgenIndStack ind_stacks[PGEN_IND_STACK_COUNT];
+  PgenTrailEntry *trail;
+  size_t trail_len;
+  size_t trail_cap;
 } Parser;
 
 typedef struct {
   size_t pos;
   int stack_size;
+  size_t trail_index;
 } ParserPosition;
 
-#define REMEMBER_POSITION(parser, pp) \
-  ParserPosition pp;                  \
-  (pp).pos = (parser)->pos;           \
-  (pp).stack_size = lua_gettop((parser)->L);
+#define REMEMBER_POSITION(parser, pp)        \
+  ParserPosition pp;                         \
+  (pp).pos = (parser)->pos;                  \
+  (pp).stack_size = lua_gettop((parser)->L); \
+  (pp).trail_index = (parser)->trail_len;
 
 // Restore parser position
-#define RESTORE_POSITION(parser, pp) \
-  (parser)->pos = (pp).pos;          \
-  lua_settop((parser)->L, (pp).stack_size);
+#define RESTORE_POSITION(parser, pp)        \
+  (parser)->pos = (pp).pos;                 \
+  lua_settop((parser)->L, (pp).stack_size); \
+  pgen_ind_trail_rewind(parser, (pp).trail_index);
+
+// Rewind the indenter trail to a previous length, undoing pushes and pops
+static void pgen_ind_trail_rewind(Parser *parser, size_t index) {
+  while (parser->trail_len > index) {
+    parser->trail_len--;
+    PgenTrailEntry *e = &parser->trail[parser->trail_len];
+    PgenIndStack *s = &parser->ind_stacks[e->stack_id];
+    if (e->op == 0) {
+      // undo push
+      s->size--;
+    } else {
+      // undo pop: the slot is still allocated, restore the value
+      s->items[s->size] = e->value;
+      s->size++;
+    }
+  }
+}
+
+static void pgen_ind_trail_record(Parser *parser, int stack_id, int op, int value) {
+  if (parser->trail_len >= parser->trail_cap) {
+    size_t new_cap = parser->trail_cap == 0 ? 64 : parser->trail_cap * 2;
+    PgenTrailEntry *trail = (PgenTrailEntry *)realloc(parser->trail, new_cap * sizeof(PgenTrailEntry));
+    if (!trail) {
+      luaL_error(parser->L, "pgen: out of memory growing indenter trail");
+    }
+    parser->trail = trail;
+    parser->trail_cap = new_cap;
+  }
+  parser->trail[parser->trail_len].stack_id = (unsigned char)stack_id;
+  parser->trail[parser->trail_len].op = (unsigned char)op;
+  parser->trail[parser->trail_len].value = value;
+  parser->trail_len++;
+}
+
+static void pgen_ind_push(Parser *parser, int stack_id, int value) {
+  PgenIndStack *s = &parser->ind_stacks[stack_id];
+  if (s->size >= s->cap) {
+    int new_cap = s->cap * 2;
+    int *items = (int *)realloc(s->items, new_cap * sizeof(int));
+    if (!items) {
+      luaL_error(parser->L, "pgen: out of memory growing indenter stack");
+    }
+    s->items = items;
+    s->cap = new_cap;
+  }
+  s->items[s->size++] = value;
+  pgen_ind_trail_record(parser, stack_id, 0, value);
+}
+
+// Pop the stack; returns false if the stack is empty
+static bool pgen_ind_pop(Parser *parser, int stack_id) {
+  PgenIndStack *s = &parser->ind_stacks[stack_id];
+  if (s->size == 0) {
+    return false;
+  }
+  s->size--;
+  pgen_ind_trail_record(parser, stack_id, 1, s->items[s->size]);
+  return true;
+}
+
+// Measure the indentation width of the run of space/tab characters at the
+// current position (space = 1, tab = tab_width). Sets *end_pos to the first
+// position past the run.
+static int pgen_ind_measure(Parser *parser, size_t *end_pos, int tab_width) {
+  size_t p = parser->pos;
+  int width = 0;
+  while (p < parser->input_len) {
+    char c = parser->input[p];
+    if (c == ' ') {
+      width += 1;
+    } else if (c == '\t') {
+      width += tab_width;
+    } else {
+      break;
+    }
+    p++;
+  }
+  *end_pos = p;
+  return width;
+}
 
 #ifdef PGEN_DEBUG
 static void dumpstack(lua_State *L) {
@@ -68,49 +178,17 @@ static bool is_cg_sentinel(void *ptr) {
   (void)ptr; // unused
   return false;
 }
-// Match-time capture (Cmt) infrastructure
-
-static const char __cmt_code_0[] = "    local subject, pos, spaces = ...\n    local level = 0\n    for i = 1, #spaces do\n      local c = spaces:sub(i, i)\n      if c == \" \" then\n        level = level + 1\n      elseif c == \"\\t\" then\n        level = level + 2\n      end\n    end\n    return true, level\n  ";
-static const char __cmt_code_1[] = "    local subject, pos, level = ...\n    local stack = _G._ms_indent\n    local top = stack[#stack]\n    if level > top then\n      stack[#stack + 1] = level\n      return true\n    end\n    return false\n  ";
-static const char __cmt_code_2[] = "    local subject, pos = ...\n    local stack = _G._ms_indent\n    if #stack > 1 then\n      stack[#stack] = nil\n      return true\n    end\n    return true  -- Don't fail if already at base\n  ";
-static const char __cmt_code_3[] = "    local subject, pos, level = ...\n    local stack = _G._ms_indent\n    return stack[#stack] == level\n  ";
-
-static int __cmt_refs[4];
-
-// Initialize Cmt callbacks by loading their Lua code
-static void __cmt_init(lua_State *L) {
-  if (luaL_loadstring(L, __cmt_code_0) != 0) {
-    luaL_error(L, "Failed to load Cmt callback 0: %s", lua_tostring(L, -1));
-  }
-  __cmt_refs[0] = luaL_ref(L, LUA_REGISTRYINDEX);
-  if (luaL_loadstring(L, __cmt_code_1) != 0) {
-    luaL_error(L, "Failed to load Cmt callback 1: %s", lua_tostring(L, -1));
-  }
-  __cmt_refs[1] = luaL_ref(L, LUA_REGISTRYINDEX);
-  if (luaL_loadstring(L, __cmt_code_2) != 0) {
-    luaL_error(L, "Failed to load Cmt callback 2: %s", lua_tostring(L, -1));
-  }
-  __cmt_refs[2] = luaL_ref(L, LUA_REGISTRYINDEX);
-  if (luaL_loadstring(L, __cmt_code_3) != 0) {
-    luaL_error(L, "Failed to load Cmt callback 3: %s", lua_tostring(L, -1));
-  }
-  __cmt_refs[3] = luaL_ref(L, LUA_REGISTRYINDEX);
-}
 
 // Forward declarations
 static bool parse_File(Parser *parser);
-static bool parse_Advance(Parser *parser);
 static bool parse_Assign(Parser *parser);
 static bool parse_BlankLine(Parser *parser);
 static bool parse_Block(Parser *parser);
-static bool parse_CalcIndent(Parser *parser);
-static bool parse_CheckIndent(Parser *parser);
 static bool parse_IfStatement(Parser *parser);
 static bool parse_InBlock(Parser *parser);
 static bool parse_Line(Parser *parser);
 static bool parse_Name(Parser *parser);
 static bool parse_Number(Parser *parser);
-static bool parse_PopIndent(Parser *parser);
 static bool parse_Statement(Parser *parser);
 static bool parse_String(Parser *parser);
 static bool parse_Value(Parser *parser);
@@ -179,110 +257,6 @@ static bool parse_File(Parser *parser) {
     fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "File", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_Advance(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "Advance", start);
-#endif
-
-  { // Lookahead (match without consuming input)
-    REMEMBER_POSITION(parser, pos);
-
-    { // Match-time capture (Cmt id=1)
-      int cmt_stack_base = lua_gettop(parser->L);
-      size_t cmt_start_pos = parser->pos;
-
-      parse_CalcIndent(parser);
-
-      if (parser->success) {
-        size_t pos_after_inner = parser->pos;
-        int captures_count = lua_gettop(parser->L) - cmt_stack_base;
-
-        // Get the callback function from registry
-        lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[1]);
-
-        // Push arguments: subject, position (after inner pattern)
-        lua_pushlstring(parser->L, parser->input, parser->input_len);
-        lua_pushinteger(parser->L, (lua_Integer)(pos_after_inner + 1)); // 1-based
-
-        // Copy captures as additional arguments
-        for (int i = 0; i < captures_count; i++) {
-          lua_pushvalue(parser->L, cmt_stack_base + 1 + i);
-        }
-
-        // Remove original captures from stack before calling
-        // Stack: [captures...][func][subject][pos][captures_copy...]
-        for (int i = 0; i < captures_count; i++) {
-          lua_remove(parser->L, cmt_stack_base + 1);
-        }
-        // Stack now: [func][subject][pos][captures...]
-
-        // Call function: 2 + captures_count args, LUA_MULTRET returns
-        // lua_call propagates errors (aborts parse on Lua error)
-        lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
-
-        int returns_count = lua_gettop(parser->L) - cmt_stack_base;
-
-        if (returns_count == 0) {
-          // No return value = match fails
-          parser->success = false;
-          parser->pos = cmt_start_pos;
-        } else {
-          int first_type = lua_type(parser->L, cmt_stack_base + 1);
-
-          if (first_type == LUA_TNUMBER) {
-            // Number = new position (1-based from Lua)
-            lua_Integer new_pos = lua_tointeger(parser->L, cmt_stack_base + 1);
-            new_pos--; // Convert to 0-based
-            // Per lpeg: must be in range [pos_after_inner, input_len]
-            if (new_pos >= (lua_Integer)pos_after_inner && new_pos <= (lua_Integer)parser->input_len) {
-              parser->pos = (size_t)new_pos;
-              parser->success = true;
-            } else {
-              parser->success = false;
-              parser->pos = cmt_start_pos;
-            }
-          } else if (first_type == LUA_TBOOLEAN && lua_toboolean(parser->L, cmt_stack_base + 1)) {
-            // true = succeed without consuming (position stays at pos_after_inner)
-            parser->success = true;
-          } else {
-            // false, nil, or other = fail
-            parser->success = false;
-            parser->pos = cmt_start_pos;
-          }
-        }
-
-        // Handle captures: remove first return value, keep extras as captures
-        if (parser->success && returns_count > 1) {
-          lua_remove(parser->L, cmt_stack_base + 1); // Remove first return value
-          // Remaining values are the new captures
-        } else {
-          lua_settop(parser->L, cmt_stack_base); // Clear all returns
-        }
-      }
-    }
-
-    if (parser->success) {
-      // Pattern matched, but we don't consume any input
-      RESTORE_POSITION(parser, pos);
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "Advance", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "Advance", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -596,248 +570,6 @@ static bool parse_Block(Parser *parser) {
   return parser->success;
 }
 
-static bool parse_CalcIndent(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "CalcIndent", start);
-#endif
-
-  { // Match-time capture (Cmt id=0)
-    int cmt_stack_base = lua_gettop(parser->L);
-    size_t cmt_start_pos = parser->pos;
-
-    { // Capture
-      size_t start_pos = parser->pos;
-      { // Zero or more repetitions
-        while (true) {
-          { // Match character set " \t"
-            if (parser->pos < parser->input_len) {
-              switch (parser->input[parser->pos]) {
-              case 32: /* " " */
-              case 9:  /* "\t" */
-                parser->pos++;
-                break;
-              default:
-#ifdef PGEN_ERRORS
-                sprintf(parser->error_message, "Expected one of "
-                                               "\" \\t\""
-                                               " at position %zu",
-                        parser->pos);
-#endif
-                parser->success = false;
-              }
-            } else {
-#ifdef PGEN_ERRORS
-              sprintf(parser->error_message, "Expected one of "
-                                             "\" \\t\""
-                                             " at position %zu but reached end of input",
-                      parser->pos);
-#endif
-              parser->success = false;
-            }
-          }
-          if (!parser->success) {
-            break;
-          }
-        }
-        // Only recover from ordinary failure, not labeled failure from T()
-        if (!parser->throw_label) {
-          parser->success = true;
-        }
-      }
-
-      if (parser->success) {
-        size_t capture_length = parser->pos - start_pos;
-        // TODO: ensure stack has enough space for push
-        lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-      }
-    }
-
-    if (parser->success) {
-      size_t pos_after_inner = parser->pos;
-      int captures_count = lua_gettop(parser->L) - cmt_stack_base;
-
-      // Get the callback function from registry
-      lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[0]);
-
-      // Push arguments: subject, position (after inner pattern)
-      lua_pushlstring(parser->L, parser->input, parser->input_len);
-      lua_pushinteger(parser->L, (lua_Integer)(pos_after_inner + 1)); // 1-based
-
-      // Copy captures as additional arguments
-      for (int i = 0; i < captures_count; i++) {
-        lua_pushvalue(parser->L, cmt_stack_base + 1 + i);
-      }
-
-      // Remove original captures from stack before calling
-      // Stack: [captures...][func][subject][pos][captures_copy...]
-      for (int i = 0; i < captures_count; i++) {
-        lua_remove(parser->L, cmt_stack_base + 1);
-      }
-      // Stack now: [func][subject][pos][captures...]
-
-      // Call function: 2 + captures_count args, LUA_MULTRET returns
-      // lua_call propagates errors (aborts parse on Lua error)
-      lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
-
-      int returns_count = lua_gettop(parser->L) - cmt_stack_base;
-
-      if (returns_count == 0) {
-        // No return value = match fails
-        parser->success = false;
-        parser->pos = cmt_start_pos;
-      } else {
-        int first_type = lua_type(parser->L, cmt_stack_base + 1);
-
-        if (first_type == LUA_TNUMBER) {
-          // Number = new position (1-based from Lua)
-          lua_Integer new_pos = lua_tointeger(parser->L, cmt_stack_base + 1);
-          new_pos--; // Convert to 0-based
-          // Per lpeg: must be in range [pos_after_inner, input_len]
-          if (new_pos >= (lua_Integer)pos_after_inner && new_pos <= (lua_Integer)parser->input_len) {
-            parser->pos = (size_t)new_pos;
-            parser->success = true;
-          } else {
-            parser->success = false;
-            parser->pos = cmt_start_pos;
-          }
-        } else if (first_type == LUA_TBOOLEAN && lua_toboolean(parser->L, cmt_stack_base + 1)) {
-          // true = succeed without consuming (position stays at pos_after_inner)
-          parser->success = true;
-        } else {
-          // false, nil, or other = fail
-          parser->success = false;
-          parser->pos = cmt_start_pos;
-        }
-      }
-
-      // Handle captures: remove first return value, keep extras as captures
-      if (parser->success && returns_count > 1) {
-        lua_remove(parser->L, cmt_stack_base + 1); // Remove first return value
-        // Remaining values are the new captures
-      } else {
-        lua_settop(parser->L, cmt_stack_base); // Clear all returns
-      }
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "CalcIndent", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "CalcIndent", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_CheckIndent(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "CheckIndent", start);
-#endif
-
-  { // Numbered Capture (discard all)
-    int cn_stack_start = lua_gettop(parser->L);
-    { // Match-time capture (Cmt id=3)
-      int cmt_stack_base = lua_gettop(parser->L);
-      size_t cmt_start_pos = parser->pos;
-
-      parse_CalcIndent(parser);
-
-      if (parser->success) {
-        size_t pos_after_inner = parser->pos;
-        int captures_count = lua_gettop(parser->L) - cmt_stack_base;
-
-        // Get the callback function from registry
-        lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[3]);
-
-        // Push arguments: subject, position (after inner pattern)
-        lua_pushlstring(parser->L, parser->input, parser->input_len);
-        lua_pushinteger(parser->L, (lua_Integer)(pos_after_inner + 1)); // 1-based
-
-        // Copy captures as additional arguments
-        for (int i = 0; i < captures_count; i++) {
-          lua_pushvalue(parser->L, cmt_stack_base + 1 + i);
-        }
-
-        // Remove original captures from stack before calling
-        // Stack: [captures...][func][subject][pos][captures_copy...]
-        for (int i = 0; i < captures_count; i++) {
-          lua_remove(parser->L, cmt_stack_base + 1);
-        }
-        // Stack now: [func][subject][pos][captures...]
-
-        // Call function: 2 + captures_count args, LUA_MULTRET returns
-        // lua_call propagates errors (aborts parse on Lua error)
-        lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
-
-        int returns_count = lua_gettop(parser->L) - cmt_stack_base;
-
-        if (returns_count == 0) {
-          // No return value = match fails
-          parser->success = false;
-          parser->pos = cmt_start_pos;
-        } else {
-          int first_type = lua_type(parser->L, cmt_stack_base + 1);
-
-          if (first_type == LUA_TNUMBER) {
-            // Number = new position (1-based from Lua)
-            lua_Integer new_pos = lua_tointeger(parser->L, cmt_stack_base + 1);
-            new_pos--; // Convert to 0-based
-            // Per lpeg: must be in range [pos_after_inner, input_len]
-            if (new_pos >= (lua_Integer)pos_after_inner && new_pos <= (lua_Integer)parser->input_len) {
-              parser->pos = (size_t)new_pos;
-              parser->success = true;
-            } else {
-              parser->success = false;
-              parser->pos = cmt_start_pos;
-            }
-          } else if (first_type == LUA_TBOOLEAN && lua_toboolean(parser->L, cmt_stack_base + 1)) {
-            // true = succeed without consuming (position stays at pos_after_inner)
-            parser->success = true;
-          } else {
-            // false, nil, or other = fail
-            parser->success = false;
-            parser->pos = cmt_start_pos;
-          }
-        }
-
-        // Handle captures: remove first return value, keep extras as captures
-        if (parser->success && returns_count > 1) {
-          lua_remove(parser->L, cmt_stack_base + 1); // Remove first return value
-          // Remaining values are the new captures
-        } else {
-          lua_settop(parser->L, cmt_stack_base); // Clear all returns
-        }
-      }
-    }
-
-    if (parser->success) {
-      lua_settop(parser->L, cn_stack_start);
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "CheckIndent", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "CheckIndent", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
 static bool parse_IfStatement(Parser *parser) {
   size_t start = parser->pos;
 
@@ -1023,11 +755,31 @@ static bool parse_InBlock(Parser *parser) {
         }
       }
       if (parser->success) {
-        parse_Advance(parser);
+        { // Indenter advance (stack 0): push width if deeper than top, consume nothing
+          size_t ind_end;
+          int ind_width = pgen_ind_measure(parser, &ind_end, 2);
+          (void)ind_end;
+          PgenIndStack *ind_s = &parser->ind_stacks[0];
+          if (ind_s->size > 0 && ind_width > ind_s->items[ind_s->size - 1]) {
+            pgen_ind_push(parser, 0, ind_width);
+          } else {
+            parser->success = false;
+#ifdef PGEN_ERRORS
+            sprintf(parser->error_message, "Indent width %d does not advance current level at position %zu", ind_width, parser->pos);
+#endif
+          }
+        }
         if (parser->success) {
           parse_Block(parser);
           if (parser->success) {
-            parse_PopIndent(parser);
+            { // Indenter pop (stack 0)
+              if (!pgen_ind_pop(parser, 0)) {
+                parser->success = false;
+#ifdef PGEN_ERRORS
+                sprintf(parser->error_message, "Indenter stack 0 is empty at position %zu", parser->pos);
+#endif
+              }
+            }
           }
         }
       }
@@ -1061,7 +813,19 @@ static bool parse_Line(Parser *parser) {
   { // Sequence with 2 patterns
     REMEMBER_POSITION(parser, pos);
 
-    parse_CheckIndent(parser);
+    { // Indenter check (stack 0): consume whitespace, width must equal top
+      size_t ind_end;
+      int ind_width = pgen_ind_measure(parser, &ind_end, 2);
+      PgenIndStack *ind_s = &parser->ind_stacks[0];
+      if (ind_s->size > 0 && ind_s->items[ind_s->size - 1] == ind_width) {
+        parser->pos = ind_end;
+      } else {
+        parser->success = false;
+#ifdef PGEN_ERRORS
+        sprintf(parser->error_message, "Indent width %d does not match current level at position %zu", ind_width, parser->pos);
+#endif
+      }
+    }
     if (parser->success) {
       parse_Statement(parser);
       if (!parser->success) {
@@ -1348,121 +1112,6 @@ static bool parse_Number(Parser *parser) {
     fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "Number", parser->pos);
-  }
-  parser->depth -= 1;
-#endif
-
-  return parser->success;
-}
-
-static bool parse_PopIndent(Parser *parser) {
-  size_t start = parser->pos;
-
-#ifdef PGEN_DEBUG
-  parser->depth += 1;
-  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "PopIndent", start);
-#endif
-
-  { // Numbered Capture (discard all)
-    int cn_stack_start = lua_gettop(parser->L);
-    { // Match-time capture (Cmt id=2)
-      int cmt_stack_base = lua_gettop(parser->L);
-      size_t cmt_start_pos = parser->pos;
-
-      { // Match literal ""
-        if (parser->pos + 0 <= parser->input_len &&
-            memcmp(parser->input + parser->pos, "", 0) == 0) {
-          parser->pos += 0;
-        } else {
-#ifdef PGEN_ERRORS
-          sprintf(parser->error_message, "Expected `"
-                                         ""
-                                         "` at position %zu",
-                  parser->pos);
-#endif
-          parser->success = false;
-        }
-      }
-
-      if (parser->success) {
-        size_t pos_after_inner = parser->pos;
-        int captures_count = lua_gettop(parser->L) - cmt_stack_base;
-
-        // Get the callback function from registry
-        lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[2]);
-
-        // Push arguments: subject, position (after inner pattern)
-        lua_pushlstring(parser->L, parser->input, parser->input_len);
-        lua_pushinteger(parser->L, (lua_Integer)(pos_after_inner + 1)); // 1-based
-
-        // Copy captures as additional arguments
-        for (int i = 0; i < captures_count; i++) {
-          lua_pushvalue(parser->L, cmt_stack_base + 1 + i);
-        }
-
-        // Remove original captures from stack before calling
-        // Stack: [captures...][func][subject][pos][captures_copy...]
-        for (int i = 0; i < captures_count; i++) {
-          lua_remove(parser->L, cmt_stack_base + 1);
-        }
-        // Stack now: [func][subject][pos][captures...]
-
-        // Call function: 2 + captures_count args, LUA_MULTRET returns
-        // lua_call propagates errors (aborts parse on Lua error)
-        lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
-
-        int returns_count = lua_gettop(parser->L) - cmt_stack_base;
-
-        if (returns_count == 0) {
-          // No return value = match fails
-          parser->success = false;
-          parser->pos = cmt_start_pos;
-        } else {
-          int first_type = lua_type(parser->L, cmt_stack_base + 1);
-
-          if (first_type == LUA_TNUMBER) {
-            // Number = new position (1-based from Lua)
-            lua_Integer new_pos = lua_tointeger(parser->L, cmt_stack_base + 1);
-            new_pos--; // Convert to 0-based
-            // Per lpeg: must be in range [pos_after_inner, input_len]
-            if (new_pos >= (lua_Integer)pos_after_inner && new_pos <= (lua_Integer)parser->input_len) {
-              parser->pos = (size_t)new_pos;
-              parser->success = true;
-            } else {
-              parser->success = false;
-              parser->pos = cmt_start_pos;
-            }
-          } else if (first_type == LUA_TBOOLEAN && lua_toboolean(parser->L, cmt_stack_base + 1)) {
-            // true = succeed without consuming (position stays at pos_after_inner)
-            parser->success = true;
-          } else {
-            // false, nil, or other = fail
-            parser->success = false;
-            parser->pos = cmt_start_pos;
-          }
-        }
-
-        // Handle captures: remove first return value, keep extras as captures
-        if (parser->success && returns_count > 1) {
-          lua_remove(parser->L, cmt_stack_base + 1); // Remove first return value
-          // Remaining values are the new captures
-        } else {
-          lua_settop(parser->L, cmt_stack_base); // Clear all returns
-        }
-      }
-    }
-
-    if (parser->success) {
-      lua_settop(parser->L, cn_stack_start);
-    }
-  }
-
-#ifdef PGEN_DEBUG
-  if (parser->success) {
-    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "PopIndent", start, parser->pos);
-    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
-  } else {
-    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "PopIndent", parser->pos);
   }
   parser->depth -= 1;
 #endif
@@ -2089,6 +1738,26 @@ static Parser *moonscript_init(const char *input, lua_State *L) {
   parser->throw_label = NULL;
   parser->throw_pos = 0;
   parser->L = L;
+
+  // Initialize indenter stacks (each seeded with its initial value)
+  static const int pgen_ind_initials[PGEN_IND_STACK_COUNT] = {0};
+  parser->trail = NULL;
+  parser->trail_len = 0;
+  parser->trail_cap = 0;
+  for (int i = 0; i < PGEN_IND_STACK_COUNT; i++) {
+    parser->ind_stacks[i].items = (int *)malloc(8 * sizeof(int));
+    if (!parser->ind_stacks[i].items) {
+      for (int j = 0; j < i; j++) {
+        free(parser->ind_stacks[j].items);
+      }
+      free(parser);
+      return NULL;
+    }
+    parser->ind_stacks[i].cap = 8;
+    parser->ind_stacks[i].size = 1;
+    parser->ind_stacks[i].items[0] = pgen_ind_initials[i];
+  }
+
   return parser;
 }
 
@@ -2096,6 +1765,10 @@ static Parser *moonscript_init(const char *input, lua_State *L) {
 static void moonscript_free(Parser *parser) {
   // Check for NULL in case _init failed or was called with NULL
   if (parser) {
+    for (int i = 0; i < PGEN_IND_STACK_COUNT; i++) {
+      free(parser->ind_stacks[i].items);
+    }
+    free(parser->trail);
     free(parser);
   }
 }
@@ -2190,14 +1863,14 @@ static const struct luaL_Reg moonscript_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_moonscript(lua_State *L) {
-  __cmt_init(L);
+
   luaL_newlib(L, moonscript_module); // Creates table and registers functions
   return 1;
 }
 #else
 // Lua 5.1 uses luaL_register
 int luaopen_moonscript(lua_State *L) {
-  __cmt_init(L);
+
   luaL_register(L, "moonscript", moonscript_module); // Registers functions in global table (or package table)
   return 1;
 }

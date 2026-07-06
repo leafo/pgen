@@ -440,6 +440,9 @@ static bool parse_captures_passed(Parser *parser) {
   { // Match-time capture (Cmt id=7)
     int cmt_stack_base = lua_gettop(parser->L);
     size_t cmt_start_pos = parser->pos;
+#ifdef PGEN_HAS_IND
+    size_t cmt_trail_index = parser->trail_len;
+#endif
 
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
@@ -562,6 +565,14 @@ static bool parse_captures_passed(Parser *parser) {
       } else {
         lua_settop(parser->L, cmt_stack_base); // Clear all returns
       }
+
+#ifdef PGEN_HAS_IND
+      // Callback rejected the match: undo indenter operations performed by the
+      // inner pattern (an inner failure rewinds itself)
+      if (!parser->success) {
+        pgen_ind_trail_rewind(parser, cmt_trail_index);
+      }
+#endif
     }
   }
 
@@ -591,6 +602,9 @@ static bool parse_inside_ct(Parser *parser) {
     { // Match-time capture (Cmt id=8)
       int cmt_stack_base = lua_gettop(parser->L);
       size_t cmt_start_pos = parser->pos;
+#ifdef PGEN_HAS_IND
+      size_t cmt_trail_index = parser->trail_len;
+#endif
 
       { // Match literal "xyz"
         if (parser->pos + 3 <= parser->input_len &&
@@ -672,6 +686,14 @@ static bool parse_inside_ct(Parser *parser) {
         } else {
           lua_settop(parser->L, cmt_stack_base); // Clear all returns
         }
+
+#ifdef PGEN_HAS_IND
+        // Callback rejected the match: undo indenter operations performed by the
+        // inner pattern (an inner failure rewinds itself)
+        if (!parser->success) {
+          pgen_ind_trail_rewind(parser, cmt_trail_index);
+        }
+#endif
       }
     }
 
@@ -721,6 +743,9 @@ static bool parse_no_return(Parser *parser) {
   { // Match-time capture (Cmt id=3)
     int cmt_stack_base = lua_gettop(parser->L);
     size_t cmt_start_pos = parser->pos;
+#ifdef PGEN_HAS_IND
+    size_t cmt_trail_index = parser->trail_len;
+#endif
 
     { // Match literal "test"
       if (parser->pos + 4 <= parser->input_len &&
@@ -802,6 +827,14 @@ static bool parse_no_return(Parser *parser) {
       } else {
         lua_settop(parser->L, cmt_stack_base); // Clear all returns
       }
+
+#ifdef PGEN_HAS_IND
+      // Callback rejected the match: undo indenter operations performed by the
+      // inner pattern (an inner failure rewinds itself)
+      if (!parser->success) {
+        pgen_ind_trail_rewind(parser, cmt_trail_index);
+      }
+#endif
     }
   }
 
@@ -829,6 +862,9 @@ static bool parse_return_extra_captures(Parser *parser) {
   { // Match-time capture (Cmt id=6)
     int cmt_stack_base = lua_gettop(parser->L);
     size_t cmt_start_pos = parser->pos;
+#ifdef PGEN_HAS_IND
+    size_t cmt_trail_index = parser->trail_len;
+#endif
 
     { // Match literal "abc"
       if (parser->pos + 3 <= parser->input_len &&
@@ -910,6 +946,14 @@ static bool parse_return_extra_captures(Parser *parser) {
       } else {
         lua_settop(parser->L, cmt_stack_base); // Clear all returns
       }
+
+#ifdef PGEN_HAS_IND
+      // Callback rejected the match: undo indenter operations performed by the
+      // inner pattern (an inner failure rewinds itself)
+      if (!parser->success) {
+        pgen_ind_trail_rewind(parser, cmt_trail_index);
+      }
+#endif
     }
   }
 
@@ -937,6 +981,9 @@ static bool parse_return_false(Parser *parser) {
   { // Match-time capture (Cmt id=1)
     int cmt_stack_base = lua_gettop(parser->L);
     size_t cmt_start_pos = parser->pos;
+#ifdef PGEN_HAS_IND
+    size_t cmt_trail_index = parser->trail_len;
+#endif
 
     { // Match literal "hello"
       if (parser->pos + 5 <= parser->input_len &&
@@ -1018,6 +1065,14 @@ static bool parse_return_false(Parser *parser) {
       } else {
         lua_settop(parser->L, cmt_stack_base); // Clear all returns
       }
+
+#ifdef PGEN_HAS_IND
+      // Callback rejected the match: undo indenter operations performed by the
+      // inner pattern (an inner failure rewinds itself)
+      if (!parser->success) {
+        pgen_ind_trail_rewind(parser, cmt_trail_index);
+      }
+#endif
     }
   }
 
@@ -1045,6 +1100,9 @@ static bool parse_return_nil(Parser *parser) {
   { // Match-time capture (Cmt id=4)
     int cmt_stack_base = lua_gettop(parser->L);
     size_t cmt_start_pos = parser->pos;
+#ifdef PGEN_HAS_IND
+    size_t cmt_trail_index = parser->trail_len;
+#endif
 
     { // Match literal "hello"
       if (parser->pos + 5 <= parser->input_len &&
@@ -1126,6 +1184,14 @@ static bool parse_return_nil(Parser *parser) {
       } else {
         lua_settop(parser->L, cmt_stack_base); // Clear all returns
       }
+
+#ifdef PGEN_HAS_IND
+      // Callback rejected the match: undo indenter operations performed by the
+      // inner pattern (an inner failure rewinds itself)
+      if (!parser->success) {
+        pgen_ind_trail_rewind(parser, cmt_trail_index);
+      }
+#endif
     }
   }
 
@@ -1153,6 +1219,9 @@ static bool parse_return_pos(Parser *parser) {
   { // Match-time capture (Cmt id=2)
     int cmt_stack_base = lua_gettop(parser->L);
     size_t cmt_start_pos = parser->pos;
+#ifdef PGEN_HAS_IND
+    size_t cmt_trail_index = parser->trail_len;
+#endif
 
     { // Match literal "hello"
       if (parser->pos + 5 <= parser->input_len &&
@@ -1234,6 +1303,14 @@ static bool parse_return_pos(Parser *parser) {
       } else {
         lua_settop(parser->L, cmt_stack_base); // Clear all returns
       }
+
+#ifdef PGEN_HAS_IND
+      // Callback rejected the match: undo indenter operations performed by the
+      // inner pattern (an inner failure rewinds itself)
+      if (!parser->success) {
+        pgen_ind_trail_rewind(parser, cmt_trail_index);
+      }
+#endif
     }
   }
 
@@ -1261,6 +1338,9 @@ static bool parse_return_true(Parser *parser) {
   { // Match-time capture (Cmt id=5)
     int cmt_stack_base = lua_gettop(parser->L);
     size_t cmt_start_pos = parser->pos;
+#ifdef PGEN_HAS_IND
+    size_t cmt_trail_index = parser->trail_len;
+#endif
 
     { // Match literal "hello"
       if (parser->pos + 5 <= parser->input_len &&
@@ -1342,6 +1422,14 @@ static bool parse_return_true(Parser *parser) {
       } else {
         lua_settop(parser->L, cmt_stack_base); // Clear all returns
       }
+
+#ifdef PGEN_HAS_IND
+      // Callback rejected the match: undo indenter operations performed by the
+      // inner pattern (an inner failure rewinds itself)
+      if (!parser->success) {
+        pgen_ind_trail_rewind(parser, cmt_trail_index);
+      }
+#endif
     }
   }
 
@@ -1372,6 +1460,9 @@ static bool parse_skip_chars(Parser *parser) {
     { // Match-time capture (Cmt id=0)
       int cmt_stack_base = lua_gettop(parser->L);
       size_t cmt_start_pos = parser->pos;
+#ifdef PGEN_HAS_IND
+      size_t cmt_trail_index = parser->trail_len;
+#endif
 
       { // Match literal "start"
         if (parser->pos + 5 <= parser->input_len &&
@@ -1453,6 +1544,14 @@ static bool parse_skip_chars(Parser *parser) {
         } else {
           lua_settop(parser->L, cmt_stack_base); // Clear all returns
         }
+
+#ifdef PGEN_HAS_IND
+        // Callback rejected the match: undo indenter operations performed by the
+        // inner pattern (an inner failure rewinds itself)
+        if (!parser->success) {
+          pgen_ind_trail_rewind(parser, cmt_trail_index);
+        }
+#endif
       }
     }
     if (parser->success) {

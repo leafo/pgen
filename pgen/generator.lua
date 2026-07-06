@@ -102,6 +102,66 @@ local function collect_cmt_codes(grammar)
   return codes, new_grammar
 end
 
+-- Collect all indenter descriptors referenced by Ind nodes in a grammar,
+-- assigning each distinct descriptor (by table identity) a stack id.
+-- Rules are visited in sorted order so ids are deterministic regardless of
+-- table iteration order.
+-- Returns array of {id, tab_width, initial} and a new grammar with stack_id
+-- set on every Ind node.
+local function collect_indenters(grammar)
+  local visitor = require("pgen.visitor")
+  local descriptors = {}
+  local desc_to_id = {}
+
+  local names = {}
+  for name in pairs(grammar) do
+    table.insert(names, name)
+  end
+  table.sort(names, function(a, b)
+    return tostring(a) < tostring(b)
+  end)
+
+  local new_grammar = {}
+  local changed = false
+
+  for _, name in ipairs(names) do
+    local pattern = grammar[name]
+    if type(pattern) == "table" then
+      local new_pattern = visitor.visit_pattern(pattern, function(node, replace)
+        if node.type == types.Ind then
+          local desc = node.indenter
+          if type(desc) ~= "table" then
+            error("Ind node is missing its indenter descriptor")
+          end
+          local id = desc_to_id[desc]
+          if id == nil then
+            id = #descriptors
+            desc_to_id[desc] = id
+            table.insert(descriptors, {
+              id = id,
+              tab_width = desc.tab_width or 4,
+              initial = desc.initial or 0
+            })
+          end
+          if node.stack_id ~= id then
+            replace(visitor.copy_node(node, {stack_id = id}))
+          end
+        end
+      end)
+      new_grammar[name] = new_pattern
+      if new_pattern ~= pattern then changed = true end
+    else
+      new_grammar[name] = pattern
+    end
+  end
+
+  if #descriptors > 256 then
+    error("Too many indenter stacks in grammar (max 256)")
+  end
+
+  return descriptors, changed and new_grammar or grammar
+end
+
 local function template_code(template, vars)
   -- Use gsub to find placeholders like $VARNAME
   -- The pattern matches '$' followed by UPPER_CASE letters
@@ -147,6 +207,10 @@ function generator.generate(grammar, parser_name, options)
   -- Collect Cmt codes and get transformed grammar with cmt_id assigned
   local cmt_codes, transformed_grammar = collect_cmt_codes(grammar)
 
+  -- Collect indenter descriptors and assign stack ids to Ind nodes
+  local indenters
+  indenters, transformed_grammar = collect_indenters(transformed_grammar)
+
   local rules = {}
   local start_rule = nil
 
@@ -178,10 +242,10 @@ function generator.generate(grammar, parser_name, options)
 
   -- Generate the C code
   local c_chunks = {
-    generator.generate_parser_header(parser_name, cg_names, cmt_codes),
+    generator.generate_parser_header(parser_name, cg_names, cmt_codes, indenters),
     generator.generate_forward_declarations(rules, start_rule),
     generator.generate_rule_functions(rules, start_rule),
-    generator.generate_parser_main(parser_name, start_rule, cmt_codes),
+    generator.generate_parser_main(parser_name, start_rule, cmt_codes, indenters),
     -- Add compilation instructions as a comment
     template_code([[/*
 To compile as a Lua module:
@@ -293,9 +357,154 @@ static void __cmt_init(lua_State *L) {]])
   return table.concat(lines, "\n")
 end
 
+-- Generate indenter stack/trail infrastructure snippets for the parser header
+-- Returns a table of template variable values; all empty strings when the
+-- grammar uses no indenters so the generated code is unchanged.
+local function generate_indenter_header_vars(indenters)
+  if #indenters == 0 then
+    return {
+      IND_TYPES = "",
+      IND_PARSER_FIELDS = "",
+      IND_PP_FIELD = "",
+      IND_REMEMBER = "",
+      IND_RESTORE = "",
+      IND_HELPERS = ""
+    }
+  end
+
+  local ind_types = template_code([[#include <limits.h>
+
+// Indenter (match-time integer stack) infrastructure
+#define PGEN_HAS_IND 1
+#define PGEN_IND_STACK_COUNT $COUNT$
+// Sentinel pushed by `prevent`: no measured width compares greater than it,
+// so any nested `advance` fails
+#define PGEN_IND_PREVENT_SENTINEL INT_MAX
+
+typedef struct {
+  int *items;
+  int size;
+  int cap;
+} PgenIndStack;
+
+// Undo log entry for transactional stack operations. Rewinding the trail on
+// backtrack reverses every push/pop performed since the choice point.
+typedef struct {
+  unsigned char stack_id;
+  unsigned char op;   // 0 = push, 1 = pop
+  int value;          // for pop entries: the value that was popped
+} PgenTrailEntry;
+
+]], {COUNT = #indenters})
+
+  local ind_helpers = [[
+// Rewind the indenter trail to a previous length, undoing pushes and pops
+static void pgen_ind_trail_rewind(Parser *parser, size_t index) {
+  while (parser->trail_len > index) {
+    parser->trail_len--;
+    PgenTrailEntry *e = &parser->trail[parser->trail_len];
+    PgenIndStack *s = &parser->ind_stacks[e->stack_id];
+    if (e->op == 0) {
+      // undo push
+      s->size--;
+    } else {
+      // undo pop: the slot is still allocated, restore the value
+      s->items[s->size] = e->value;
+      s->size++;
+    }
+  }
+}
+
+static void pgen_ind_trail_record(Parser *parser, int stack_id, int op, int value) {
+  if (parser->trail_len >= parser->trail_cap) {
+    size_t new_cap = parser->trail_cap == 0 ? 64 : parser->trail_cap * 2;
+    PgenTrailEntry *trail = (PgenTrailEntry*)realloc(parser->trail, new_cap * sizeof(PgenTrailEntry));
+    if (!trail) {
+      luaL_error(parser->L, "pgen: out of memory growing indenter trail");
+    }
+    parser->trail = trail;
+    parser->trail_cap = new_cap;
+  }
+  parser->trail[parser->trail_len].stack_id = (unsigned char)stack_id;
+  parser->trail[parser->trail_len].op = (unsigned char)op;
+  parser->trail[parser->trail_len].value = value;
+  parser->trail_len++;
+}
+
+static void pgen_ind_push(Parser *parser, int stack_id, int value) {
+  PgenIndStack *s = &parser->ind_stacks[stack_id];
+  if (s->size >= s->cap) {
+    int new_cap = s->cap * 2;
+    int *items = (int*)realloc(s->items, new_cap * sizeof(int));
+    if (!items) {
+      luaL_error(parser->L, "pgen: out of memory growing indenter stack");
+    }
+    s->items = items;
+    s->cap = new_cap;
+  }
+  s->items[s->size++] = value;
+  pgen_ind_trail_record(parser, stack_id, 0, value);
+}
+
+// Pop the stack; returns false if the stack is empty
+static bool pgen_ind_pop(Parser *parser, int stack_id) {
+  PgenIndStack *s = &parser->ind_stacks[stack_id];
+  if (s->size == 0) {
+    return false;
+  }
+  s->size--;
+  pgen_ind_trail_record(parser, stack_id, 1, s->items[s->size]);
+  return true;
+}
+
+// Measure the indentation width of the run of space/tab characters at the
+// current position (space = 1, tab = tab_width). Sets *end_pos to the first
+// position past the run.
+static int pgen_ind_measure(Parser *parser, size_t *end_pos, int tab_width) {
+  size_t p = parser->pos;
+  int width = 0;
+  while (p < parser->input_len) {
+    char c = parser->input[p];
+    if (c == ' ') {
+      width += 1;
+    } else if (c == '\t') {
+      width += tab_width;
+    } else {
+      break;
+    }
+    p++;
+  }
+  *end_pos = p;
+  return width;
+}
+
+]]
+
+  return {
+    IND_TYPES = ind_types,
+    IND_PARSER_FIELDS = [[
+
+  PgenIndStack ind_stacks[PGEN_IND_STACK_COUNT];
+  PgenTrailEntry *trail;
+  size_t trail_len;
+  size_t trail_cap;]],
+    IND_PP_FIELD = "\n  size_t trail_index;",
+    -- these extend the line-continuation macros, so they must supply their
+    -- own leading " \" on the previous line
+    IND_REMEMBER = " \\\n  (pp).trail_index = (parser)->trail_len;",
+    IND_RESTORE = " \\\n  pgen_ind_trail_rewind(parser, (pp).trail_index);",
+    IND_HELPERS = ind_helpers
+  }
+end
+
 -- Generate parser header
-function generator.generate_parser_header(parser_name, cg_names, cmt_codes)
+function generator.generate_parser_header(parser_name, cg_names, cmt_codes, indenters)
   cg_names = cg_names or {}
+  indenters = indenters or {}
+
+  local header_vars = generate_indenter_header_vars(indenters)
+  header_vars.PARSER_NAME = parser_name
+
   return template_code([[#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -307,7 +516,7 @@ function generator.generate_parser_header(parser_name, cg_names, cmt_codes)
 
 // $PARSER_NAME$ - generated parser
 
-typedef struct {
+$IND_TYPES$typedef struct {
   const char *input;
   size_t input_len;
   size_t pos;
@@ -316,24 +525,25 @@ typedef struct {
   const char *throw_label;  // Label from T() or NULL for ordinary failure
   size_t throw_pos;         // Position where T() was thrown
   size_t depth;
-  lua_State *L;
+  lua_State *L;$IND_PARSER_FIELDS$
 } Parser;
 
 typedef struct {
   size_t pos;
-  int stack_size;
+  int stack_size;$IND_PP_FIELD$
 } ParserPosition;
 
 #define REMEMBER_POSITION(parser, pp) \
   ParserPosition pp; \
   (pp).pos = (parser)->pos; \
-  (pp).stack_size = lua_gettop((parser)->L);
+  (pp).stack_size = lua_gettop((parser)->L);$IND_REMEMBER$
 
 // Restore parser position
 #define RESTORE_POSITION(parser, pp) \
   (parser)->pos = (pp).pos; \
-  lua_settop((parser)->L, (pp).stack_size);
+  lua_settop((parser)->L, (pp).stack_size);$IND_RESTORE$
 
+$IND_HELPERS$
 
 #ifdef PGEN_DEBUG
 static void dumpstack (lua_State *L) {
@@ -361,7 +571,7 @@ static void dumpstack (lua_State *L) {
 }
 #endif
 
-]], {PARSER_NAME = parser_name}) .. generate_cg_sentinels(cg_names) .. generate_cmt_infrastructure(cmt_codes or {})
+]], header_vars) .. generate_cg_sentinels(cg_names) .. generate_cmt_infrastructure(cmt_codes or {})
 end
 
 -- Generate forward declarations for all rules
@@ -457,6 +667,8 @@ function generator.generate_pattern_code(pattern)
     return generator.generate_cmt_code(pattern.value, pattern.cmt_id)
   elseif t == types.T then -- T (labeled failure)
     return generator.generate_labeled_failure_code(pattern.value)
+  elseif t == types.Ind then -- Ind (indenter stack operation)
+    return generator.generate_indenter_code(pattern)
   elseif t == "sequence" then
     return generator.generate_sequence_code(unpack(pattern))
   elseif t == "choice" then
@@ -1080,6 +1292,9 @@ function generator.generate_cmt_code(inner_pattern, cmt_id)
   return template_code([[{ // Match-time capture (Cmt id=$ID$)
   int cmt_stack_base = lua_gettop(parser->L);
   size_t cmt_start_pos = parser->pos;
+#ifdef PGEN_HAS_IND
+  size_t cmt_trail_index = parser->trail_len;
+#endif
 
   $INNER_PATTERN_CODE$
 
@@ -1148,11 +1363,110 @@ function generator.generate_cmt_code(inner_pattern, cmt_id)
     } else {
       lua_settop(parser->L, cmt_stack_base);  // Clear all returns
     }
+
+#ifdef PGEN_HAS_IND
+    // Callback rejected the match: undo indenter operations performed by the
+    // inner pattern (an inner failure rewinds itself)
+    if (!parser->success) {
+      pgen_ind_trail_rewind(parser, cmt_trail_index);
+    }
+#endif
   }
 }]], {
     ID = cmt_id,
     INNER_PATTERN_CODE = generator.generate_pattern_code(inner_pattern)
   })
+end
+
+-- Generate code for an indenter stack operation (Ind)
+-- All operations are transactional: pushes/pops are recorded on the trail
+-- and undone when the parser backtracks past them
+function generator.generate_indenter_code(pattern)
+  local op = pattern.op
+  local sid = pattern.stack_id
+
+  if sid == nil then
+    error("Ind node has no stack_id assigned; compile the grammar through pgen.compile/generator.generate")
+  end
+
+  local vars = {
+    SID = sid,
+    TW = pattern.indenter.tab_width or 4
+  }
+
+  if op == "check" then
+    return template_code([[{ // Indenter check (stack $SID$): consume whitespace, width must equal top
+  size_t ind_end;
+  int ind_width = pgen_ind_measure(parser, &ind_end, $TW$);
+  PgenIndStack *ind_s = &parser->ind_stacks[$SID$];
+  if (ind_s->size > 0 && ind_s->items[ind_s->size - 1] == ind_width) {
+    parser->pos = ind_end;
+  } else {
+    parser->success = false;
+#ifdef PGEN_ERRORS
+    sprintf(parser->error_message, "Indent width %d does not match current level at position %zu", ind_width, parser->pos);
+#endif
+  }
+}]], vars)
+  elseif op == "advance" then
+    return template_code([[{ // Indenter advance (stack $SID$): push width if deeper than top, consume nothing
+  size_t ind_end;
+  int ind_width = pgen_ind_measure(parser, &ind_end, $TW$);
+  (void)ind_end;
+  PgenIndStack *ind_s = &parser->ind_stacks[$SID$];
+  if (ind_s->size > 0 && ind_width > ind_s->items[ind_s->size - 1]) {
+    pgen_ind_push(parser, $SID$, ind_width);
+  } else {
+    parser->success = false;
+#ifdef PGEN_ERRORS
+    sprintf(parser->error_message, "Indent width %d does not advance current level at position %zu", ind_width, parser->pos);
+#endif
+  }
+}]], vars)
+  elseif op == "push" then
+    return template_code([[{ // Indenter push (stack $SID$): consume whitespace, push measured width
+  size_t ind_end;
+  int ind_width = pgen_ind_measure(parser, &ind_end, $TW$);
+  pgen_ind_push(parser, $SID$, ind_width);
+  parser->pos = ind_end;
+}]], vars)
+  elseif op == "prevent" then
+    return template_code([[{ // Indenter prevent (stack $SID$): push sentinel so nested advance fails
+  pgen_ind_push(parser, $SID$, PGEN_IND_PREVENT_SENTINEL);
+}]], vars)
+  elseif op == "pop" then
+    return template_code([[{ // Indenter pop (stack $SID$)
+  if (!pgen_ind_pop(parser, $SID$)) {
+    parser->success = false;
+#ifdef PGEN_ERRORS
+    sprintf(parser->error_message, "Indenter stack $SID$ is empty at position %zu", parser->pos);
+#endif
+  }
+}]], vars)
+  elseif op == "cpush" then
+    vars.VALUE = pattern.value
+    return template_code([[{ // Indenter cpush (stack $SID$): push constant $VALUE$
+  pgen_ind_push(parser, $SID$, $VALUE$);
+}]], vars)
+  elseif op == "ctop" then
+    local cmp_ops = {
+      eq = "==", ne = "!=", lt = "<", le = "<=", gt = ">", ge = ">="
+    }
+    vars.VALUE = pattern.value
+    vars.CMP = pattern.cmp
+    vars.CMP_OP = cmp_ops[pattern.cmp] or error("Unknown ctop comparison: " .. tostring(pattern.cmp))
+    return template_code([[{ // Indenter ctop (stack $SID$): top $CMP$ $VALUE$
+  PgenIndStack *ind_s = &parser->ind_stacks[$SID$];
+  if (!(ind_s->size > 0 && ind_s->items[ind_s->size - 1] $CMP_OP$ $VALUE$)) {
+    parser->success = false;
+#ifdef PGEN_ERRORS
+    sprintf(parser->error_message, "Indenter stack $SID$ top failed $CMP$ $VALUE$ check at position %zu", parser->pos);
+#endif
+  }
+}]], vars)
+  else
+    error("Unknown indenter operation: " .. tostring(op))
+  end
 end
 
 -- Generate code for labeled failure throw
@@ -1174,7 +1488,49 @@ function generator.generate_labeled_failure_code(label)
 end
 
 -- Generate core C parser functions (_init, _free, _parse)
-function generator.generate_c_core_functions(parser_name, start_rule)
+function generator.generate_c_core_functions(parser_name, start_rule, indenters)
+  indenters = indenters or {}
+
+  local ind_init = ""
+  local ind_free = ""
+
+  if #indenters > 0 then
+    local initials = {}
+    for _, ind in ipairs(indenters) do
+      table.insert(initials, tostring(ind.initial))
+    end
+
+    ind_init = template_code([[
+
+
+  // Initialize indenter stacks (each seeded with its initial value)
+  static const int pgen_ind_initials[PGEN_IND_STACK_COUNT] = { $INITIALS$ };
+  parser->trail = NULL;
+  parser->trail_len = 0;
+  parser->trail_cap = 0;
+  for (int i = 0; i < PGEN_IND_STACK_COUNT; i++) {
+    parser->ind_stacks[i].items = (int*)malloc(8 * sizeof(int));
+    if (!parser->ind_stacks[i].items) {
+      for (int j = 0; j < i; j++) {
+        free(parser->ind_stacks[j].items);
+      }
+      free(parser);
+      return NULL;
+    }
+    parser->ind_stacks[i].cap = 8;
+    parser->ind_stacks[i].size = 1;
+    parser->ind_stacks[i].items[0] = pgen_ind_initials[i];
+  }
+]], {INITIALS = table.concat(initials, ", ")})
+
+    ind_free = [[
+
+     for (int i = 0; i < PGEN_IND_STACK_COUNT; i++) {
+       free(parser->ind_stacks[i].items);
+     }
+     free(parser->trail);]]
+  end
+
   return template_code([[
 // Initialize parser
 static Parser* $PARSER_NAME$_init(const char *input, lua_State *L) {
@@ -1191,7 +1547,7 @@ static Parser* $PARSER_NAME$_init(const char *input, lua_State *L) {
   parser->error_message[0] = '\0';
   parser->throw_label = NULL;
   parser->throw_pos = 0;
-  parser->L = L;
+  parser->L = L;$IND_INIT$
   return parser;
 }
 
@@ -1199,13 +1555,15 @@ static Parser* $PARSER_NAME$_init(const char *input, lua_State *L) {
 // Free parser
 static void $PARSER_NAME$_free(Parser *parser) {
   // Check for NULL in case _init failed or was called with NULL
-  if (parser) {
+  if (parser) {$IND_FREE$
      free(parser);
   }
 }
 ]], {
     PARSER_NAME = parser_name,
-    START_RULE = start_rule
+    START_RULE = start_rule,
+    IND_INIT = ind_init,
+    IND_FREE = ind_free
   })
 end
 
@@ -1325,9 +1683,9 @@ static const struct luaL_Reg $PARSER_NAME$_module[] = {
 end
 
 -- Generate the final combined parser main C code
-function generator.generate_parser_main(parser_name, start_rule, cmt_codes)
+function generator.generate_parser_main(parser_name, start_rule, cmt_codes, indenters)
   -- core C functions
-  local c_core_code = generator.generate_c_core_functions(parser_name, start_rule)
+  local c_core_code = generator.generate_c_core_functions(parser_name, start_rule, indenters)
   -- Lua module interface
   local lua_module_code = generator.generate_lua_module_code(parser_name, start_rule, cmt_codes)
 

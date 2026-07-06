@@ -119,6 +119,73 @@ function pgen.Cmt(patt, code)
   }
 end
 
+-- Indenter: a match-time integer stack that lives alongside the parser, with
+-- indentation-flavored operations. Backed by a stack in the generated C
+-- parser; all operations are transactional (undone when the parser
+-- backtracks past them). Each call to pgen.indenter() declares one stack.
+--
+-- Indent ops (measure the run of space/tab characters at the current
+-- position; space = 1, tab = tab_width):
+--   ind.check    consume the whitespace, succeed if width == top of stack
+--   ind.advance  consume nothing, push width if width > top (fails otherwise)
+--   ind.push     consume the whitespace, always push measured width
+--   ind.prevent  consume nothing, push a sentinel so any nested advance fails
+--   ind.pop      pop the stack (fails if empty)
+--
+-- Constant ops (consume nothing, for do-stack style flags):
+--   ind.cpush(n)      push constant n
+--   ind.ctop(cmp, n)  succeed if `top cmp n`; cmp is one of
+--                     "eq", "ne", "lt", "le", "gt", "ge"
+--
+-- None of the operations produce captures.
+local ctop_comparisons = {
+  eq = true, ne = true, lt = true, le = true, gt = true, ge = true
+}
+
+function pgen.indenter(opts)
+  opts = opts or {}
+
+  assert(opts.tab_width == nil or (type(opts.tab_width) == "number" and opts.tab_width >= 0 and math.floor(opts.tab_width) == opts.tab_width),
+    "indenter tab_width must be a non-negative integer")
+  assert(opts.initial == nil or (type(opts.initial) == "number" and math.floor(opts.initial) == opts.initial),
+    "indenter initial must be an integer")
+
+  -- Plain descriptor table shared by every op node from this indenter.
+  -- Descriptor identity is what maps ops to the same stack; the generator
+  -- assigns the actual stack id at compile time.
+  local descriptor = {
+    tab_width = opts.tab_width or 4,
+    initial = opts.initial or 0
+  }
+
+  local function op(fields)
+    fields.type = types.Ind
+    fields.indenter = descriptor
+    return make(fields)
+  end
+
+  return {
+    descriptor = descriptor,
+
+    check = op{op = "check"},
+    advance = op{op = "advance"},
+    push = op{op = "push"},
+    prevent = op{op = "prevent"},
+    pop = op{op = "pop"},
+
+    cpush = function(n)
+      assert(type(n) == "number" and math.floor(n) == n, "cpush requires an integer value")
+      return op{op = "cpush", value = n}
+    end,
+
+    ctop = function(cmp, n)
+      assert(ctop_comparisons[cmp], "ctop comparison must be one of eq, ne, lt, le, gt, ge")
+      assert(type(n) == "number" and math.floor(n) == n, "ctop requires an integer value")
+      return op{op = "ctop", cmp = cmp, value = n}
+    end
+  }
+end
+
 -- Throw labeled failure
 function pgen.T(label)
   assert(type(label) == "string", "T requires a string label")

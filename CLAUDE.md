@@ -81,6 +81,43 @@ If you are adding a new type, please ensure that **pgen/visitor.lua** knows how
 to traverse it. Additionally, it might be worth scanning **pgen/optimize.lua**
 to ensure the new type doesn't interfere with any optimizers.
 
+### Indenters (indentation-sensitive parsing)
+
+`pgen.indenter(opts)` declares a match-time integer stack that lives in the
+generated parser, for indent-based grammars (see **moonscript_indent.md**).
+Options: `tab_width` (default 4), `initial` (default 0). All operations are
+**transactional**: pushes/pops are recorded on an undo trail and reversed when
+the parser backtracks past them, so failed alternatives never leak stack
+state. Lookahead (`L`) and negation are state-pure. None of the ops produce
+captures.
+
+```lua
+local ind = pgen.indenter{tab_width = 4}
+```
+
+Indent ops (measure the run of space/tab at the current position; space = 1,
+tab = tab_width):
+
+- `ind.check` - consume the whitespace, succeed if width == top of stack
+- `ind.advance` - consume nothing, push width if width > top (else fail)
+- `ind.push` - consume the whitespace, always push measured width
+- `ind.prevent` - consume nothing, push a sentinel so any nested advance fails
+- `ind.pop` - pop the stack (fails if empty)
+
+Constant ops (consume nothing; useful for do-stack style flags):
+
+- `ind.cpush(n)` - push constant n
+- `ind.ctop(cmp, n)` - succeed if `top cmp n`; cmp is one of `"eq"`, `"ne"`,
+  `"lt"`, `"le"`, `"gt"`, `"ge"` (fails on an empty stack)
+
+Each `pgen.indenter()` call declares one independent stack; the generator
+assigns stack ids at compile time. Typical block structure:
+
+```lua
+Line = ind.check * V"Statement"
+InBlock = ind.advance * V"Block" * ind.pop
+```
+
 ### Using the Visitor Module
 
 The `pgen.visitor` module provides utilities for traversing and transforming grammar ASTs:

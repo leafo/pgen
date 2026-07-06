@@ -3,9 +3,9 @@ local pgen = require "pgen"
 describe("moonscript parser", function()
   local parser
 
-  before_each(function()
-    -- Reset indent state before each test
-    _G._ms_indent = {0}
+  setup(function()
+    -- Indentation state lives inside the compiled parser and is reset on
+    -- every parse call, so a single parser instance is shared by all tests
     parser = pgen.require("spec.parsers.moonscript")
   end)
 

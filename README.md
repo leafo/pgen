@@ -10,6 +10,7 @@ This is just an experiment that will eventually find its way into [moonparse](ht
 - Supports common pattern types: literals, character ranges, character sets
 - Operators for sequences, choices, repetition and optional patterns
 - Supports captures, table captures, constant captures, named captures, and match-time captures
+- Indentation-sensitive parsing via match-time stacks that roll back on backtracking
 
 ## Usage
 
@@ -62,6 +63,89 @@ Patterns specific to this library that aren't in LPeg:
 - `Cmb(name)` - Match backreference (matches the same text captured by `Cg` with the given name)
 
 Unlike LPeg's `Cmt` which takes a function, pgen's `Cmt(patt, code)` takes a **string of Lua code**. This code is embedded into the generated C parser and executed via the Lua C API during parsing. The code receives `(subject, pos, ...)` where `...` are any captures from the inner pattern, and should return a position (to advance), `true` (to succeed), or `false`/`nil` (to fail).
+
+## Indentation-Sensitive Parsing
+
+PEGs can't express indentation-based block structure (Python, MoonScript,
+YAML, ...) with lookahead alone, since matching a block requires comparing
+line indentation against surrounding context. pgen provides **indenters** for
+this: integer stacks that live inside the generated parser and are
+manipulated by patterns at match time.
+
+```lua
+local ind = pgen.indenter{
+  tab_width = 4, -- width a "\t" counts for (space = 1), default 4
+  initial = 0,   -- value the stack is seeded with, default 0
+}
+```
+
+Each call to `pgen.indenter()` declares one independent stack in the compiled
+parser. The stack is reset at the start of every `parse()` call. The returned
+object provides patterns that operate on the stack; none of them produce
+captures.
+
+Indent operations measure the run of space/tab characters at the current
+position and compare its width against the top of the stack:
+
+- `ind.check` - Consume the whitespace if its width equals the top of the stack, otherwise fail
+- `ind.advance` - Push the width if it is greater than the top of the stack, otherwise fail. Consumes nothing (the whitespace is left for a following `check`)
+- `ind.push` - Unconditionally push the measured width and consume the whitespace
+- `ind.prevent` - Push a sentinel value that causes any nested `advance` to fail. Consumes nothing
+- `ind.pop` - Pop the stack, failing if it is empty
+
+Constant operations ignore the input entirely, useful for tracking
+match-time flags (e.g. MoonScript's `do` disambiguation):
+
+- `ind.cpush(n)` - Push the constant integer `n`
+- `ind.ctop(cmp, n)` - Succeed if `top cmp n` holds, where `cmp` is one of `"eq"`, `"ne"`, `"lt"`, `"le"`, `"gt"`, `"ge"`. Fails on an empty stack
+
+A minimal block-structured grammar:
+
+```lua
+local pgen = require "pgen"
+local P, R, S, V, C, Ct = pgen.P, pgen.R, pgen.S, pgen.V, pgen.C, pgen.Ct
+
+local ind = pgen.indenter{}
+
+return {
+  "File",
+
+  File = V"Block" * -P(1),
+
+  -- lines at the same indentation level
+  Block = Ct(V"Line" * (P"\n" * V"Line")^0),
+
+  -- every line must sit at the current level exactly
+  Line = ind.check * V"Statement",
+
+  -- "name:" opens a nested block at any deeper indentation
+  Statement = C(R"az"^1) * (P":" * P"\n" * ind.advance * V"Block" * ind.pop)^-1,
+}
+```
+
+```
+a:
+  b:
+      c
+d
+```
+
+parses into `{"a", {"b", {"c"}}, "d"}`.
+
+### Transactional Semantics
+
+All indenter operations are **transactional**: every push and pop is recorded
+on an internal trail, and when the parser backtracks past an operation it is
+automatically undone. A failed alternative in a choice, a failed iteration of
+a repeat, or a rejected `Cmt` always leaves the stack exactly as it found it,
+so grammars never need cleanup patterns to keep the stack balanced across
+failure paths.
+
+Lookahead (`L`) and negative predicates (`-patt`) are state-pure: stack
+operations performed inside them are rolled back even when the predicate
+succeeds. This means a stack operation cannot communicate state out of a
+lookahead — use `advance` (which internally measures ahead without consuming)
+rather than wrapping `push` in `L()`.
 
 ## Labeled Failures
 
