@@ -542,6 +542,7 @@ $IND_TYPES$typedef struct {
   char error_message[256];
   const char *throw_label;  // Label from T() or NULL for ordinary failure
   size_t throw_pos;         // Position where T() was thrown
+  size_t furthest_fail;     // Furthest position where a match attempt failed
   size_t depth;
   lua_State *L;$IND_PARSER_FIELDS$
 } Parser;
@@ -560,6 +561,30 @@ typedef struct {
 #define RESTORE_POSITION(parser, pp) \
   (parser)->pos = (pp).pos; \
   lua_settop((parser)->L, (pp).stack_size);$IND_RESTORE$
+
+// Records the furthest input position where a match attempt failed (only
+// ever increases). Because the parser can only attempt a position it
+// reached by matching everything before it, the furthest failure is the
+// deepest progress into the input; parse() reports it when the overall
+// parse fails without a label.
+//
+// Not recorded in single-character matchers (literal char, range, set):
+// they fail constantly as the parser tries alternatives, and any position
+// they fail at also gets tried by larger patterns (multi-char literals,
+// tries, predicates, indent checks), so skipping them keeps the cost too
+// small to measure without losing useful precision.
+//
+// Compile with -DPGEN_NO_FURTHEST to remove the tracking entirely (parse()
+// then reports position 1 on ordinary failure).
+#ifdef PGEN_NO_FURTHEST
+#define PGEN_RECORD_FURTHEST(parser) ((void)0)
+#else
+#define PGEN_RECORD_FURTHEST(parser) \
+  do { \
+    if ((parser)->pos > (parser)->furthest_fail) \
+      (parser)->furthest_fail = (parser)->pos; \
+  } while (0)
+#endif
 
 // Ensure the Lua stack can hold n more values. Captures are built on the Lua
 // stack, so without this a large parse tree would overflow it (undefined
@@ -751,6 +776,7 @@ if (parser->pos + $LITERAL_LEN$ <= parser->input_len &&
   sprintf(parser->error_message, "Expected `" $LITERAL$ "` at position %zu", parser->pos);
 #endif
   parser->success = false;
+  PGEN_RECORD_FURTHEST(parser);
 }
 }]], {
     ESCAPED_LITERAL = escape_string(literal),
@@ -769,6 +795,7 @@ function generator.generate_n_chars_code(n)
     sprintf(parser->error_message, "Expected at least $N$ more characters at position %zu", parser->pos);
 #endif
     parser->success = false;
+    PGEN_RECORD_FURTHEST(parser);
   }
 }]], {
     N = n
@@ -1007,6 +1034,7 @@ function generator.generate_negate_code(a)
     // Pattern matched, so negate fails
     RESTORE_POSITION(parser, pos);
     parser->success = false;
+    PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Negated pattern unexpectedly matched at position %zu", pos.pos);
 #endif
@@ -1316,11 +1344,12 @@ function generator.generate_capture_match_back_code(name)
       }
     }
   }
-#ifdef PGEN_ERRORS
   if (!parser->success) {
+    PGEN_RECORD_FURTHEST(parser);
+#ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Capture match back '$NAME$' failed at position %zu", parser->pos);
-  }
 #endif
+  }
 }]], {
     NAME = name
   })
@@ -1373,6 +1402,7 @@ function generator.generate_cmt_code(inner_pattern, cmt_id)
     if (returns_count == 0) {
       // No return value = match fails
       parser->success = false;
+      PGEN_RECORD_FURTHEST(parser); // record at pos_after_inner, before rewind
       parser->pos = cmt_start_pos;
     } else {
       int first_type = lua_type(parser->L, cmt_stack_base + 1);
@@ -1387,6 +1417,7 @@ function generator.generate_cmt_code(inner_pattern, cmt_id)
           parser->success = true;
         } else {
           parser->success = false;
+          PGEN_RECORD_FURTHEST(parser); // record at pos_after_inner, before rewind
           parser->pos = cmt_start_pos;
         }
       } else if (first_type == LUA_TBOOLEAN && lua_toboolean(parser->L, cmt_stack_base + 1)) {
@@ -1395,6 +1426,7 @@ function generator.generate_cmt_code(inner_pattern, cmt_id)
       } else {
         // false, nil, or other = fail
         parser->success = false;
+        PGEN_RECORD_FURTHEST(parser); // record at pos_after_inner, before rewind
         parser->pos = cmt_start_pos;
       }
     }
@@ -1446,6 +1478,7 @@ function generator.generate_indenter_code(pattern)
     parser->pos = ind_end;
   } else {
     parser->success = false;
+    PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Indent width %d does not match current level at position %zu", ind_width, parser->pos);
 #endif
@@ -1461,6 +1494,7 @@ function generator.generate_indenter_code(pattern)
     pgen_ind_push(parser, $SID$, ind_width);
   } else {
     parser->success = false;
+    PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Indent width %d does not advance current level at position %zu", ind_width, parser->pos);
 #endif
@@ -1481,6 +1515,7 @@ function generator.generate_indenter_code(pattern)
     return template_code([[{ // Indenter pop (stack $SID$)
   if (!pgen_ind_pop(parser, $SID$)) {
     parser->success = false;
+    PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Indenter stack $SID$ is empty at position %zu", parser->pos);
 #endif
@@ -1502,6 +1537,7 @@ function generator.generate_indenter_code(pattern)
   PgenIndStack *ind_s = &parser->ind_stacks[$SID$];
   if (!(ind_s->size > 0 && ind_s->items[ind_s->size - 1] $CMP_OP$ $VALUE$)) {
     parser->success = false;
+    PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Indenter stack $SID$ top failed $CMP$ $VALUE$ check at position %zu", parser->pos);
 #endif
@@ -1546,7 +1582,7 @@ function generator.generate_c_core_functions(parser_name, start_rule, indenters)
     ind_init = template_code([[
 
 
-  // Initialize indenter stacks (each seeded with its initial value)
+  // Initialize indenter stacks (each starts holding its initial value)
   static const int pgen_ind_initials[PGEN_IND_STACK_COUNT] = { $INITIALS$ };
   parser->trail = NULL;
   parser->trail_len = 0;
@@ -1590,6 +1626,7 @@ static Parser* $PARSER_NAME$_init(const char *input, lua_State *L) {
   parser->error_message[0] = '\0';
   parser->throw_label = NULL;
   parser->throw_pos = 0;
+  parser->furthest_fail = 0;
   parser->L = L;$IND_INIT$
   return parser;
 }
@@ -1655,10 +1692,16 @@ static int l_$PARSER_NAME$_parse(lua_State *L) {
       $PARSER_NAME$_free(parser);
       return 3;
     } else {
-      // Ordinary failure: return nil, error_message
+      // Ordinary failure: return nil, message (PGEN_ERRORS builds only) and
+      // the furthest input position a match attempt failed at (1-indexed)
+#ifdef PGEN_ERRORS
       lua_pushstring(L, parser->error_message);
+#else
+      lua_pushnil(L);
+#endif
+      lua_pushinteger(L, parser->furthest_fail + 1);
       $PARSER_NAME$_free(parser);
-      return 2;
+      return 3;
     }
   }
 
@@ -1712,10 +1755,14 @@ static const struct luaL_Reg $PARSER_NAME$_module[] = {
     return 1;
   }
 #else
-  // Lua 5.1 uses luaL_register
+  // Lua 5.1 uses luaL_register. Register into a fresh table rather than a
+  // named global: a name would be shared through package.loaded, so loading
+  // two parsers compiled with the same parser_name in one process would
+  // silently overwrite the first module's parse function.
   int luaopen_$PARSER_NAME$(lua_State *L) {
     $CMT_INIT$
-    luaL_register(L, "$PARSER_NAME$", $PARSER_NAME$_module); // Registers functions in global table (or package table)
+    lua_newtable(L);
+    luaL_register(L, NULL, $PARSER_NAME$_module);
     return 1;
   }
 #endif
@@ -1820,6 +1867,8 @@ $CASES$
     if (has_terminal) {
       parser->pos = last_terminal_pos;
       parser->success = true;
+    } else {
+      PGEN_RECORD_FURTHEST(parser);
     }
   }
 } else {
@@ -1827,6 +1876,8 @@ $CASES$
   if (has_terminal) {
     parser->pos = last_terminal_pos;
     parser->success = true;
+  } else {
+    PGEN_RECORD_FURTHEST(parser);
   }
 }]], {
     PREAMBLE = preamble,

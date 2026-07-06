@@ -350,9 +350,30 @@ give `parser->depth` a configurable limit and clean error.
      repetitions with nullable bodies at compile time (`pgen/analyze.lua`),
      matching LPeg's "loop body may accept empty string" error. Conservative
      for recursive rule references.
-4. **Furthest-failure tracking** for error positions (replaces the original's
-   `state.last_pos`). `Cx` transform capture only if the port turns up
-   transforms that are genuinely awkward post-parse.
+4. **[DONE] Furthest-failure tracking.** The engine records the deepest
+   failed match attempt (multi-char literals, tries, predicates, Cmb/Cmt,
+   indenter ops; single-char matchers skipped as noise) and ordinary
+   failures return `nil, message|nil, furthest_pos`. A/B benchmarks (JSON +
+   full MoonScript corpus): overhead indistinguishable from code-layout
+   noise (≤1% worst case, verified against a no-op-macro build);
+   `-DPGEN_NO_FURTHEST` removes it. `moonscript_pgen` errors now format as
+   line/column messages via `pgen.errors`. `Cx` was never needed. Fixed
+   along the way: generated Lua 5.1 `luaopen_` used `luaL_register` with a
+   global name, so two same-named parsers in one process silently shared
+   (and clobbered) one module table.
+
+   **`T()` labels: attempted and removed.** Candidate commit points that
+   looked safe by construction (unterminated strings at EOF, malformed
+   `import` after its keyword) were refuted by the truncation fuzz: `Value`
+   speculatively parses arbitrary text as code — at `[[` the Comprehension
+   alternative consumes both brackets and probes long-string *content* as an
+   expression before `String` is attempted — so labels fire mid-speculation
+   and reject valid programs (`y = [[if x then import a]] .. z`,
+   `x = [[=[hi]] .. 1`, and real Lapis template files). Regression cases
+   live in the diff spec. Conclusion: in this grammar labels need an
+   engine-level catch/recovery operator (lpeglabel's `Rec`) that scopes a
+   label back to an ordinary failure; until then, furthest-failure alone
+   carries error reporting.
 5. **[DONE] Grammar port** (all stages) — `moonscript_pgen/grammar.lua`, a
    full transcription of the reference grammar. The `/ fn` transformation
    captures become `Ct(Cc"tag" * ...)` nodes; the nontrivial transforms

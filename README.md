@@ -77,7 +77,7 @@ manipulated by patterns at match time.
 ```lua
 local ind = pgen.indenter{
   tab_width = 4, -- width a "\t" counts for (space = 1), default 4
-  initial = 0,   -- value the stack is seeded with, default 0
+  initial = 0,   -- value the stack starts with, default 0
 }
 ```
 
@@ -151,11 +151,40 @@ rather than wrapping `push` in `L()`.
 
 ## Labeled Failures
 
-Use `T(label)` to throw a labeled failure with a descriptive error name. Unlike regular failures, labeled failures propagate through choice (`+`) and repeat (`^`) operators, allowing you to signal unrecoverable errors.
+Use `T(label)` to throw a labeled failure with a descriptive error name. Unlike regular failures, labeled failures propagate through choice (`+`) and repeat (`^`) operators, allowing you to signal unrecoverable errors. Labels thrown inside predicates (`L(patt)`, `-patt`) are swallowed and treated as ordinary failures, so speculative parses cannot leak hard errors.
 
 - `T(label)` - Throw a labeled failure with the given label string
 
 When a labeled failure occurs, `parse()` returns three values: `nil, label, position`
+
+`T()` branches only execute after the preceding alternatives have already
+failed, so labels add no work to successful parses.
+
+**Caution with backtracking grammars:** a label turns a failure that would
+normally backtrack into an error for the entire parse. If an enclosing
+choice relies on that failure to fall through to another alternative — for
+example when one alternative tries to parse text as code that a later
+alternative would consume as string content — a label can reject input
+that has a valid parse. Only throw where no other alternative could ever
+succeed, and verify against a test corpus.
+
+## Failure Positions
+
+Every generated parser tracks the **furthest failure position**: the deepest
+input position where a match attempt failed. Since the parser can only
+attempt a position after successfully matching everything before it, this is
+the point of deepest progress — usually right at the actual error.
+
+On an ordinary (unlabeled) failure, `parse()` returns `nil, message, position`
+where `message` is `nil` unless the parser was compiled with `--pgen-errors`,
+and `position` is the 1-indexed furthest failure position.
+
+The position is recorded in the failure paths of multi-character literals,
+tries, predicates, `Cmb`/`Cmt`, and indenter operations. Single-character
+matchers are skipped: they fail far more often than anything else, and any
+position they fail at is also tried by larger patterns, so skipping them
+costs no precision. The overhead is not measurable; compile with
+`-DPGEN_NO_FURTHEST` to remove it entirely.
 
 Example grammar with error labels:
 
@@ -181,13 +210,9 @@ local errors = require "pgen.errors"
 
 local result, label, pos = parser.parse(input)
 if not result then
-  if pos then
-    -- Labeled failure from T()
-    print(errors.format(input, pos, label))
-  else
-    -- Regular parse failure (no position available)
-    print("Parse error")
-  end
+  -- label is the T() label, or nil for a regular failure; pos is the
+  -- throw position or the furthest failure position respectively
+  print(errors.format(input, pos, label or "parse error"))
 end
 ```
 

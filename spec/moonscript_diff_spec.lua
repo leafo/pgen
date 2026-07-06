@@ -76,6 +76,11 @@ y = "say \"hi\""]],
   ["leading whitespace first line"] = "  x = 5",
   ["shebang"] = "#!/usr/bin/env moon\nx = 5",
   ["keyword-prefixed names"] = "iffy = 1\nformat = 2\ndoor = 3\nnotes = 4\norange = 5",
+  -- string content the parser attempts to parse as code while trying
+  -- alternatives (these are why the grammar has no T() labels)
+  ["statement keywords inside long string"] = "y = [[if x then import a]] .. z",
+  ["level-shifted long string open"] = "x = [[=[hi]] .. 1",
+  ["quote inside long string content"] = [=[x = y .. [[extend("]] .. z .. [[")]] .. w]=],
   ["keyword as name fails"] = "if = 5",
   ["bad indent fails"] = "if x\nprint y",
   ["non-assignable lhs fails"] = "f! = 5",

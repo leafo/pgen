@@ -25,6 +25,7 @@ typedef struct {
   char error_message[256];
   const char *throw_label; // Label from T() or NULL for ordinary failure
   size_t throw_pos;        // Position where T() was thrown
+  size_t furthest_fail;    // Furthest position where a match attempt failed
   size_t depth;
   lua_State *L;
 } Parser;
@@ -43,6 +44,30 @@ typedef struct {
 #define RESTORE_POSITION(parser, pp) \
   (parser)->pos = (pp).pos;          \
   lua_settop((parser)->L, (pp).stack_size);
+
+// Records the furthest input position where a match attempt failed (only
+// ever increases). Because the parser can only attempt a position it
+// reached by matching everything before it, the furthest failure is the
+// deepest progress into the input; parse() reports it when the overall
+// parse fails without a label.
+//
+// Not recorded in single-character matchers (literal char, range, set):
+// they fail constantly as the parser tries alternatives, and any position
+// they fail at also gets tried by larger patterns (multi-char literals,
+// tries, predicates, indent checks), so skipping them keeps the cost too
+// small to measure without losing useful precision.
+//
+// Compile with -DPGEN_NO_FURTHEST to remove the tracking entirely (parse()
+// then reports position 1 on ordinary failure).
+#ifdef PGEN_NO_FURTHEST
+#define PGEN_RECORD_FURTHEST(parser) ((void)0)
+#else
+#define PGEN_RECORD_FURTHEST(parser)             \
+  do {                                           \
+    if ((parser)->pos > (parser)->furthest_fail) \
+      (parser)->furthest_fail = (parser)->pos;   \
+  } while (0)
+#endif
 
 // Ensure the Lua stack can hold n more values. Captures are built on the Lua
 // stack, so without this a large parse tree would overflow it (undefined
@@ -119,6 +144,7 @@ static bool parse_main(Parser *parser) {
                 parser->pos);
 #endif
         parser->success = false;
+        PGEN_RECORD_FURTHEST(parser);
       }
     }
     if (parser->success) {
@@ -182,6 +208,7 @@ static Parser *multiple_constants_init(const char *input, lua_State *L) {
   parser->error_message[0] = '\0';
   parser->throw_label = NULL;
   parser->throw_pos = 0;
+  parser->furthest_fail = 0;
   parser->L = L;
   return parser;
 }
@@ -233,10 +260,16 @@ static int l_multiple_constants_parse(lua_State *L) {
       multiple_constants_free(parser);
       return 3;
     } else {
-      // Ordinary failure: return nil, error_message
+      // Ordinary failure: return nil, message (PGEN_ERRORS builds only) and
+      // the furthest input position a match attempt failed at (1-indexed)
+#ifdef PGEN_ERRORS
       lua_pushstring(L, parser->error_message);
+#else
+      lua_pushnil(L);
+#endif
+      lua_pushinteger(L, parser->furthest_fail + 1);
       multiple_constants_free(parser);
-      return 2;
+      return 3;
     }
   }
 
@@ -290,10 +323,14 @@ int luaopen_multiple_constants(lua_State *L) {
   return 1;
 }
 #else
-// Lua 5.1 uses luaL_register
+// Lua 5.1 uses luaL_register. Register into a fresh table rather than a
+// named global: a name would be shared through package.loaded, so loading
+// two parsers compiled with the same parser_name in one process would
+// silently overwrite the first module's parse function.
 int luaopen_multiple_constants(lua_State *L) {
 
-  luaL_register(L, "multiple_constants", multiple_constants_module); // Registers functions in global table (or package table)
+  lua_newtable(L);
+  luaL_register(L, NULL, multiple_constants_module);
   return 1;
 }
 #endif

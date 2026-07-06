@@ -10,22 +10,22 @@
 -- final shape.
 --
 -- The reference's two Cmt-managed stacks (indentation and the `do`
--- disambiguation stack) become pgen indenters, so all of the original's
--- ensure()/Cut cleanup choreography is unnecessary: stack operations roll
--- back automatically when the parser backtracks.
+-- disambiguation stack) become pgen indenters, so none of the original's
+-- ensure()/Cut cleanup patterns are needed: stack operations are undone
+-- automatically when the parser backtracks.
 
 local pgen = require "pgen"
 local P, R, S, V, C, Ct, Cc, Cp, Cg, Cmb, Cmt, L =
   pgen.P, pgen.R, pgen.S, pgen.V, pgen.C, pgen.Ct, pgen.Cc, pgen.Cp,
   pgen.Cg, pgen.Cmb, pgen.Cmt, pgen.L
 
--- indentation stack: space = 1, tab = 4, seeded with 0 (matches the
+-- indentation stack: space = 1, tab = 4, starts with 0 on it (matches the
 -- reference's count_width and `Stack(0)`)
 local ind = pgen.indenter{tab_width = 4, initial = 0}
 
 -- `do` permission stack: the `do` expression is disabled while parsing the
--- header expression of while/with/switch/for. 0 = disabled; seeded with 1
--- (allowed), mirroring the reference where only an explicit `false` on top
+-- header expression of while/with/switch/for. 0 = disabled; starts with 1
+-- (allowed), matching the reference where only an explicit `false` on top
 -- of the stack blocks `do`.
 local dos = pgen.indenter{initial = 1}
 local DisableDo = dos.cpush(0)
@@ -67,7 +67,8 @@ local function sym(chars)
   return V"Space" * P(chars)
 end
 
--- operator token: captures its text; word operators get a boundary guard
+-- operator token: captures its text; word operators ("or", "and") must not
+-- be followed by a letter, digit, or underscore
 local function op(chars)
   local patt = V"Space" * C(P(chars))
   if chars:match("^%w*$") then
@@ -256,6 +257,19 @@ return {
     V"ChainValue" + V"String"),
   SliceValue = V"Exp",
 
+  -- NOTE: this grammar deliberately contains no T() labels. A label turns
+  -- a failure that would normally backtrack into an error for the whole
+  -- parse, and in this grammar there is no place where that is safe: Value
+  -- tries several alternatives before String, and those attempts can end
+  -- up parsing arbitrary text as code. For example, at "[[" the
+  -- Comprehension alternative consumes both brackets and then tries to
+  -- parse the long string's *content* as an expression before String ever
+  -- runs. A label reached during one of these attempts fails input that a
+  -- later alternative would have parsed fine: `y = [[if x then import a]]
+  -- .. z` is valid MoonScript, but an expected_from label inside Import
+  -- rejected it (found by comparing against the reference parser over
+  -- truncated real files). Error positions come from the engine's
+  -- furthest-failure tracking instead.
   String = V"Space" * V"DoubleString" + V"Space" * V"SingleString" + V"LuaString",
   SingleString = mark("string",
     C(P"'") * C((P"\\'" + P"\\\\" + (P(1) - P"'"))^0) * P"'"),
@@ -313,7 +327,8 @@ return {
     ) * V"White" * sym"}"),
   TableValueList = V"TableValue" * (sym"," * V"TableValue")^0,
   -- reference: PushIndent * ((TableValueList * PopIndent) + (PopIndent * Cut)) + Space
-  -- the pop-and-fail cleanup arm is unnecessary with transactional stacks
+  -- the pop-and-fail alternative is not needed since the stack is undone
+  -- automatically on backtracking
   TableLitLine = V"PushIndent" * V"TableValueList" * V"PopIndent" + V"Space",
 
   TableBlockInner = Ct(V"KeyValueLine" * (V"SpaceBreak"^1 * V"KeyValueLine")^0),

@@ -7,7 +7,7 @@ local P, R, S, V, C, Cc, Ct, Cmt, L = pgen.P, pgen.R, pgen.S, pgen.V, pgen.C, pg
 -- default indenter: tab_width = 4, initial level 0
 local ind = pgen.indenter{}
 
--- flag stack seeded with 1 ("enabled"), used with constant ops only
+-- flag stack that starts with 1 on it ("enabled"), used with constant ops only
 local flags = pgen.indenter{ initial = 1 }
 
 -- indenter with narrow tabs

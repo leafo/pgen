@@ -29,8 +29,9 @@ describe("multiple ranges", function()
   end)
 
   it("fails on characters outside the ranges", function()
-    local res, err = parser.parse("abc!123")
+    local res, err, pos = parser.parse("abc!123")
     assert.is_nil(res)
-    assert.is_not_nil(err)
+    assert.is_nil(err) -- error message only present in PGEN_ERRORS builds
+    assert.is_number(pos) -- furthest failure position
   end)
 end)

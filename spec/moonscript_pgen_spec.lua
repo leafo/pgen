@@ -1,8 +1,9 @@
 -- Unit tests for the full MoonScript parser (moonscript_pgen/).
 -- Expected trees follow the reference parser's AST format exactly,
--- including [-1] position annotations. The differential suite in
--- moonscript_diff_spec.lua checks parity with the reference parser over
--- the whole .moon corpus; these are fast hand-checked anchors.
+-- including [-1] position annotations. The suite in
+-- moonscript_diff_spec.lua compares output against the reference parser
+-- over whole .moon files; these are quick hand-checked cases that run
+-- without the reference available.
 
 describe("moonscript_pgen", function()
   local parse
@@ -100,6 +101,31 @@ describe("moonscript_pgen", function()
     local tree, err = parse.string("f! = 5")
     assert.is_nil(tree)
     assert.matches("not assignable", err)
+    assert.matches("line 1", err)
+  end)
+
+  it("reports a line position for parse failures", function()
+    local tree, err = parse.string("x = 1\ny = 2\nz = (a +")
+    assert.is_nil(tree)
+    assert.matches("line 3", err)
+
+    tree, err = parse.string('x = "hello\ny = 1')
+    assert.is_nil(tree)
+    assert.matches("line 2", err)
+
+    tree, err = parse.string("import a from")
+    assert.is_nil(tree)
+    assert.matches("line 1", err)
+  end)
+
+  -- regression: T() labels were tried in this grammar and removed. Value
+  -- tries Comprehension before String, so at "[[" the parser attempts to
+  -- parse string content as code; a label reached during such an attempt
+  -- rejected valid programs like these.
+  it("parses code-like content inside long strings", function()
+    assert.is_table(parse.string("y = [[if x then import a]] .. z"))
+    assert.is_table(parse.string("x = [[=[hi]] .. 1"))
+    assert.is_table(parse.string([=[x = y .. [[Flow:extend("]] .. z .. [[")]] .. w]=]))
   end)
 
   it("keeps the parser reusable after a failed parse", function()

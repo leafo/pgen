@@ -43,7 +43,7 @@ The MoonScript parser is validated differentially: `spec/moonscript_diff_spec.lu
 asserts tree-identical output (including `[-1]` positions) against the
 reference LPeg parser over every `.moon` file in the `moonscript/` checkout.
 It is skipped automatically when `moonscript/` or lpeg is unavailable. Design
-notes and porting decisions live in **moonscript_indent.md**.
+notes and porting decisions live in **moonscript_pgen/moonscript_indent.md**.
 
 ### Key Components
 
@@ -94,7 +94,7 @@ to ensure the new type doesn't interfere with any optimizers.
 ### Indenters (indentation-sensitive parsing)
 
 `pgen.indenter(opts)` declares a match-time integer stack that lives in the
-generated parser, for indent-based grammars (see **moonscript_indent.md**).
+generated parser, for indent-based grammars (see **moonscript_pgen/moonscript_indent.md**).
 Options: `tab_width` (default 4), `initial` (default 0). All operations are
 **transactional**: pushes/pops are recorded on an undo trail and reversed when
 the parser backtracks past them, so failed alternatives never leak stack
@@ -127,6 +127,17 @@ assigns stack ids at compile time. Typical block structure:
 Line = ind.check * V"Statement"
 InBlock = ind.advance * V"Block" * ind.pop
 ```
+
+### Failure Reporting
+
+- Ordinary parse failure: `parse()` returns `nil, message, position` where
+  `message` is nil unless compiled with `--pgen-errors`, and `position` is
+  the 1-indexed **furthest failure position** (deepest input position where
+  a match attempt failed — tracked in multi-char literals, tries,
+  predicates, Cmb/Cmt, and indenter ops; disable with `-DPGEN_NO_FURTHEST`).
+- Labeled failure from `T(label)`: returns `nil, label, position`. Labels
+  propagate through choice/repeat but are swallowed inside predicates.
+- `pgen.errors.format(input, pos, label)` renders line/column messages.
 
 ### Parser Limits and Safety
 
