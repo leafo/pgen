@@ -30,10 +30,20 @@ pgen/
 │   ├── types.lua         # Type constants (P=1, R=2, etc.)
 │   └── visitor.lua       # AST visitor pattern for traversal/transformation
 ├── examples/             # Example grammars (calc, JSON, numbers)
+├── moonscript_pgen/      # Full MoonScript parser built on pgen
+│   ├── grammar.lua       # Grammar (port of moonscript/moonscript/parse.lua)
+│   ├── tree.lua          # Post-parse AST normalization ("@"-tag transforms)
+│   └── init.lua          # parse.string() API (compiles parser on first use)
 └── spec/                 # Test suite (busted framework)
     ├── *_spec.lua        # Test files
     └── parsers/          # Test grammars and their generated C/so files
 ```
+
+The MoonScript parser is validated differentially: `spec/moonscript_diff_spec.lua`
+asserts tree-identical output (including `[-1]` positions) against the
+reference LPeg parser over every `.moon` file in the `moonscript/` checkout.
+It is skipped automatically when `moonscript/` or lpeg is unavailable. Design
+notes and porting decisions live in **moonscript_indent.md**.
 
 ### Key Components
 
@@ -117,6 +127,22 @@ assigns stack ids at compile time. Typical block structure:
 Line = ind.check * V"Statement"
 InBlock = ind.advance * V"Block" * ind.pop
 ```
+
+### Parser Limits and Safety
+
+- **Recursion depth**: rule calls recurse on the C stack; the generated parser
+  aborts with a Lua error (catch with `pcall`) past `PGEN_MAX_DEPTH` (default
+  5000). Configure per grammar with the `max_depth` option to
+  `pgen.compile`/`pgen.require`, or override at C compile time with
+  `-DPGEN_MAX_DEPTH=n`.
+- **Capture count**: captures are built on the Lua stack, so simultaneous
+  pending captures are bounded by the Lua build's `LUAI_MAXCSTACK` (8000 in
+  stock Lua 5.1). Exceeding it raises a clean Lua error rather than
+  undefined behavior.
+- **Nullable loops**: `pgen.compile` rejects unbounded repetitions (`patt^n`
+  for n >= 0) whose body can match the empty string ("loop body may accept
+  empty string"), since they would hang the parser. The analysis lives in
+  **pgen/analyze.lua** and is conservative for recursive rule references.
 
 ### Using the Visitor Module
 
