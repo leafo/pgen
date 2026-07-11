@@ -27,6 +27,8 @@ typedef struct {
   size_t throw_pos;        // Position where T() was thrown
   size_t furthest_fail;    // Furthest position where a match attempt failed
   size_t depth;
+  int top;           // Shadow of lua_gettop(L), exact between patterns
+  int stack_claimed; // Stack index secured so far via lua_checkstack
   lua_State *L;
 } Parser;
 
@@ -39,15 +41,31 @@ typedef struct {
   size_t pos;
 } ParserInputPosition;
 
+// Set the Lua stack top, keeping the parser's shadow copy in sync. Any
+// batched lua_checkstack claim beyond what survives GC stack shrinking is
+// forfeited: capacity may shrink to twice the in-use size, but never below
+// the runtime's minimum allocation (conservatively PGEN_STACK_FLOOR).
+#define PGEN_SETTOP(parser, n)                \
+  do {                                        \
+    int pgen_newtop_ = (n);                   \
+    lua_settop((parser)->L, pgen_newtop_);    \
+    (parser)->top = pgen_newtop_;             \
+    int pgen_keep_ = 2 * pgen_newtop_;        \
+    if (pgen_keep_ < PGEN_STACK_FLOOR)        \
+      pgen_keep_ = PGEN_STACK_FLOOR;          \
+    if ((parser)->stack_claimed > pgen_keep_) \
+      (parser)->stack_claimed = pgen_keep_;   \
+  } while (0)
+
 #define REMEMBER_POSITION(parser, pp) \
   ParserPosition pp;                  \
   (pp).pos = (parser)->pos;           \
-  (pp).stack_size = lua_gettop((parser)->L);
+  (pp).stack_size = (parser)->top;
 
 // Restore parser position
 #define RESTORE_POSITION(parser, pp) \
   (parser)->pos = (pp).pos;          \
-  lua_settop((parser)->L, (pp).stack_size);
+  PGEN_SETTOP(parser, (pp).stack_size);
 
 #define REMEMBER_INPUT_POSITION(parser, pp) \
   ParserInputPosition pp;                   \
@@ -84,11 +102,42 @@ typedef struct {
 // stack, so without this a large parse tree would overflow it (undefined
 // behavior). Raises a Lua error when the stack cannot grow any further
 // (LUAI_MAXCSTACK).
-static void pgen_checkstack(Parser *parser, int n) {
-  if (!lua_checkstack(parser->L, n)) {
+//
+// Claims are batched so most calls are a single comparison against the
+// shadow top. Batch size is limited to what survives GC stack shrinking:
+// PUC Lua honors lua_checkstack claims for the frame's lifetime, but
+// LuaJIT's GC may shrink capacity to twice the in-use size (never below
+// its minimum allocation, conservatively PGEN_STACK_FLOOR). Claims above
+// released stack space are forfeited by PGEN_SETTOP.
+#define PGEN_STACK_BATCH 64
+#define PGEN_STACK_FLOOR 32
+
+static void pgen_checkstack_slow(Parser *parser, int n) {
+  int batch = parser->top - n;                            // survives 2x-used shrink
+  int floor_batch = PGEN_STACK_FLOOR - (parser->top + n); // under shrink floor
+  if (floor_batch > batch)
+    batch = floor_batch;
+  if (batch > PGEN_STACK_BATCH)
+    batch = PGEN_STACK_BATCH;
+  if (batch < 0)
+    batch = 0;
+  if (lua_checkstack(parser->L, n + batch)) {
+    parser->stack_claimed = parser->top + n + batch;
+  } else if (lua_checkstack(parser->L, n)) {
+    // Batched request exceeded the stack limit; the exact one still fits
+    parser->stack_claimed = parser->top + n;
+  } else {
     luaL_error(parser->L, "pgen: Lua stack overflow while building captures");
   }
 }
+
+// Fast path: one comparison against the already-claimed capacity. n may be
+// evaluated twice, so call sites must pass side-effect-free expressions.
+#define pgen_checkstack(parser, n)                     \
+  do {                                                 \
+    if ((parser)->top + (n) > (parser)->stack_claimed) \
+      pgen_checkstack_slow(parser, n);                 \
+  } while (0)
 
 #ifdef PGEN_DEBUG
 static void dumpstack(lua_State *L) {
@@ -564,7 +613,7 @@ static bool parse_test1(Parser *parser) {
 #endif
 
   { // Numbered Capture (select 1)
-    int cn_stack_start = lua_gettop(parser->L);
+    int cn_stack_start = parser->top;
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -589,6 +638,7 @@ static bool parse_test1(Parser *parser) {
           size_t capture_length = parser->pos - start_pos;
           pgen_checkstack(parser, 1);
           lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+          parser->top++;
         }
       }
       if (parser->success) {
@@ -613,6 +663,7 @@ static bool parse_test1(Parser *parser) {
             size_t capture_length = parser->pos - start_pos;
             pgen_checkstack(parser, 1);
             lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            parser->top++;
           }
         }
         if (parser->success) {
@@ -637,6 +688,7 @@ static bool parse_test1(Parser *parser) {
               size_t capture_length = parser->pos - start_pos;
               pgen_checkstack(parser, 1);
               lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+              parser->top++;
             }
           }
         }
@@ -647,7 +699,7 @@ static bool parse_test1(Parser *parser) {
     }
 
     if (parser->success) {
-      int final_stack = lua_gettop(parser->L);
+      int final_stack = parser->top;
       pgen_checkstack(parser, 1);
 
       // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
@@ -668,10 +720,11 @@ static bool parse_test1(Parser *parser) {
       if (target_idx > 0) {
         lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
+        PGEN_SETTOP(parser, cn_stack_start + 1);
       } else {
-        lua_settop(parser->L, cn_stack_start);
+        PGEN_SETTOP(parser, cn_stack_start);
         lua_pushnil(parser->L);
+        parser->top++;
       }
     }
   }
@@ -704,21 +757,22 @@ static bool parse_test10(Parser *parser) {
 #endif
 
   { // Numbered Capture (select 2)
-    int cn_stack_start = lua_gettop(parser->L);
+    int cn_stack_start = parser->top;
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
 
       { // Capture Group "a"
-        int cg_stack_start = lua_gettop(parser->L);
+        int cg_stack_start = parser->top;
         size_t start_pos = parser->pos;
         { // Constant Capture
           // A constant capture matches the empty string and produces all given values
           pgen_checkstack(parser, 1);
           lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[0]); // "one"
+          parser->top += 1;
         }
 
         if (parser->success) {
-          int cg_stack_end = lua_gettop(parser->L);
+          int cg_stack_end = parser->top;
           int captures_produced = cg_stack_end - cg_stack_start;
 
           pgen_checkstack(parser, 2); // sentinel + value
@@ -730,7 +784,7 @@ static bool parse_test10(Parser *parser) {
             lua_insert(parser->L, cg_stack_start + 1);
             // Now stack is: sentinel, first_capture, [other_captures...]
             // Remove any extra captures (keep only sentinel + first capture)
-            lua_settop(parser->L, cg_stack_start + 2);
+            PGEN_SETTOP(parser, cg_stack_start + 2);
           } else {
             // No captures - capture the matched text span
             size_t capture_len = parser->pos - start_pos;
@@ -738,6 +792,7 @@ static bool parse_test10(Parser *parser) {
             lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_a);
             // Push captured value
             lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+            parser->top += 2;
           }
         }
       }
@@ -746,19 +801,21 @@ static bool parse_test10(Parser *parser) {
           // A constant capture matches the empty string and produces all given values
           pgen_checkstack(parser, 1);
           lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[2]); // "two"
+          parser->top += 1;
         }
         if (parser->success) {
           { // Capture Group "b"
-            int cg_stack_start = lua_gettop(parser->L);
+            int cg_stack_start = parser->top;
             size_t start_pos = parser->pos;
             { // Constant Capture
               // A constant capture matches the empty string and produces all given values
               pgen_checkstack(parser, 1);
               lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[1]); // "three"
+              parser->top += 1;
             }
 
             if (parser->success) {
-              int cg_stack_end = lua_gettop(parser->L);
+              int cg_stack_end = parser->top;
               int captures_produced = cg_stack_end - cg_stack_start;
 
               pgen_checkstack(parser, 2); // sentinel + value
@@ -770,7 +827,7 @@ static bool parse_test10(Parser *parser) {
                 lua_insert(parser->L, cg_stack_start + 1);
                 // Now stack is: sentinel, first_capture, [other_captures...]
                 // Remove any extra captures (keep only sentinel + first capture)
-                lua_settop(parser->L, cg_stack_start + 2);
+                PGEN_SETTOP(parser, cg_stack_start + 2);
               } else {
                 // No captures - capture the matched text span
                 size_t capture_len = parser->pos - start_pos;
@@ -778,6 +835,7 @@ static bool parse_test10(Parser *parser) {
                 lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_b);
                 // Push captured value
                 lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+                parser->top += 2;
               }
             }
           }
@@ -789,7 +847,7 @@ static bool parse_test10(Parser *parser) {
     }
 
     if (parser->success) {
-      int final_stack = lua_gettop(parser->L);
+      int final_stack = parser->top;
       pgen_checkstack(parser, 1);
 
       // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
@@ -810,10 +868,11 @@ static bool parse_test10(Parser *parser) {
       if (target_idx > 0) {
         lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
+        PGEN_SETTOP(parser, cn_stack_start + 1);
       } else {
-        lua_settop(parser->L, cn_stack_start);
+        PGEN_SETTOP(parser, cn_stack_start);
         lua_pushnil(parser->L);
+        parser->top++;
       }
     }
   }
@@ -846,7 +905,7 @@ static bool parse_test11(Parser *parser) {
 #endif
 
   { // Numbered Capture (select 2)
-    int cn_stack_start = lua_gettop(parser->L);
+    int cn_stack_start = parser->top;
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -871,11 +930,12 @@ static bool parse_test11(Parser *parser) {
           size_t capture_length = parser->pos - start_pos;
           pgen_checkstack(parser, 1);
           lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+          parser->top++;
         }
       }
       if (parser->success) {
         { // Capture Group "name"
-          int cg_stack_start = lua_gettop(parser->L);
+          int cg_stack_start = parser->top;
           size_t start_pos = parser->pos;
           { // Capture
             size_t start_pos = parser->pos;
@@ -898,11 +958,12 @@ static bool parse_test11(Parser *parser) {
               size_t capture_length = parser->pos - start_pos;
               pgen_checkstack(parser, 1);
               lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+              parser->top++;
             }
           }
 
           if (parser->success) {
-            int cg_stack_end = lua_gettop(parser->L);
+            int cg_stack_end = parser->top;
             int captures_produced = cg_stack_end - cg_stack_start;
 
             pgen_checkstack(parser, 2); // sentinel + value
@@ -914,7 +975,7 @@ static bool parse_test11(Parser *parser) {
               lua_insert(parser->L, cg_stack_start + 1);
               // Now stack is: sentinel, first_capture, [other_captures...]
               // Remove any extra captures (keep only sentinel + first capture)
-              lua_settop(parser->L, cg_stack_start + 2);
+              PGEN_SETTOP(parser, cg_stack_start + 2);
             } else {
               // No captures - capture the matched text span
               size_t capture_len = parser->pos - start_pos;
@@ -922,6 +983,7 @@ static bool parse_test11(Parser *parser) {
               lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_name);
               // Push captured value
               lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+              parser->top += 2;
             }
           }
         }
@@ -947,6 +1009,7 @@ static bool parse_test11(Parser *parser) {
               size_t capture_length = parser->pos - start_pos;
               pgen_checkstack(parser, 1);
               lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+              parser->top++;
             }
           }
         }
@@ -957,7 +1020,7 @@ static bool parse_test11(Parser *parser) {
     }
 
     if (parser->success) {
-      int final_stack = lua_gettop(parser->L);
+      int final_stack = parser->top;
       pgen_checkstack(parser, 1);
 
       // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
@@ -978,10 +1041,11 @@ static bool parse_test11(Parser *parser) {
       if (target_idx > 0) {
         lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
+        PGEN_SETTOP(parser, cn_stack_start + 1);
       } else {
-        lua_settop(parser->L, cn_stack_start);
+        PGEN_SETTOP(parser, cn_stack_start);
         lua_pushnil(parser->L);
+        parser->top++;
       }
     }
   }
@@ -1014,7 +1078,7 @@ static bool parse_test2(Parser *parser) {
 #endif
 
   { // Numbered Capture (select 2)
-    int cn_stack_start = lua_gettop(parser->L);
+    int cn_stack_start = parser->top;
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -1039,6 +1103,7 @@ static bool parse_test2(Parser *parser) {
           size_t capture_length = parser->pos - start_pos;
           pgen_checkstack(parser, 1);
           lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+          parser->top++;
         }
       }
       if (parser->success) {
@@ -1063,6 +1128,7 @@ static bool parse_test2(Parser *parser) {
             size_t capture_length = parser->pos - start_pos;
             pgen_checkstack(parser, 1);
             lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            parser->top++;
           }
         }
         if (parser->success) {
@@ -1087,6 +1153,7 @@ static bool parse_test2(Parser *parser) {
               size_t capture_length = parser->pos - start_pos;
               pgen_checkstack(parser, 1);
               lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+              parser->top++;
             }
           }
         }
@@ -1097,7 +1164,7 @@ static bool parse_test2(Parser *parser) {
     }
 
     if (parser->success) {
-      int final_stack = lua_gettop(parser->L);
+      int final_stack = parser->top;
       pgen_checkstack(parser, 1);
 
       // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
@@ -1118,10 +1185,11 @@ static bool parse_test2(Parser *parser) {
       if (target_idx > 0) {
         lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
+        PGEN_SETTOP(parser, cn_stack_start + 1);
       } else {
-        lua_settop(parser->L, cn_stack_start);
+        PGEN_SETTOP(parser, cn_stack_start);
         lua_pushnil(parser->L);
+        parser->top++;
       }
     }
   }
@@ -1154,7 +1222,7 @@ static bool parse_test3(Parser *parser) {
 #endif
 
   { // Numbered Capture (select 3)
-    int cn_stack_start = lua_gettop(parser->L);
+    int cn_stack_start = parser->top;
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -1179,6 +1247,7 @@ static bool parse_test3(Parser *parser) {
           size_t capture_length = parser->pos - start_pos;
           pgen_checkstack(parser, 1);
           lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+          parser->top++;
         }
       }
       if (parser->success) {
@@ -1203,6 +1272,7 @@ static bool parse_test3(Parser *parser) {
             size_t capture_length = parser->pos - start_pos;
             pgen_checkstack(parser, 1);
             lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            parser->top++;
           }
         }
         if (parser->success) {
@@ -1227,6 +1297,7 @@ static bool parse_test3(Parser *parser) {
               size_t capture_length = parser->pos - start_pos;
               pgen_checkstack(parser, 1);
               lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+              parser->top++;
             }
           }
         }
@@ -1237,7 +1308,7 @@ static bool parse_test3(Parser *parser) {
     }
 
     if (parser->success) {
-      int final_stack = lua_gettop(parser->L);
+      int final_stack = parser->top;
       pgen_checkstack(parser, 1);
 
       // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
@@ -1258,10 +1329,11 @@ static bool parse_test3(Parser *parser) {
       if (target_idx > 0) {
         lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
+        PGEN_SETTOP(parser, cn_stack_start + 1);
       } else {
-        lua_settop(parser->L, cn_stack_start);
+        PGEN_SETTOP(parser, cn_stack_start);
         lua_pushnil(parser->L);
+        parser->top++;
       }
     }
   }
@@ -1294,7 +1366,7 @@ static bool parse_test4(Parser *parser) {
 #endif
 
   { // Numbered Capture (discard all)
-    int cn_stack_start = lua_gettop(parser->L);
+    int cn_stack_start = parser->top;
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -1320,6 +1392,7 @@ static bool parse_test4(Parser *parser) {
           size_t capture_length = parser->pos - start_pos;
           pgen_checkstack(parser, 1);
           lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+          parser->top++;
         }
       }
       if (parser->success) {
@@ -1344,6 +1417,7 @@ static bool parse_test4(Parser *parser) {
             size_t capture_length = parser->pos - start_pos;
             pgen_checkstack(parser, 1);
             lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            parser->top++;
           }
         }
         if (parser->success) {
@@ -1369,6 +1443,7 @@ static bool parse_test4(Parser *parser) {
               size_t capture_length = parser->pos - start_pos;
               pgen_checkstack(parser, 1);
               lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+              parser->top++;
             }
           }
         }
@@ -1379,7 +1454,7 @@ static bool parse_test4(Parser *parser) {
     }
 
     if (parser->success) {
-      lua_settop(parser->L, cn_stack_start);
+      PGEN_SETTOP(parser, cn_stack_start);
     }
   }
 
@@ -1411,7 +1486,7 @@ static bool parse_test5(Parser *parser) {
 #endif
 
   { // Numbered Capture (select 5)
-    int cn_stack_start = lua_gettop(parser->L);
+    int cn_stack_start = parser->top;
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -1436,6 +1511,7 @@ static bool parse_test5(Parser *parser) {
           size_t capture_length = parser->pos - start_pos;
           pgen_checkstack(parser, 1);
           lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+          parser->top++;
         }
       }
       if (parser->success) {
@@ -1460,6 +1536,7 @@ static bool parse_test5(Parser *parser) {
             size_t capture_length = parser->pos - start_pos;
             pgen_checkstack(parser, 1);
             lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            parser->top++;
           }
         }
         if (!parser->success) {
@@ -1469,7 +1546,7 @@ static bool parse_test5(Parser *parser) {
     }
 
     if (parser->success) {
-      int final_stack = lua_gettop(parser->L);
+      int final_stack = parser->top;
       pgen_checkstack(parser, 1);
 
       // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
@@ -1490,10 +1567,11 @@ static bool parse_test5(Parser *parser) {
       if (target_idx > 0) {
         lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
+        PGEN_SETTOP(parser, cn_stack_start + 1);
       } else {
-        lua_settop(parser->L, cn_stack_start);
+        PGEN_SETTOP(parser, cn_stack_start);
         lua_pushnil(parser->L);
+        parser->top++;
       }
     }
   }
@@ -1526,7 +1604,7 @@ static bool parse_test6(Parser *parser) {
 #endif
 
   { // Numbered Capture (select 1)
-    int cn_stack_start = lua_gettop(parser->L);
+    int cn_stack_start = parser->top;
     { // Capture
       size_t start_pos = parser->pos;
       { // Match literal "single"
@@ -1549,11 +1627,12 @@ static bool parse_test6(Parser *parser) {
         size_t capture_length = parser->pos - start_pos;
         pgen_checkstack(parser, 1);
         lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+        parser->top++;
       }
     }
 
     if (parser->success) {
-      int final_stack = lua_gettop(parser->L);
+      int final_stack = parser->top;
       pgen_checkstack(parser, 1);
 
       // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
@@ -1574,10 +1653,11 @@ static bool parse_test6(Parser *parser) {
       if (target_idx > 0) {
         lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
+        PGEN_SETTOP(parser, cn_stack_start + 1);
       } else {
-        lua_settop(parser->L, cn_stack_start);
+        PGEN_SETTOP(parser, cn_stack_start);
         lua_pushnil(parser->L);
+        parser->top++;
       }
     }
   }
@@ -1610,7 +1690,7 @@ static bool parse_test7(Parser *parser) {
 #endif
 
   { // Capture Table (array-only)
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -1635,11 +1715,12 @@ static bool parse_test7(Parser *parser) {
           size_t capture_length = parser->pos - start_pos;
           pgen_checkstack(parser, 1);
           lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+          parser->top++;
         }
       }
       if (parser->success) {
         { // Numbered Capture (select 2)
-          int cn_stack_start = lua_gettop(parser->L);
+          int cn_stack_start = parser->top;
           { // Sequence with 2 patterns
             REMEMBER_POSITION(parser, pos);
 
@@ -1664,6 +1745,7 @@ static bool parse_test7(Parser *parser) {
                 size_t capture_length = parser->pos - start_pos;
                 pgen_checkstack(parser, 1);
                 lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+                parser->top++;
               }
             }
             if (parser->success) {
@@ -1688,6 +1770,7 @@ static bool parse_test7(Parser *parser) {
                   size_t capture_length = parser->pos - start_pos;
                   pgen_checkstack(parser, 1);
                   lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+                  parser->top++;
                 }
               }
               if (!parser->success) {
@@ -1697,7 +1780,7 @@ static bool parse_test7(Parser *parser) {
           }
 
           if (parser->success) {
-            int final_stack = lua_gettop(parser->L);
+            int final_stack = parser->top;
             pgen_checkstack(parser, 1);
 
             // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
@@ -1718,10 +1801,11 @@ static bool parse_test7(Parser *parser) {
             if (target_idx > 0) {
               lua_pushvalue(parser->L, target_idx);
               lua_replace(parser->L, cn_stack_start + 1);
-              lua_settop(parser->L, cn_stack_start + 1);
+              PGEN_SETTOP(parser, cn_stack_start + 1);
             } else {
-              lua_settop(parser->L, cn_stack_start);
+              PGEN_SETTOP(parser, cn_stack_start);
               lua_pushnil(parser->L);
+              parser->top++;
             }
           }
         }
@@ -1732,13 +1816,14 @@ static bool parse_test7(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
       int array_count = new_stack_size - initial_stack_size;
 
       pgen_checkstack(parser, 2); // table + one temporary during fill
       lua_createtable(parser->L, array_count, 0);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -1749,7 +1834,7 @@ static bool parse_test7(Parser *parser) {
       // Remove all items except table, move table to correct position
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -1782,9 +1867,9 @@ static bool parse_test8(Parser *parser) {
 #endif
 
   { // Numbered Capture (select 1)
-    int cn_stack_start = lua_gettop(parser->L);
+    int cn_stack_start = parser->top;
     { // Numbered Capture (select 2)
-      int cn_stack_start = lua_gettop(parser->L);
+      int cn_stack_start = parser->top;
       { // Sequence with 3 patterns
         REMEMBER_POSITION(parser, pos);
 
@@ -1809,6 +1894,7 @@ static bool parse_test8(Parser *parser) {
             size_t capture_length = parser->pos - start_pos;
             pgen_checkstack(parser, 1);
             lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            parser->top++;
           }
         }
         if (parser->success) {
@@ -1833,6 +1919,7 @@ static bool parse_test8(Parser *parser) {
               size_t capture_length = parser->pos - start_pos;
               pgen_checkstack(parser, 1);
               lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+              parser->top++;
             }
           }
           if (parser->success) {
@@ -1857,6 +1944,7 @@ static bool parse_test8(Parser *parser) {
                 size_t capture_length = parser->pos - start_pos;
                 pgen_checkstack(parser, 1);
                 lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+                parser->top++;
               }
             }
           }
@@ -1867,7 +1955,7 @@ static bool parse_test8(Parser *parser) {
       }
 
       if (parser->success) {
-        int final_stack = lua_gettop(parser->L);
+        int final_stack = parser->top;
         pgen_checkstack(parser, 1);
 
         // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
@@ -1888,16 +1976,17 @@ static bool parse_test8(Parser *parser) {
         if (target_idx > 0) {
           lua_pushvalue(parser->L, target_idx);
           lua_replace(parser->L, cn_stack_start + 1);
-          lua_settop(parser->L, cn_stack_start + 1);
+          PGEN_SETTOP(parser, cn_stack_start + 1);
         } else {
-          lua_settop(parser->L, cn_stack_start);
+          PGEN_SETTOP(parser, cn_stack_start);
           lua_pushnil(parser->L);
+          parser->top++;
         }
       }
     }
 
     if (parser->success) {
-      int final_stack = lua_gettop(parser->L);
+      int final_stack = parser->top;
       pgen_checkstack(parser, 1);
 
       // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
@@ -1918,10 +2007,11 @@ static bool parse_test8(Parser *parser) {
       if (target_idx > 0) {
         lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
+        PGEN_SETTOP(parser, cn_stack_start + 1);
       } else {
-        lua_settop(parser->L, cn_stack_start);
+        PGEN_SETTOP(parser, cn_stack_start);
         lua_pushnil(parser->L);
+        parser->top++;
       }
     }
   }
@@ -1954,21 +2044,22 @@ static bool parse_test9(Parser *parser) {
 #endif
 
   { // Numbered Capture (select 1)
-    int cn_stack_start = lua_gettop(parser->L);
+    int cn_stack_start = parser->top;
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
 
       { // Capture Group "a"
-        int cg_stack_start = lua_gettop(parser->L);
+        int cg_stack_start = parser->top;
         size_t start_pos = parser->pos;
         { // Constant Capture
           // A constant capture matches the empty string and produces all given values
           pgen_checkstack(parser, 1);
           lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[0]); // "one"
+          parser->top += 1;
         }
 
         if (parser->success) {
-          int cg_stack_end = lua_gettop(parser->L);
+          int cg_stack_end = parser->top;
           int captures_produced = cg_stack_end - cg_stack_start;
 
           pgen_checkstack(parser, 2); // sentinel + value
@@ -1980,7 +2071,7 @@ static bool parse_test9(Parser *parser) {
             lua_insert(parser->L, cg_stack_start + 1);
             // Now stack is: sentinel, first_capture, [other_captures...]
             // Remove any extra captures (keep only sentinel + first capture)
-            lua_settop(parser->L, cg_stack_start + 2);
+            PGEN_SETTOP(parser, cg_stack_start + 2);
           } else {
             // No captures - capture the matched text span
             size_t capture_len = parser->pos - start_pos;
@@ -1988,6 +2079,7 @@ static bool parse_test9(Parser *parser) {
             lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_a);
             // Push captured value
             lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+            parser->top += 2;
           }
         }
       }
@@ -1996,19 +2088,21 @@ static bool parse_test9(Parser *parser) {
           // A constant capture matches the empty string and produces all given values
           pgen_checkstack(parser, 1);
           lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[2]); // "two"
+          parser->top += 1;
         }
         if (parser->success) {
           { // Capture Group "b"
-            int cg_stack_start = lua_gettop(parser->L);
+            int cg_stack_start = parser->top;
             size_t start_pos = parser->pos;
             { // Constant Capture
               // A constant capture matches the empty string and produces all given values
               pgen_checkstack(parser, 1);
               lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[1]); // "three"
+              parser->top += 1;
             }
 
             if (parser->success) {
-              int cg_stack_end = lua_gettop(parser->L);
+              int cg_stack_end = parser->top;
               int captures_produced = cg_stack_end - cg_stack_start;
 
               pgen_checkstack(parser, 2); // sentinel + value
@@ -2020,7 +2114,7 @@ static bool parse_test9(Parser *parser) {
                 lua_insert(parser->L, cg_stack_start + 1);
                 // Now stack is: sentinel, first_capture, [other_captures...]
                 // Remove any extra captures (keep only sentinel + first capture)
-                lua_settop(parser->L, cg_stack_start + 2);
+                PGEN_SETTOP(parser, cg_stack_start + 2);
               } else {
                 // No captures - capture the matched text span
                 size_t capture_len = parser->pos - start_pos;
@@ -2028,6 +2122,7 @@ static bool parse_test9(Parser *parser) {
                 lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_b);
                 // Push captured value
                 lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+                parser->top += 2;
               }
             }
           }
@@ -2039,7 +2134,7 @@ static bool parse_test9(Parser *parser) {
     }
 
     if (parser->success) {
-      int final_stack = lua_gettop(parser->L);
+      int final_stack = parser->top;
       pgen_checkstack(parser, 1);
 
       // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
@@ -2060,10 +2155,11 @@ static bool parse_test9(Parser *parser) {
       if (target_idx > 0) {
         lua_pushvalue(parser->L, target_idx);
         lua_replace(parser->L, cn_stack_start + 1);
-        lua_settop(parser->L, cn_stack_start + 1);
+        PGEN_SETTOP(parser, cn_stack_start + 1);
       } else {
-        lua_settop(parser->L, cn_stack_start);
+        PGEN_SETTOP(parser, cn_stack_start);
         lua_pushnil(parser->L);
+        parser->top++;
       }
     }
   }
@@ -2097,6 +2193,8 @@ static Parser *numbered_capture_init(const char *input, lua_State *L) {
   parser->throw_label = NULL;
   parser->throw_pos = 0;
   parser->furthest_fail = 0;
+  parser->top = lua_gettop(L);
+  parser->stack_claimed = parser->top;
   parser->L = L;
   return parser;
 }
@@ -2136,6 +2234,7 @@ static int l_numbered_capture_parse(lua_State *L) {
   parse_test(parser);
 
   int final_stack_size = lua_gettop(parser->L);
+  assert(parser->top == final_stack_size && "Shadow stack top out of sync.");
 
   // Return nil and error info on failure
   if (!parser->success) {

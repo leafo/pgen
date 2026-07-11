@@ -27,6 +27,8 @@ typedef struct {
   size_t throw_pos;        // Position where T() was thrown
   size_t furthest_fail;    // Furthest position where a match attempt failed
   size_t depth;
+  int top;           // Shadow of lua_gettop(L), exact between patterns
+  int stack_claimed; // Stack index secured so far via lua_checkstack
   lua_State *L;
 } Parser;
 
@@ -39,15 +41,31 @@ typedef struct {
   size_t pos;
 } ParserInputPosition;
 
+// Set the Lua stack top, keeping the parser's shadow copy in sync. Any
+// batched lua_checkstack claim beyond what survives GC stack shrinking is
+// forfeited: capacity may shrink to twice the in-use size, but never below
+// the runtime's minimum allocation (conservatively PGEN_STACK_FLOOR).
+#define PGEN_SETTOP(parser, n)                \
+  do {                                        \
+    int pgen_newtop_ = (n);                   \
+    lua_settop((parser)->L, pgen_newtop_);    \
+    (parser)->top = pgen_newtop_;             \
+    int pgen_keep_ = 2 * pgen_newtop_;        \
+    if (pgen_keep_ < PGEN_STACK_FLOOR)        \
+      pgen_keep_ = PGEN_STACK_FLOOR;          \
+    if ((parser)->stack_claimed > pgen_keep_) \
+      (parser)->stack_claimed = pgen_keep_;   \
+  } while (0)
+
 #define REMEMBER_POSITION(parser, pp) \
   ParserPosition pp;                  \
   (pp).pos = (parser)->pos;           \
-  (pp).stack_size = lua_gettop((parser)->L);
+  (pp).stack_size = (parser)->top;
 
 // Restore parser position
 #define RESTORE_POSITION(parser, pp) \
   (parser)->pos = (pp).pos;          \
-  lua_settop((parser)->L, (pp).stack_size);
+  PGEN_SETTOP(parser, (pp).stack_size);
 
 #define REMEMBER_INPUT_POSITION(parser, pp) \
   ParserInputPosition pp;                   \
@@ -84,11 +102,42 @@ typedef struct {
 // stack, so without this a large parse tree would overflow it (undefined
 // behavior). Raises a Lua error when the stack cannot grow any further
 // (LUAI_MAXCSTACK).
-static void pgen_checkstack(Parser *parser, int n) {
-  if (!lua_checkstack(parser->L, n)) {
+//
+// Claims are batched so most calls are a single comparison against the
+// shadow top. Batch size is limited to what survives GC stack shrinking:
+// PUC Lua honors lua_checkstack claims for the frame's lifetime, but
+// LuaJIT's GC may shrink capacity to twice the in-use size (never below
+// its minimum allocation, conservatively PGEN_STACK_FLOOR). Claims above
+// released stack space are forfeited by PGEN_SETTOP.
+#define PGEN_STACK_BATCH 64
+#define PGEN_STACK_FLOOR 32
+
+static void pgen_checkstack_slow(Parser *parser, int n) {
+  int batch = parser->top - n;                            // survives 2x-used shrink
+  int floor_batch = PGEN_STACK_FLOOR - (parser->top + n); // under shrink floor
+  if (floor_batch > batch)
+    batch = floor_batch;
+  if (batch > PGEN_STACK_BATCH)
+    batch = PGEN_STACK_BATCH;
+  if (batch < 0)
+    batch = 0;
+  if (lua_checkstack(parser->L, n + batch)) {
+    parser->stack_claimed = parser->top + n + batch;
+  } else if (lua_checkstack(parser->L, n)) {
+    // Batched request exceeded the stack limit; the exact one still fits
+    parser->stack_claimed = parser->top + n;
+  } else {
     luaL_error(parser->L, "pgen: Lua stack overflow while building captures");
   }
 }
+
+// Fast path: one comparison against the already-claimed capacity. n may be
+// evaluated twice, so call sites must pass side-effect-free expressions.
+#define pgen_checkstack(parser, n)                     \
+  do {                                                 \
+    if ((parser)->top + (n) > (parser)->stack_claimed) \
+      pgen_checkstack_slow(parser, n);                 \
+  } while (0)
 
 #ifdef PGEN_DEBUG
 static void dumpstack(lua_State *L) {
@@ -519,7 +568,7 @@ static bool parse_captures_passed(Parser *parser) {
 #endif
 
   { // Match-time capture (Cmt id=7)
-    int cmt_stack_base = lua_gettop(parser->L);
+    int cmt_stack_base = parser->top;
     size_t cmt_start_pos = parser->pos;
 #ifdef PGEN_HAS_IND
     size_t cmt_trail_index = parser->trail_len;
@@ -550,6 +599,7 @@ static bool parse_captures_passed(Parser *parser) {
           size_t capture_length = parser->pos - start_pos;
           pgen_checkstack(parser, 1);
           lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+          parser->top++;
         }
       }
       if (parser->success) {
@@ -575,6 +625,7 @@ static bool parse_captures_passed(Parser *parser) {
             size_t capture_length = parser->pos - start_pos;
             pgen_checkstack(parser, 1);
             lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            parser->top++;
           }
         }
         if (!parser->success) {
@@ -585,7 +636,7 @@ static bool parse_captures_passed(Parser *parser) {
 
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
-      int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+      int captures_count = parser->top - cmt_stack_base;
 
       // function + subject + position + copies of the captures
       pgen_checkstack(parser, captures_count + 3);
@@ -613,7 +664,14 @@ static bool parse_captures_passed(Parser *parser) {
       // lua_call propagates errors (aborts parse on Lua error)
       lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
 
-      int returns_count = lua_gettop(parser->L) - cmt_stack_base;
+      // Resync the shadow top: the callee's stack use is arbitrary, and any
+      // batched checkstack claim may have been shrunk away during the call
+      parser->top = lua_gettop(parser->L);
+      if (parser->stack_claimed > parser->top) {
+        parser->stack_claimed = parser->top;
+      }
+
+      int returns_count = parser->top - cmt_stack_base;
 
       if (returns_count == 0) {
         // No return value = match fails
@@ -650,9 +708,13 @@ static bool parse_captures_passed(Parser *parser) {
       // Handle captures: remove first return value, keep extras as captures
       if (parser->success && returns_count > 1) {
         lua_remove(parser->L, cmt_stack_base + 1); // Remove first return value
+        parser->top--;
+        if (parser->stack_claimed > parser->top) {
+          parser->stack_claimed = parser->top;
+        }
         // Remaining values are the new captures
       } else {
-        lua_settop(parser->L, cmt_stack_base); // Clear all returns
+        PGEN_SETTOP(parser, cmt_stack_base); // Clear all returns
       }
 
 #ifdef PGEN_HAS_IND
@@ -693,9 +755,9 @@ static bool parse_inside_ct(Parser *parser) {
 #endif
 
   { // Capture Table (array-only)
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Match-time capture (Cmt id=8)
-      int cmt_stack_base = lua_gettop(parser->L);
+      int cmt_stack_base = parser->top;
       size_t cmt_start_pos = parser->pos;
 #ifdef PGEN_HAS_IND
       size_t cmt_trail_index = parser->trail_len;
@@ -719,7 +781,7 @@ static bool parse_inside_ct(Parser *parser) {
 
       if (parser->success) {
         size_t pos_after_inner = parser->pos;
-        int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+        int captures_count = parser->top - cmt_stack_base;
 
         // function + subject + position + copies of the captures
         pgen_checkstack(parser, captures_count + 3);
@@ -747,7 +809,14 @@ static bool parse_inside_ct(Parser *parser) {
         // lua_call propagates errors (aborts parse on Lua error)
         lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
 
-        int returns_count = lua_gettop(parser->L) - cmt_stack_base;
+        // Resync the shadow top: the callee's stack use is arbitrary, and any
+        // batched checkstack claim may have been shrunk away during the call
+        parser->top = lua_gettop(parser->L);
+        if (parser->stack_claimed > parser->top) {
+          parser->stack_claimed = parser->top;
+        }
+
+        int returns_count = parser->top - cmt_stack_base;
 
         if (returns_count == 0) {
           // No return value = match fails
@@ -784,9 +853,13 @@ static bool parse_inside_ct(Parser *parser) {
         // Handle captures: remove first return value, keep extras as captures
         if (parser->success && returns_count > 1) {
           lua_remove(parser->L, cmt_stack_base + 1); // Remove first return value
+          parser->top--;
+          if (parser->stack_claimed > parser->top) {
+            parser->stack_claimed = parser->top;
+          }
           // Remaining values are the new captures
         } else {
-          lua_settop(parser->L, cmt_stack_base); // Clear all returns
+          PGEN_SETTOP(parser, cmt_stack_base); // Clear all returns
         }
 
 #ifdef PGEN_HAS_IND
@@ -800,13 +873,14 @@ static bool parse_inside_ct(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
       int array_count = new_stack_size - initial_stack_size;
 
       pgen_checkstack(parser, 2); // table + one temporary during fill
       lua_createtable(parser->L, array_count, 0);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -817,7 +891,7 @@ static bool parse_inside_ct(Parser *parser) {
       // Remove all items except table, move table to correct position
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -850,7 +924,7 @@ static bool parse_no_return(Parser *parser) {
 #endif
 
   { // Match-time capture (Cmt id=3)
-    int cmt_stack_base = lua_gettop(parser->L);
+    int cmt_stack_base = parser->top;
     size_t cmt_start_pos = parser->pos;
 #ifdef PGEN_HAS_IND
     size_t cmt_trail_index = parser->trail_len;
@@ -874,7 +948,7 @@ static bool parse_no_return(Parser *parser) {
 
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
-      int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+      int captures_count = parser->top - cmt_stack_base;
 
       // function + subject + position + copies of the captures
       pgen_checkstack(parser, captures_count + 3);
@@ -902,7 +976,14 @@ static bool parse_no_return(Parser *parser) {
       // lua_call propagates errors (aborts parse on Lua error)
       lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
 
-      int returns_count = lua_gettop(parser->L) - cmt_stack_base;
+      // Resync the shadow top: the callee's stack use is arbitrary, and any
+      // batched checkstack claim may have been shrunk away during the call
+      parser->top = lua_gettop(parser->L);
+      if (parser->stack_claimed > parser->top) {
+        parser->stack_claimed = parser->top;
+      }
+
+      int returns_count = parser->top - cmt_stack_base;
 
       if (returns_count == 0) {
         // No return value = match fails
@@ -939,9 +1020,13 @@ static bool parse_no_return(Parser *parser) {
       // Handle captures: remove first return value, keep extras as captures
       if (parser->success && returns_count > 1) {
         lua_remove(parser->L, cmt_stack_base + 1); // Remove first return value
+        parser->top--;
+        if (parser->stack_claimed > parser->top) {
+          parser->stack_claimed = parser->top;
+        }
         // Remaining values are the new captures
       } else {
-        lua_settop(parser->L, cmt_stack_base); // Clear all returns
+        PGEN_SETTOP(parser, cmt_stack_base); // Clear all returns
       }
 
 #ifdef PGEN_HAS_IND
@@ -982,7 +1067,7 @@ static bool parse_return_extra_captures(Parser *parser) {
 #endif
 
   { // Match-time capture (Cmt id=6)
-    int cmt_stack_base = lua_gettop(parser->L);
+    int cmt_stack_base = parser->top;
     size_t cmt_start_pos = parser->pos;
 #ifdef PGEN_HAS_IND
     size_t cmt_trail_index = parser->trail_len;
@@ -1006,7 +1091,7 @@ static bool parse_return_extra_captures(Parser *parser) {
 
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
-      int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+      int captures_count = parser->top - cmt_stack_base;
 
       // function + subject + position + copies of the captures
       pgen_checkstack(parser, captures_count + 3);
@@ -1034,7 +1119,14 @@ static bool parse_return_extra_captures(Parser *parser) {
       // lua_call propagates errors (aborts parse on Lua error)
       lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
 
-      int returns_count = lua_gettop(parser->L) - cmt_stack_base;
+      // Resync the shadow top: the callee's stack use is arbitrary, and any
+      // batched checkstack claim may have been shrunk away during the call
+      parser->top = lua_gettop(parser->L);
+      if (parser->stack_claimed > parser->top) {
+        parser->stack_claimed = parser->top;
+      }
+
+      int returns_count = parser->top - cmt_stack_base;
 
       if (returns_count == 0) {
         // No return value = match fails
@@ -1071,9 +1163,13 @@ static bool parse_return_extra_captures(Parser *parser) {
       // Handle captures: remove first return value, keep extras as captures
       if (parser->success && returns_count > 1) {
         lua_remove(parser->L, cmt_stack_base + 1); // Remove first return value
+        parser->top--;
+        if (parser->stack_claimed > parser->top) {
+          parser->stack_claimed = parser->top;
+        }
         // Remaining values are the new captures
       } else {
-        lua_settop(parser->L, cmt_stack_base); // Clear all returns
+        PGEN_SETTOP(parser, cmt_stack_base); // Clear all returns
       }
 
 #ifdef PGEN_HAS_IND
@@ -1114,7 +1210,7 @@ static bool parse_return_false(Parser *parser) {
 #endif
 
   { // Match-time capture (Cmt id=1)
-    int cmt_stack_base = lua_gettop(parser->L);
+    int cmt_stack_base = parser->top;
     size_t cmt_start_pos = parser->pos;
 #ifdef PGEN_HAS_IND
     size_t cmt_trail_index = parser->trail_len;
@@ -1138,7 +1234,7 @@ static bool parse_return_false(Parser *parser) {
 
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
-      int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+      int captures_count = parser->top - cmt_stack_base;
 
       // function + subject + position + copies of the captures
       pgen_checkstack(parser, captures_count + 3);
@@ -1166,7 +1262,14 @@ static bool parse_return_false(Parser *parser) {
       // lua_call propagates errors (aborts parse on Lua error)
       lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
 
-      int returns_count = lua_gettop(parser->L) - cmt_stack_base;
+      // Resync the shadow top: the callee's stack use is arbitrary, and any
+      // batched checkstack claim may have been shrunk away during the call
+      parser->top = lua_gettop(parser->L);
+      if (parser->stack_claimed > parser->top) {
+        parser->stack_claimed = parser->top;
+      }
+
+      int returns_count = parser->top - cmt_stack_base;
 
       if (returns_count == 0) {
         // No return value = match fails
@@ -1203,9 +1306,13 @@ static bool parse_return_false(Parser *parser) {
       // Handle captures: remove first return value, keep extras as captures
       if (parser->success && returns_count > 1) {
         lua_remove(parser->L, cmt_stack_base + 1); // Remove first return value
+        parser->top--;
+        if (parser->stack_claimed > parser->top) {
+          parser->stack_claimed = parser->top;
+        }
         // Remaining values are the new captures
       } else {
-        lua_settop(parser->L, cmt_stack_base); // Clear all returns
+        PGEN_SETTOP(parser, cmt_stack_base); // Clear all returns
       }
 
 #ifdef PGEN_HAS_IND
@@ -1246,7 +1353,7 @@ static bool parse_return_nil(Parser *parser) {
 #endif
 
   { // Match-time capture (Cmt id=4)
-    int cmt_stack_base = lua_gettop(parser->L);
+    int cmt_stack_base = parser->top;
     size_t cmt_start_pos = parser->pos;
 #ifdef PGEN_HAS_IND
     size_t cmt_trail_index = parser->trail_len;
@@ -1270,7 +1377,7 @@ static bool parse_return_nil(Parser *parser) {
 
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
-      int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+      int captures_count = parser->top - cmt_stack_base;
 
       // function + subject + position + copies of the captures
       pgen_checkstack(parser, captures_count + 3);
@@ -1298,7 +1405,14 @@ static bool parse_return_nil(Parser *parser) {
       // lua_call propagates errors (aborts parse on Lua error)
       lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
 
-      int returns_count = lua_gettop(parser->L) - cmt_stack_base;
+      // Resync the shadow top: the callee's stack use is arbitrary, and any
+      // batched checkstack claim may have been shrunk away during the call
+      parser->top = lua_gettop(parser->L);
+      if (parser->stack_claimed > parser->top) {
+        parser->stack_claimed = parser->top;
+      }
+
+      int returns_count = parser->top - cmt_stack_base;
 
       if (returns_count == 0) {
         // No return value = match fails
@@ -1335,9 +1449,13 @@ static bool parse_return_nil(Parser *parser) {
       // Handle captures: remove first return value, keep extras as captures
       if (parser->success && returns_count > 1) {
         lua_remove(parser->L, cmt_stack_base + 1); // Remove first return value
+        parser->top--;
+        if (parser->stack_claimed > parser->top) {
+          parser->stack_claimed = parser->top;
+        }
         // Remaining values are the new captures
       } else {
-        lua_settop(parser->L, cmt_stack_base); // Clear all returns
+        PGEN_SETTOP(parser, cmt_stack_base); // Clear all returns
       }
 
 #ifdef PGEN_HAS_IND
@@ -1378,7 +1496,7 @@ static bool parse_return_pos(Parser *parser) {
 #endif
 
   { // Match-time capture (Cmt id=2)
-    int cmt_stack_base = lua_gettop(parser->L);
+    int cmt_stack_base = parser->top;
     size_t cmt_start_pos = parser->pos;
 #ifdef PGEN_HAS_IND
     size_t cmt_trail_index = parser->trail_len;
@@ -1402,7 +1520,7 @@ static bool parse_return_pos(Parser *parser) {
 
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
-      int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+      int captures_count = parser->top - cmt_stack_base;
 
       // function + subject + position + copies of the captures
       pgen_checkstack(parser, captures_count + 3);
@@ -1430,7 +1548,14 @@ static bool parse_return_pos(Parser *parser) {
       // lua_call propagates errors (aborts parse on Lua error)
       lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
 
-      int returns_count = lua_gettop(parser->L) - cmt_stack_base;
+      // Resync the shadow top: the callee's stack use is arbitrary, and any
+      // batched checkstack claim may have been shrunk away during the call
+      parser->top = lua_gettop(parser->L);
+      if (parser->stack_claimed > parser->top) {
+        parser->stack_claimed = parser->top;
+      }
+
+      int returns_count = parser->top - cmt_stack_base;
 
       if (returns_count == 0) {
         // No return value = match fails
@@ -1467,9 +1592,13 @@ static bool parse_return_pos(Parser *parser) {
       // Handle captures: remove first return value, keep extras as captures
       if (parser->success && returns_count > 1) {
         lua_remove(parser->L, cmt_stack_base + 1); // Remove first return value
+        parser->top--;
+        if (parser->stack_claimed > parser->top) {
+          parser->stack_claimed = parser->top;
+        }
         // Remaining values are the new captures
       } else {
-        lua_settop(parser->L, cmt_stack_base); // Clear all returns
+        PGEN_SETTOP(parser, cmt_stack_base); // Clear all returns
       }
 
 #ifdef PGEN_HAS_IND
@@ -1510,7 +1639,7 @@ static bool parse_return_true(Parser *parser) {
 #endif
 
   { // Match-time capture (Cmt id=5)
-    int cmt_stack_base = lua_gettop(parser->L);
+    int cmt_stack_base = parser->top;
     size_t cmt_start_pos = parser->pos;
 #ifdef PGEN_HAS_IND
     size_t cmt_trail_index = parser->trail_len;
@@ -1534,7 +1663,7 @@ static bool parse_return_true(Parser *parser) {
 
     if (parser->success) {
       size_t pos_after_inner = parser->pos;
-      int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+      int captures_count = parser->top - cmt_stack_base;
 
       // function + subject + position + copies of the captures
       pgen_checkstack(parser, captures_count + 3);
@@ -1562,7 +1691,14 @@ static bool parse_return_true(Parser *parser) {
       // lua_call propagates errors (aborts parse on Lua error)
       lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
 
-      int returns_count = lua_gettop(parser->L) - cmt_stack_base;
+      // Resync the shadow top: the callee's stack use is arbitrary, and any
+      // batched checkstack claim may have been shrunk away during the call
+      parser->top = lua_gettop(parser->L);
+      if (parser->stack_claimed > parser->top) {
+        parser->stack_claimed = parser->top;
+      }
+
+      int returns_count = parser->top - cmt_stack_base;
 
       if (returns_count == 0) {
         // No return value = match fails
@@ -1599,9 +1735,13 @@ static bool parse_return_true(Parser *parser) {
       // Handle captures: remove first return value, keep extras as captures
       if (parser->success && returns_count > 1) {
         lua_remove(parser->L, cmt_stack_base + 1); // Remove first return value
+        parser->top--;
+        if (parser->stack_claimed > parser->top) {
+          parser->stack_claimed = parser->top;
+        }
         // Remaining values are the new captures
       } else {
-        lua_settop(parser->L, cmt_stack_base); // Clear all returns
+        PGEN_SETTOP(parser, cmt_stack_base); // Clear all returns
       }
 
 #ifdef PGEN_HAS_IND
@@ -1645,7 +1785,7 @@ static bool parse_skip_chars(Parser *parser) {
     REMEMBER_POSITION(parser, pos);
 
     { // Match-time capture (Cmt id=0)
-      int cmt_stack_base = lua_gettop(parser->L);
+      int cmt_stack_base = parser->top;
       size_t cmt_start_pos = parser->pos;
 #ifdef PGEN_HAS_IND
       size_t cmt_trail_index = parser->trail_len;
@@ -1669,7 +1809,7 @@ static bool parse_skip_chars(Parser *parser) {
 
       if (parser->success) {
         size_t pos_after_inner = parser->pos;
-        int captures_count = lua_gettop(parser->L) - cmt_stack_base;
+        int captures_count = parser->top - cmt_stack_base;
 
         // function + subject + position + copies of the captures
         pgen_checkstack(parser, captures_count + 3);
@@ -1697,7 +1837,14 @@ static bool parse_skip_chars(Parser *parser) {
         // lua_call propagates errors (aborts parse on Lua error)
         lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
 
-        int returns_count = lua_gettop(parser->L) - cmt_stack_base;
+        // Resync the shadow top: the callee's stack use is arbitrary, and any
+        // batched checkstack claim may have been shrunk away during the call
+        parser->top = lua_gettop(parser->L);
+        if (parser->stack_claimed > parser->top) {
+          parser->stack_claimed = parser->top;
+        }
+
+        int returns_count = parser->top - cmt_stack_base;
 
         if (returns_count == 0) {
           // No return value = match fails
@@ -1734,9 +1881,13 @@ static bool parse_skip_chars(Parser *parser) {
         // Handle captures: remove first return value, keep extras as captures
         if (parser->success && returns_count > 1) {
           lua_remove(parser->L, cmt_stack_base + 1); // Remove first return value
+          parser->top--;
+          if (parser->stack_claimed > parser->top) {
+            parser->stack_claimed = parser->top;
+          }
           // Remaining values are the new captures
         } else {
-          lua_settop(parser->L, cmt_stack_base); // Clear all returns
+          PGEN_SETTOP(parser, cmt_stack_base); // Clear all returns
         }
 
 #ifdef PGEN_HAS_IND
@@ -1799,6 +1950,8 @@ static Parser *cmt_init(const char *input, lua_State *L) {
   parser->throw_label = NULL;
   parser->throw_pos = 0;
   parser->furthest_fail = 0;
+  parser->top = lua_gettop(L);
+  parser->stack_claimed = parser->top;
   parser->L = L;
   return parser;
 }
@@ -1838,6 +1991,7 @@ static int l_cmt_parse(lua_State *L) {
   parse_test(parser);
 
   int final_stack_size = lua_gettop(parser->L);
+  assert(parser->top == final_stack_size && "Shadow stack top out of sync.");
 
   // Return nil and error info on failure
   if (!parser->success) {

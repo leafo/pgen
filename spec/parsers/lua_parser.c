@@ -27,6 +27,8 @@ typedef struct {
   size_t throw_pos;        // Position where T() was thrown
   size_t furthest_fail;    // Furthest position where a match attempt failed
   size_t depth;
+  int top;           // Shadow of lua_gettop(L), exact between patterns
+  int stack_claimed; // Stack index secured so far via lua_checkstack
   lua_State *L;
 } Parser;
 
@@ -39,15 +41,31 @@ typedef struct {
   size_t pos;
 } ParserInputPosition;
 
+// Set the Lua stack top, keeping the parser's shadow copy in sync. Any
+// batched lua_checkstack claim beyond what survives GC stack shrinking is
+// forfeited: capacity may shrink to twice the in-use size, but never below
+// the runtime's minimum allocation (conservatively PGEN_STACK_FLOOR).
+#define PGEN_SETTOP(parser, n)                \
+  do {                                        \
+    int pgen_newtop_ = (n);                   \
+    lua_settop((parser)->L, pgen_newtop_);    \
+    (parser)->top = pgen_newtop_;             \
+    int pgen_keep_ = 2 * pgen_newtop_;        \
+    if (pgen_keep_ < PGEN_STACK_FLOOR)        \
+      pgen_keep_ = PGEN_STACK_FLOOR;          \
+    if ((parser)->stack_claimed > pgen_keep_) \
+      (parser)->stack_claimed = pgen_keep_;   \
+  } while (0)
+
 #define REMEMBER_POSITION(parser, pp) \
   ParserPosition pp;                  \
   (pp).pos = (parser)->pos;           \
-  (pp).stack_size = lua_gettop((parser)->L);
+  (pp).stack_size = (parser)->top;
 
 // Restore parser position
 #define RESTORE_POSITION(parser, pp) \
   (parser)->pos = (pp).pos;          \
-  lua_settop((parser)->L, (pp).stack_size);
+  PGEN_SETTOP(parser, (pp).stack_size);
 
 #define REMEMBER_INPUT_POSITION(parser, pp) \
   ParserInputPosition pp;                   \
@@ -84,11 +102,42 @@ typedef struct {
 // stack, so without this a large parse tree would overflow it (undefined
 // behavior). Raises a Lua error when the stack cannot grow any further
 // (LUAI_MAXCSTACK).
-static void pgen_checkstack(Parser *parser, int n) {
-  if (!lua_checkstack(parser->L, n)) {
+//
+// Claims are batched so most calls are a single comparison against the
+// shadow top. Batch size is limited to what survives GC stack shrinking:
+// PUC Lua honors lua_checkstack claims for the frame's lifetime, but
+// LuaJIT's GC may shrink capacity to twice the in-use size (never below
+// its minimum allocation, conservatively PGEN_STACK_FLOOR). Claims above
+// released stack space are forfeited by PGEN_SETTOP.
+#define PGEN_STACK_BATCH 64
+#define PGEN_STACK_FLOOR 32
+
+static void pgen_checkstack_slow(Parser *parser, int n) {
+  int batch = parser->top - n;                            // survives 2x-used shrink
+  int floor_batch = PGEN_STACK_FLOOR - (parser->top + n); // under shrink floor
+  if (floor_batch > batch)
+    batch = floor_batch;
+  if (batch > PGEN_STACK_BATCH)
+    batch = PGEN_STACK_BATCH;
+  if (batch < 0)
+    batch = 0;
+  if (lua_checkstack(parser->L, n + batch)) {
+    parser->stack_claimed = parser->top + n + batch;
+  } else if (lua_checkstack(parser->L, n)) {
+    // Batched request exceeded the stack limit; the exact one still fits
+    parser->stack_claimed = parser->top + n;
+  } else {
     luaL_error(parser->L, "pgen: Lua stack overflow while building captures");
   }
 }
+
+// Fast path: one comparison against the already-claimed capacity. n may be
+// evaluated twice, so call sites must pass side-effect-free expressions.
+#define pgen_checkstack(parser, n)                     \
+  do {                                                 \
+    if ((parser)->top + (n) > (parser)->stack_claimed) \
+      pgen_checkstack_slow(parser, n);                 \
+  } while (0)
 
 #ifdef PGEN_DEBUG
 static void dumpstack(lua_State *L) {
@@ -368,7 +417,7 @@ static bool parse_Name(Parser *parser) {
 #endif
 
   { // Capture Table (array-only)
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -376,6 +425,7 @@ static bool parse_Name(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[28]); // "name"
+        parser->top += 1;
       }
       if (parser->success) {
         { // Capture
@@ -419,6 +469,7 @@ static bool parse_Name(Parser *parser) {
             size_t capture_length = parser->pos - start_pos;
             pgen_checkstack(parser, 1);
             lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            parser->top++;
           }
         }
         if (!parser->success) {
@@ -428,13 +479,14 @@ static bool parse_Name(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
       int array_count = new_stack_size - initial_stack_size;
 
       pgen_checkstack(parser, 2); // table + one temporary during fill
       lua_createtable(parser->L, array_count, 0);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -445,7 +497,7 @@ static bool parse_Name(Parser *parser) {
       // Remove all items except table, move table to correct position
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -478,7 +530,7 @@ static bool parse_Number(Parser *parser) {
 #endif
 
   { // Capture Table (array-only)
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -486,6 +538,7 @@ static bool parse_Number(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[32]); // "number"
+        parser->top += 1;
       }
       if (parser->success) {
         { // Capture
@@ -1319,6 +1372,7 @@ static bool parse_Number(Parser *parser) {
             size_t capture_length = parser->pos - start_pos;
             pgen_checkstack(parser, 1);
             lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            parser->top++;
           }
         }
         if (!parser->success) {
@@ -1328,13 +1382,14 @@ static bool parse_Number(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
       int array_count = new_stack_size - initial_stack_size;
 
       pgen_checkstack(parser, 2); // table + one temporary during fill
       lua_createtable(parser->L, array_count, 0);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -1345,7 +1400,7 @@ static bool parse_Number(Parser *parser) {
       // Remove all items except table, move table to correct position
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -1378,7 +1433,7 @@ static bool parse_String(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -1386,12 +1441,13 @@ static bool parse_String(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[38]); // "string"
+        parser->top += 1;
       }
       if (parser->success) {
         {     // Choice
           {   // Choice
             { // Numbered Capture (select 1)
-              int cn_stack_start = lua_gettop(parser->L);
+              int cn_stack_start = parser->top;
               { // Capture
                 size_t start_pos = parser->pos;
                 { // Sequence with 7 patterns
@@ -1413,7 +1469,7 @@ static bool parse_String(Parser *parser) {
                   }
                   if (parser->success) {
                     { // Capture Group "eq"
-                      int cg_stack_start = lua_gettop(parser->L);
+                      int cg_stack_start = parser->top;
                       size_t start_pos = parser->pos;
                       { // Zero or more repetitions
                         while (true) {
@@ -1442,7 +1498,7 @@ static bool parse_String(Parser *parser) {
                       }
 
                       if (parser->success) {
-                        int cg_stack_end = lua_gettop(parser->L);
+                        int cg_stack_end = parser->top;
                         int captures_produced = cg_stack_end - cg_stack_start;
 
                         pgen_checkstack(parser, 2); // sentinel + value
@@ -1454,7 +1510,7 @@ static bool parse_String(Parser *parser) {
                           lua_insert(parser->L, cg_stack_start + 1);
                           // Now stack is: sentinel, first_capture, [other_captures...]
                           // Remove any extra captures (keep only sentinel + first capture)
-                          lua_settop(parser->L, cg_stack_start + 2);
+                          PGEN_SETTOP(parser, cg_stack_start + 2);
                         } else {
                           // No captures - capture the matched text span
                           size_t capture_len = parser->pos - start_pos;
@@ -1462,6 +1518,7 @@ static bool parse_String(Parser *parser) {
                           lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_eq);
                           // Push captured value
                           lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+                          parser->top += 2;
                         }
                       }
                     }
@@ -1511,12 +1568,12 @@ static bool parse_String(Parser *parser) {
                                       parser->success = false;
 
                                       // Search backward through stack for sentinel "eq"
-                                      for (int i = lua_gettop(parser->L); i >= 1; i--) {
+                                      for (int i = parser->top; i >= 1; i--) {
                                         if (lua_islightuserdata(parser->L, i)) {
                                           void *ptr = lua_touserdata(parser->L, i);
                                           if (ptr == (void *)__cg_sentinel_eq) {
                                             // Found sentinel - value is at i+1 (use only if it's already a string)
-                                            if (i + 1 <= lua_gettop(parser->L) && lua_type(parser->L, i + 1) == LUA_TSTRING) {
+                                            if (i + 1 <= parser->top && lua_type(parser->L, i + 1) == LUA_TSTRING) {
                                               size_t match_len;
                                               const char *match_str = lua_tolstring(parser->L, i + 1, &match_len);
                                               // Try to match at current position
@@ -1624,12 +1681,12 @@ static bool parse_String(Parser *parser) {
                               parser->success = false;
 
                               // Search backward through stack for sentinel "eq"
-                              for (int i = lua_gettop(parser->L); i >= 1; i--) {
+                              for (int i = parser->top; i >= 1; i--) {
                                 if (lua_islightuserdata(parser->L, i)) {
                                   void *ptr = lua_touserdata(parser->L, i);
                                   if (ptr == (void *)__cg_sentinel_eq) {
                                     // Found sentinel - value is at i+1 (use only if it's already a string)
-                                    if (i + 1 <= lua_gettop(parser->L) && lua_type(parser->L, i + 1) == LUA_TSTRING) {
+                                    if (i + 1 <= parser->top && lua_type(parser->L, i + 1) == LUA_TSTRING) {
                                       size_t match_len;
                                       const char *match_str = lua_tolstring(parser->L, i + 1, &match_len);
                                       // Try to match at current position
@@ -1680,11 +1737,12 @@ static bool parse_String(Parser *parser) {
                   size_t capture_length = parser->pos - start_pos;
                   pgen_checkstack(parser, 1);
                   lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+                  parser->top++;
                 }
               }
 
               if (parser->success) {
-                int final_stack = lua_gettop(parser->L);
+                int final_stack = parser->top;
                 pgen_checkstack(parser, 1);
 
                 // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
@@ -1705,10 +1763,11 @@ static bool parse_String(Parser *parser) {
                 if (target_idx > 0) {
                   lua_pushvalue(parser->L, target_idx);
                   lua_replace(parser->L, cn_stack_start + 1);
-                  lua_settop(parser->L, cn_stack_start + 1);
+                  PGEN_SETTOP(parser, cn_stack_start + 1);
                 } else {
-                  lua_settop(parser->L, cn_stack_start);
+                  PGEN_SETTOP(parser, cn_stack_start);
                   lua_pushnil(parser->L);
+                  parser->top++;
                 }
               }
             }
@@ -1871,6 +1930,7 @@ static bool parse_String(Parser *parser) {
                   size_t capture_length = parser->pos - start_pos;
                   pgen_checkstack(parser, 1);
                   lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+                  parser->top++;
                 }
               }
             }
@@ -2034,6 +2094,7 @@ static bool parse_String(Parser *parser) {
                 size_t capture_length = parser->pos - start_pos;
                 pgen_checkstack(parser, 1);
                 lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+                parser->top++;
               }
             }
           }
@@ -2045,7 +2106,7 @@ static bool parse_String(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -2064,7 +2125,8 @@ static bool parse_String(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -2088,7 +2150,7 @@ static bool parse_String(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -2232,7 +2294,7 @@ static bool parse_attnamelist(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 4 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -2240,6 +2302,7 @@ static bool parse_attnamelist(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[1]); // "attnamelist"
+        parser->top += 1;
       }
       if (parser->success) {
         parse_Name(parser);
@@ -2341,7 +2404,7 @@ static bool parse_attnamelist(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -2360,7 +2423,8 @@ static bool parse_attnamelist(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -2384,7 +2448,7 @@ static bool parse_attnamelist(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -2422,7 +2486,7 @@ static bool parse_attrib(Parser *parser) {
     parse_ws(parser);
     if (parser->success) {
       { // Capture Table
-        int initial_stack_size = lua_gettop(parser->L);
+        int initial_stack_size = parser->top;
         { // Sequence with 6 patterns
           REMEMBER_POSITION(parser, pos);
 
@@ -2430,6 +2494,7 @@ static bool parse_attrib(Parser *parser) {
             // A constant capture matches the empty string and produces all given values
             pgen_checkstack(parser, 1);
             lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[2]); // "attrib"
+            parser->top += 1;
           }
           if (parser->success) {
             { // Match single character "<"
@@ -2478,7 +2543,7 @@ static bool parse_attrib(Parser *parser) {
         }
 
         if (parser->success) {
-          int new_stack_size = lua_gettop(parser->L);
+          int new_stack_size = parser->top;
           int items_start = initial_stack_size + 1;
 
           // Count array items and named items separately
@@ -2497,7 +2562,8 @@ static bool parse_attrib(Parser *parser) {
 
           pgen_checkstack(parser, 3); // table + two temporaries during fill
           lua_createtable(parser->L, array_count, named_count);
-          int table_idx = lua_gettop(parser->L);
+          parser->top++;
+          int table_idx = parser->top;
 
           int array_idx = 1;
           for (int i = items_start; i < table_idx; i++) {
@@ -2521,7 +2587,7 @@ static bool parse_attrib(Parser *parser) {
           // Only needed if there were items to remove (items_start <= new_stack_size)
           if (items_start <= new_stack_size) {
             lua_replace(parser->L, items_start);
-            lua_settop(parser->L, items_start);
+            PGEN_SETTOP(parser, items_start);
           }
         }
       }
@@ -2559,7 +2625,7 @@ static bool parse_binop(Parser *parser) {
 #endif
 
   { // Capture Table (array-only)
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -2567,6 +2633,7 @@ static bool parse_binop(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[3]); // "binop"
+        parser->top += 1;
       }
       if (parser->success) {
         { // Capture
@@ -2900,6 +2967,7 @@ static bool parse_binop(Parser *parser) {
             size_t capture_length = parser->pos - start_pos;
             pgen_checkstack(parser, 1);
             lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+            parser->top++;
           }
         }
         if (!parser->success) {
@@ -2909,13 +2977,14 @@ static bool parse_binop(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
       int array_count = new_stack_size - initial_stack_size;
 
       pgen_checkstack(parser, 2); // table + one temporary during fill
       lua_createtable(parser->L, array_count, 0);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -2926,7 +2995,7 @@ static bool parse_binop(Parser *parser) {
       // Remove all items except table, move table to correct position
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -2959,7 +3028,7 @@ static bool parse_block(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 5 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -2967,6 +3036,7 @@ static bool parse_block(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[4]); // "block"
+        parser->top += 1;
       }
       if (parser->success) {
         parse_ws(parser);
@@ -3018,7 +3088,7 @@ static bool parse_block(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -3037,7 +3107,8 @@ static bool parse_block(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -3061,7 +3132,7 @@ static bool parse_block(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -3095,7 +3166,7 @@ static bool parse_call_suffix(Parser *parser) {
 
   {   // Choice
     { // Capture Table
-      int initial_stack_size = lua_gettop(parser->L);
+      int initial_stack_size = parser->top;
       { // Sequence with 7 patterns
         REMEMBER_POSITION(parser, pos);
 
@@ -3103,6 +3174,7 @@ static bool parse_call_suffix(Parser *parser) {
           // A constant capture matches the empty string and produces all given values
           pgen_checkstack(parser, 1);
           lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[27]); // "method"
+          parser->top += 1;
         }
         if (parser->success) {
           parse_ws(parser);
@@ -3141,7 +3213,7 @@ static bool parse_call_suffix(Parser *parser) {
       }
 
       if (parser->success) {
-        int new_stack_size = lua_gettop(parser->L);
+        int new_stack_size = parser->top;
         int items_start = initial_stack_size + 1;
 
         // Count array items and named items separately
@@ -3160,7 +3232,8 @@ static bool parse_call_suffix(Parser *parser) {
 
         pgen_checkstack(parser, 3); // table + two temporaries during fill
         lua_createtable(parser->L, array_count, named_count);
-        int table_idx = lua_gettop(parser->L);
+        parser->top++;
+        int table_idx = parser->top;
 
         int array_idx = 1;
         for (int i = items_start; i < table_idx; i++) {
@@ -3184,7 +3257,7 @@ static bool parse_call_suffix(Parser *parser) {
         // Only needed if there were items to remove (items_start <= new_stack_size)
         if (items_start <= new_stack_size) {
           lua_replace(parser->L, items_start);
-          lua_settop(parser->L, items_start);
+          PGEN_SETTOP(parser, items_start);
         }
       }
     }
@@ -3193,7 +3266,7 @@ static bool parse_call_suffix(Parser *parser) {
     if (!parser->success && !parser->throw_label) {
       parser->success = true;
       { // Capture Table
-        int initial_stack_size = lua_gettop(parser->L);
+        int initial_stack_size = parser->top;
         { // Sequence with 3 patterns
           REMEMBER_POSITION(parser, pos);
 
@@ -3201,6 +3274,7 @@ static bool parse_call_suffix(Parser *parser) {
             // A constant capture matches the empty string and produces all given values
             pgen_checkstack(parser, 1);
             lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[7]); // "call"
+            parser->top += 1;
           }
           if (parser->success) {
             parse_ws(parser);
@@ -3214,7 +3288,7 @@ static bool parse_call_suffix(Parser *parser) {
         }
 
         if (parser->success) {
-          int new_stack_size = lua_gettop(parser->L);
+          int new_stack_size = parser->top;
           int items_start = initial_stack_size + 1;
 
           // Count array items and named items separately
@@ -3233,7 +3307,8 @@ static bool parse_call_suffix(Parser *parser) {
 
           pgen_checkstack(parser, 3); // table + two temporaries during fill
           lua_createtable(parser->L, array_count, named_count);
-          int table_idx = lua_gettop(parser->L);
+          parser->top++;
+          int table_idx = parser->top;
 
           int array_idx = 1;
           for (int i = items_start; i < table_idx; i++) {
@@ -3257,7 +3332,7 @@ static bool parse_call_suffix(Parser *parser) {
           // Only needed if there were items to remove (items_start <= new_stack_size)
           if (items_start <= new_stack_size) {
             lua_replace(parser->L, items_start);
-            lua_settop(parser->L, items_start);
+            PGEN_SETTOP(parser, items_start);
           }
         }
       }
@@ -3312,7 +3387,7 @@ static bool parse_comment(Parser *parser) {
     if (parser->success) {
       {   // Choice
         { // Numbered Capture (discard all)
-          int cn_stack_start = lua_gettop(parser->L);
+          int cn_stack_start = parser->top;
           { // Sequence with 7 patterns
             REMEMBER_POSITION(parser, pos);
 
@@ -3332,7 +3407,7 @@ static bool parse_comment(Parser *parser) {
             }
             if (parser->success) {
               { // Capture Group "eq"
-                int cg_stack_start = lua_gettop(parser->L);
+                int cg_stack_start = parser->top;
                 size_t start_pos = parser->pos;
                 { // Zero or more repetitions
                   while (true) {
@@ -3361,7 +3436,7 @@ static bool parse_comment(Parser *parser) {
                 }
 
                 if (parser->success) {
-                  int cg_stack_end = lua_gettop(parser->L);
+                  int cg_stack_end = parser->top;
                   int captures_produced = cg_stack_end - cg_stack_start;
 
                   pgen_checkstack(parser, 2); // sentinel + value
@@ -3373,7 +3448,7 @@ static bool parse_comment(Parser *parser) {
                     lua_insert(parser->L, cg_stack_start + 1);
                     // Now stack is: sentinel, first_capture, [other_captures...]
                     // Remove any extra captures (keep only sentinel + first capture)
-                    lua_settop(parser->L, cg_stack_start + 2);
+                    PGEN_SETTOP(parser, cg_stack_start + 2);
                   } else {
                     // No captures - capture the matched text span
                     size_t capture_len = parser->pos - start_pos;
@@ -3381,6 +3456,7 @@ static bool parse_comment(Parser *parser) {
                     lua_pushlightuserdata(parser->L, (void *)__cg_sentinel_eq);
                     // Push captured value
                     lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
+                    parser->top += 2;
                   }
                 }
               }
@@ -3430,12 +3506,12 @@ static bool parse_comment(Parser *parser) {
                                 parser->success = false;
 
                                 // Search backward through stack for sentinel "eq"
-                                for (int i = lua_gettop(parser->L); i >= 1; i--) {
+                                for (int i = parser->top; i >= 1; i--) {
                                   if (lua_islightuserdata(parser->L, i)) {
                                     void *ptr = lua_touserdata(parser->L, i);
                                     if (ptr == (void *)__cg_sentinel_eq) {
                                       // Found sentinel - value is at i+1 (use only if it's already a string)
-                                      if (i + 1 <= lua_gettop(parser->L) && lua_type(parser->L, i + 1) == LUA_TSTRING) {
+                                      if (i + 1 <= parser->top && lua_type(parser->L, i + 1) == LUA_TSTRING) {
                                         size_t match_len;
                                         const char *match_str = lua_tolstring(parser->L, i + 1, &match_len);
                                         // Try to match at current position
@@ -3543,12 +3619,12 @@ static bool parse_comment(Parser *parser) {
                         parser->success = false;
 
                         // Search backward through stack for sentinel "eq"
-                        for (int i = lua_gettop(parser->L); i >= 1; i--) {
+                        for (int i = parser->top; i >= 1; i--) {
                           if (lua_islightuserdata(parser->L, i)) {
                             void *ptr = lua_touserdata(parser->L, i);
                             if (ptr == (void *)__cg_sentinel_eq) {
                               // Found sentinel - value is at i+1 (use only if it's already a string)
-                              if (i + 1 <= lua_gettop(parser->L) && lua_type(parser->L, i + 1) == LUA_TSTRING) {
+                              if (i + 1 <= parser->top && lua_type(parser->L, i + 1) == LUA_TSTRING) {
                                 size_t match_len;
                                 const char *match_str = lua_tolstring(parser->L, i + 1, &match_len);
                                 // Try to match at current position
@@ -3596,7 +3672,7 @@ static bool parse_comment(Parser *parser) {
           }
 
           if (parser->success) {
-            lua_settop(parser->L, cn_stack_start);
+            PGEN_SETTOP(parser, cn_stack_start);
           }
         }
 
@@ -3812,7 +3888,7 @@ static bool parse_exp(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -3820,6 +3896,7 @@ static bool parse_exp(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[10]); // "exp"
+        parser->top += 1;
       }
       if (parser->success) {
         parse_simple_exp(parser);
@@ -3860,7 +3937,7 @@ static bool parse_exp(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -3879,7 +3956,8 @@ static bool parse_exp(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -3903,7 +3981,7 @@ static bool parse_exp(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -3936,7 +4014,7 @@ static bool parse_explist(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -3944,6 +4022,7 @@ static bool parse_explist(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[12]); // "explist"
+        parser->top += 1;
       }
       if (parser->success) {
         parse_exp(parser);
@@ -3997,7 +4076,7 @@ static bool parse_explist(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -4016,7 +4095,8 @@ static bool parse_explist(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -4040,7 +4120,7 @@ static bool parse_explist(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -4075,7 +4155,7 @@ static bool parse_field(Parser *parser) {
   {     // Choice
     {   // Choice
       { // Capture Table
-        int initial_stack_size = lua_gettop(parser->L);
+        int initial_stack_size = parser->top;
         { // Sequence with 10 patterns
           REMEMBER_POSITION(parser, pos);
 
@@ -4083,6 +4163,7 @@ static bool parse_field(Parser *parser) {
             // A constant capture matches the empty string and produces all given values
             pgen_checkstack(parser, 1);
             lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[23]); // "index_field"
+            parser->top += 1;
           }
           if (parser->success) {
             { // Match single character "["
@@ -4156,7 +4237,7 @@ static bool parse_field(Parser *parser) {
         }
 
         if (parser->success) {
-          int new_stack_size = lua_gettop(parser->L);
+          int new_stack_size = parser->top;
           int items_start = initial_stack_size + 1;
 
           // Count array items and named items separately
@@ -4175,7 +4256,8 @@ static bool parse_field(Parser *parser) {
 
           pgen_checkstack(parser, 3); // table + two temporaries during fill
           lua_createtable(parser->L, array_count, named_count);
-          int table_idx = lua_gettop(parser->L);
+          parser->top++;
+          int table_idx = parser->top;
 
           int array_idx = 1;
           for (int i = items_start; i < table_idx; i++) {
@@ -4199,7 +4281,7 @@ static bool parse_field(Parser *parser) {
           // Only needed if there were items to remove (items_start <= new_stack_size)
           if (items_start <= new_stack_size) {
             lua_replace(parser->L, items_start);
-            lua_settop(parser->L, items_start);
+            PGEN_SETTOP(parser, items_start);
           }
         }
       }
@@ -4208,7 +4290,7 @@ static bool parse_field(Parser *parser) {
       if (!parser->success && !parser->throw_label) {
         parser->success = true;
         { // Capture Table
-          int initial_stack_size = lua_gettop(parser->L);
+          int initial_stack_size = parser->top;
           { // Sequence with 6 patterns
             REMEMBER_POSITION(parser, pos);
 
@@ -4216,6 +4298,7 @@ static bool parse_field(Parser *parser) {
               // A constant capture matches the empty string and produces all given values
               pgen_checkstack(parser, 1);
               lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[29]); // "name_field"
+              parser->top += 1;
             }
             if (parser->success) {
               parse_Name(parser);
@@ -4251,7 +4334,7 @@ static bool parse_field(Parser *parser) {
           }
 
           if (parser->success) {
-            int new_stack_size = lua_gettop(parser->L);
+            int new_stack_size = parser->top;
             int items_start = initial_stack_size + 1;
 
             // Count array items and named items separately
@@ -4270,7 +4353,8 @@ static bool parse_field(Parser *parser) {
 
             pgen_checkstack(parser, 3); // table + two temporaries during fill
             lua_createtable(parser->L, array_count, named_count);
-            int table_idx = lua_gettop(parser->L);
+            parser->top++;
+            int table_idx = parser->top;
 
             int array_idx = 1;
             for (int i = items_start; i < table_idx; i++) {
@@ -4294,7 +4378,7 @@ static bool parse_field(Parser *parser) {
             // Only needed if there were items to remove (items_start <= new_stack_size)
             if (items_start <= new_stack_size) {
               lua_replace(parser->L, items_start);
-              lua_settop(parser->L, items_start);
+              PGEN_SETTOP(parser, items_start);
             }
           }
         }
@@ -4305,7 +4389,7 @@ static bool parse_field(Parser *parser) {
     if (!parser->success && !parser->throw_label) {
       parser->success = true;
       { // Capture Table
-        int initial_stack_size = lua_gettop(parser->L);
+        int initial_stack_size = parser->top;
         { // Sequence with 2 patterns
           REMEMBER_POSITION(parser, pos);
 
@@ -4313,6 +4397,7 @@ static bool parse_field(Parser *parser) {
             // A constant capture matches the empty string and produces all given values
             pgen_checkstack(parser, 1);
             lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[11]); // "exp_field"
+            parser->top += 1;
           }
           if (parser->success) {
             parse_exp(parser);
@@ -4323,7 +4408,7 @@ static bool parse_field(Parser *parser) {
         }
 
         if (parser->success) {
-          int new_stack_size = lua_gettop(parser->L);
+          int new_stack_size = parser->top;
           int items_start = initial_stack_size + 1;
 
           // Count array items and named items separately
@@ -4342,7 +4427,8 @@ static bool parse_field(Parser *parser) {
 
           pgen_checkstack(parser, 3); // table + two temporaries during fill
           lua_createtable(parser->L, array_count, named_count);
-          int table_idx = lua_gettop(parser->L);
+          parser->top++;
+          int table_idx = parser->top;
 
           int array_idx = 1;
           for (int i = items_start; i < table_idx; i++) {
@@ -4366,7 +4452,7 @@ static bool parse_field(Parser *parser) {
           // Only needed if there were items to remove (items_start <= new_stack_size)
           if (items_start <= new_stack_size) {
             lua_replace(parser->L, items_start);
-            lua_settop(parser->L, items_start);
+            PGEN_SETTOP(parser, items_start);
           }
         }
       }
@@ -4401,7 +4487,7 @@ static bool parse_fieldlist(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 4 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -4409,6 +4495,7 @@ static bool parse_fieldlist(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[14]); // "fields"
+        parser->top += 1;
       }
       if (parser->success) {
         parse_field(parser);
@@ -4467,7 +4554,7 @@ static bool parse_fieldlist(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -4486,7 +4573,8 @@ static bool parse_fieldlist(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -4510,7 +4598,7 @@ static bool parse_fieldlist(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -4619,7 +4707,7 @@ static bool parse_funcbody(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 11 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -4627,6 +4715,7 @@ static bool parse_funcbody(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[17]); // "funcbody"
+        parser->top += 1;
       }
       if (parser->success) {
         parse_ws(parser);
@@ -4725,7 +4814,7 @@ static bool parse_funcbody(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -4744,7 +4833,8 @@ static bool parse_funcbody(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -4768,7 +4858,7 @@ static bool parse_funcbody(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -4801,7 +4891,7 @@ static bool parse_funcname(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 4 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -4809,6 +4899,7 @@ static bool parse_funcname(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[18]); // "funcname"
+        parser->top += 1;
       }
       if (parser->success) {
         parse_Name(parser);
@@ -4915,7 +5006,7 @@ static bool parse_funcname(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -4934,7 +5025,8 @@ static bool parse_funcname(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -4958,7 +5050,7 @@ static bool parse_funcname(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -4991,7 +5083,7 @@ static bool parse_functioncall(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -4999,6 +5091,7 @@ static bool parse_functioncall(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[7]); // "call"
+        parser->top += 1;
       }
       if (parser->success) {
         parse_prefixexp_inner(parser);
@@ -5009,7 +5102,7 @@ static bool parse_functioncall(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -5028,7 +5121,8 @@ static bool parse_functioncall(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -5052,7 +5146,7 @@ static bool parse_functioncall(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -5085,7 +5179,7 @@ static bool parse_functiondef(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -5093,6 +5187,7 @@ static bool parse_functiondef(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[19]); // "function"
+        parser->top += 1;
       }
       if (parser->success) {
         { // Match literal "function"
@@ -5120,7 +5215,7 @@ static bool parse_functiondef(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -5139,7 +5234,8 @@ static bool parse_functiondef(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -5163,7 +5259,7 @@ static bool parse_functiondef(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -6851,7 +6947,7 @@ static bool parse_namelist(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -6859,6 +6955,7 @@ static bool parse_namelist(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[30]); // "namelist"
+        parser->top += 1;
       }
       if (parser->success) {
         parse_Name(parser);
@@ -6912,7 +7009,7 @@ static bool parse_namelist(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -6931,7 +7028,8 @@ static bool parse_namelist(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -6955,7 +7053,7 @@ static bool parse_namelist(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -6988,7 +7086,7 @@ static bool parse_parlist(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -6996,6 +7094,7 @@ static bool parse_parlist(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[33]); // "params"
+        parser->top += 1;
       }
       if (parser->success) {
         {   // Choice
@@ -7098,21 +7197,23 @@ static bool parse_parlist(Parser *parser) {
               }
               if (parser->success) {
                 { // Capture Table (array-only)
-                  int initial_stack_size = lua_gettop(parser->L);
+                  int initial_stack_size = parser->top;
                   { // Constant Capture
                     // A constant capture matches the empty string and produces all given values
                     pgen_checkstack(parser, 1);
                     lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[42]); // "vararg"
+                    parser->top += 1;
                   }
 
                   if (parser->success) {
-                    int new_stack_size = lua_gettop(parser->L);
+                    int new_stack_size = parser->top;
                     int items_start = initial_stack_size + 1;
                     int array_count = new_stack_size - initial_stack_size;
 
                     pgen_checkstack(parser, 2); // table + one temporary during fill
                     lua_createtable(parser->L, array_count, 0);
-                    int table_idx = lua_gettop(parser->L);
+                    parser->top++;
+                    int table_idx = parser->top;
 
                     int array_idx = 1;
                     for (int i = items_start; i < table_idx; i++) {
@@ -7123,7 +7224,7 @@ static bool parse_parlist(Parser *parser) {
                     // Remove all items except table, move table to correct position
                     if (items_start <= new_stack_size) {
                       lua_replace(parser->L, items_start);
-                      lua_settop(parser->L, items_start);
+                      PGEN_SETTOP(parser, items_start);
                     }
                   }
                 }
@@ -7141,7 +7242,7 @@ static bool parse_parlist(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -7160,7 +7261,8 @@ static bool parse_parlist(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -7184,7 +7286,7 @@ static bool parse_parlist(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -7217,7 +7319,7 @@ static bool parse_prefixexp(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -7225,6 +7327,7 @@ static bool parse_prefixexp(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[35]); // "prefixexp"
+        parser->top += 1;
       }
       if (parser->success) {
         parse_prefixexp_inner(parser);
@@ -7235,7 +7338,7 @@ static bool parse_prefixexp(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -7254,7 +7357,8 @@ static bool parse_prefixexp(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -7278,7 +7382,7 @@ static bool parse_prefixexp(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -7367,7 +7471,7 @@ static bool parse_primary(Parser *parser) {
     if (!parser->success && !parser->throw_label) {
       parser->success = true;
       { // Capture Table
-        int initial_stack_size = lua_gettop(parser->L);
+        int initial_stack_size = parser->top;
         { // Sequence with 6 patterns
           REMEMBER_POSITION(parser, pos);
 
@@ -7375,6 +7479,7 @@ static bool parse_primary(Parser *parser) {
             // A constant capture matches the empty string and produces all given values
             pgen_checkstack(parser, 1);
             lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[34]); // "paren"
+            parser->top += 1;
           }
           if (parser->success) {
             { // Match single character "("
@@ -7423,7 +7528,7 @@ static bool parse_primary(Parser *parser) {
         }
 
         if (parser->success) {
-          int new_stack_size = lua_gettop(parser->L);
+          int new_stack_size = parser->top;
           int items_start = initial_stack_size + 1;
 
           // Count array items and named items separately
@@ -7442,7 +7547,8 @@ static bool parse_primary(Parser *parser) {
 
           pgen_checkstack(parser, 3); // table + two temporaries during fill
           lua_createtable(parser->L, array_count, named_count);
-          int table_idx = lua_gettop(parser->L);
+          parser->top++;
+          int table_idx = parser->top;
 
           int array_idx = 1;
           for (int i = items_start; i < table_idx; i++) {
@@ -7466,7 +7572,7 @@ static bool parse_primary(Parser *parser) {
           // Only needed if there were items to remove (items_start <= new_stack_size)
           if (items_start <= new_stack_size) {
             lua_replace(parser->L, items_start);
-            lua_settop(parser->L, items_start);
+            PGEN_SETTOP(parser, items_start);
           }
         }
       }
@@ -7501,7 +7607,7 @@ static bool parse_retstat(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 4 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -7509,6 +7615,7 @@ static bool parse_retstat(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[37]); // "return"
+        parser->top += 1;
       }
       if (parser->success) {
         { // Match literal "return"
@@ -7614,7 +7721,7 @@ static bool parse_retstat(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -7633,7 +7740,8 @@ static bool parse_retstat(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -7657,7 +7765,7 @@ static bool parse_retstat(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -7718,21 +7826,23 @@ static bool parse_simple_exp(Parser *parser) {
                       }
                       if (parser->success) {
                         { // Capture Table (array-only)
-                          int initial_stack_size = lua_gettop(parser->L);
+                          int initial_stack_size = parser->top;
                           { // Constant Capture
                             // A constant capture matches the empty string and produces all given values
                             pgen_checkstack(parser, 1);
                             lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[31]); // "nil"
+                            parser->top += 1;
                           }
 
                           if (parser->success) {
-                            int new_stack_size = lua_gettop(parser->L);
+                            int new_stack_size = parser->top;
                             int items_start = initial_stack_size + 1;
                             int array_count = new_stack_size - initial_stack_size;
 
                             pgen_checkstack(parser, 2); // table + one temporary during fill
                             lua_createtable(parser->L, array_count, 0);
-                            int table_idx = lua_gettop(parser->L);
+                            parser->top++;
+                            int table_idx = parser->top;
 
                             int array_idx = 1;
                             for (int i = items_start; i < table_idx; i++) {
@@ -7743,7 +7853,7 @@ static bool parse_simple_exp(Parser *parser) {
                             // Remove all items except table, move table to correct position
                             if (items_start <= new_stack_size) {
                               lua_replace(parser->L, items_start);
-                              lua_settop(parser->L, items_start);
+                              PGEN_SETTOP(parser, items_start);
                             }
                           }
                         }
@@ -7776,21 +7886,24 @@ static bool parse_simple_exp(Parser *parser) {
                         }
                         if (parser->success) {
                           { // Capture Table (array-only)
-                            int initial_stack_size = lua_gettop(parser->L);
+                            int initial_stack_size = parser->top;
                             { // Constant Capture
                               // A constant capture matches the empty string and produces all given values
                               pgen_checkstack(parser, 2);
-                              lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[5]); // "boolean"  lua_pushnil(parser->L);
+                              lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[5]); // "boolean"
+                              lua_pushnil(parser->L);
+                              parser->top += 2;
                             }
 
                             if (parser->success) {
-                              int new_stack_size = lua_gettop(parser->L);
+                              int new_stack_size = parser->top;
                               int items_start = initial_stack_size + 1;
                               int array_count = new_stack_size - initial_stack_size;
 
                               pgen_checkstack(parser, 2); // table + one temporary during fill
                               lua_createtable(parser->L, array_count, 0);
-                              int table_idx = lua_gettop(parser->L);
+                              parser->top++;
+                              int table_idx = parser->top;
 
                               int array_idx = 1;
                               for (int i = items_start; i < table_idx; i++) {
@@ -7801,7 +7914,7 @@ static bool parse_simple_exp(Parser *parser) {
                               // Remove all items except table, move table to correct position
                               if (items_start <= new_stack_size) {
                                 lua_replace(parser->L, items_start);
-                                lua_settop(parser->L, items_start);
+                                PGEN_SETTOP(parser, items_start);
                               }
                             }
                           }
@@ -7836,21 +7949,24 @@ static bool parse_simple_exp(Parser *parser) {
                       }
                       if (parser->success) {
                         { // Capture Table (array-only)
-                          int initial_stack_size = lua_gettop(parser->L);
+                          int initial_stack_size = parser->top;
                           { // Constant Capture
                             // A constant capture matches the empty string and produces all given values
                             pgen_checkstack(parser, 2);
-                            lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[5]); // "boolean"  lua_pushnil(parser->L);
+                            lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[5]); // "boolean"
+                            lua_pushnil(parser->L);
+                            parser->top += 2;
                           }
 
                           if (parser->success) {
-                            int new_stack_size = lua_gettop(parser->L);
+                            int new_stack_size = parser->top;
                             int items_start = initial_stack_size + 1;
                             int array_count = new_stack_size - initial_stack_size;
 
                             pgen_checkstack(parser, 2); // table + one temporary during fill
                             lua_createtable(parser->L, array_count, 0);
-                            int table_idx = lua_gettop(parser->L);
+                            parser->top++;
+                            int table_idx = parser->top;
 
                             int array_idx = 1;
                             for (int i = items_start; i < table_idx; i++) {
@@ -7861,7 +7977,7 @@ static bool parse_simple_exp(Parser *parser) {
                             // Remove all items except table, move table to correct position
                             if (items_start <= new_stack_size) {
                               lua_replace(parser->L, items_start);
-                              lua_settop(parser->L, items_start);
+                              PGEN_SETTOP(parser, items_start);
                             }
                           }
                         }
@@ -7910,21 +8026,23 @@ static bool parse_simple_exp(Parser *parser) {
                 }
                 if (parser->success) {
                   { // Capture Table (array-only)
-                    int initial_stack_size = lua_gettop(parser->L);
+                    int initial_stack_size = parser->top;
                     { // Constant Capture
                       // A constant capture matches the empty string and produces all given values
                       pgen_checkstack(parser, 1);
                       lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[42]); // "vararg"
+                      parser->top += 1;
                     }
 
                     if (parser->success) {
-                      int new_stack_size = lua_gettop(parser->L);
+                      int new_stack_size = parser->top;
                       int items_start = initial_stack_size + 1;
                       int array_count = new_stack_size - initial_stack_size;
 
                       pgen_checkstack(parser, 2); // table + one temporary during fill
                       lua_createtable(parser->L, array_count, 0);
-                      int table_idx = lua_gettop(parser->L);
+                      parser->top++;
+                      int table_idx = parser->top;
 
                       int array_idx = 1;
                       for (int i = items_start; i < table_idx; i++) {
@@ -7935,7 +8053,7 @@ static bool parse_simple_exp(Parser *parser) {
                       // Remove all items except table, move table to correct position
                       if (items_start <= new_stack_size) {
                         lua_replace(parser->L, items_start);
-                        lua_settop(parser->L, items_start);
+                        PGEN_SETTOP(parser, items_start);
                       }
                     }
                   }
@@ -7972,7 +8090,7 @@ static bool parse_simple_exp(Parser *parser) {
     if (!parser->success && !parser->throw_label) {
       parser->success = true;
       { // Capture Table
-        int initial_stack_size = lua_gettop(parser->L);
+        int initial_stack_size = parser->top;
         { // Sequence with 4 patterns
           REMEMBER_POSITION(parser, pos);
 
@@ -7980,6 +8098,7 @@ static bool parse_simple_exp(Parser *parser) {
             // A constant capture matches the empty string and produces all given values
             pgen_checkstack(parser, 1);
             lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[40]); // "unop"
+            parser->top += 1;
           }
           if (parser->success) {
             parse_unop(parser);
@@ -7996,7 +8115,7 @@ static bool parse_simple_exp(Parser *parser) {
         }
 
         if (parser->success) {
-          int new_stack_size = lua_gettop(parser->L);
+          int new_stack_size = parser->top;
           int items_start = initial_stack_size + 1;
 
           // Count array items and named items separately
@@ -8015,7 +8134,8 @@ static bool parse_simple_exp(Parser *parser) {
 
           pgen_checkstack(parser, 3); // table + two temporaries during fill
           lua_createtable(parser->L, array_count, named_count);
-          int table_idx = lua_gettop(parser->L);
+          parser->top++;
+          int table_idx = parser->top;
 
           int array_idx = 1;
           for (int i = items_start; i < table_idx; i++) {
@@ -8039,7 +8159,7 @@ static bool parse_simple_exp(Parser *parser) {
           // Only needed if there were items to remove (items_start <= new_stack_size)
           if (items_start <= new_stack_size) {
             lua_replace(parser->L, items_start);
-            lua_settop(parser->L, items_start);
+            PGEN_SETTOP(parser, items_start);
           }
         }
       }
@@ -8111,21 +8231,23 @@ static bool parse_stat(Parser *parser) {
                                     }
                                     if (parser->success) {
                                       { // Capture Table (array-only)
-                                        int initial_stack_size = lua_gettop(parser->L);
+                                        int initial_stack_size = parser->top;
                                         { // Constant Capture
                                           // A constant capture matches the empty string and produces all given values
                                           pgen_checkstack(parser, 1);
                                           lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[9]); // "empty"
+                                          parser->top += 1;
                                         }
 
                                         if (parser->success) {
-                                          int new_stack_size = lua_gettop(parser->L);
+                                          int new_stack_size = parser->top;
                                           int items_start = initial_stack_size + 1;
                                           int array_count = new_stack_size - initial_stack_size;
 
                                           pgen_checkstack(parser, 2); // table + one temporary during fill
                                           lua_createtable(parser->L, array_count, 0);
-                                          int table_idx = lua_gettop(parser->L);
+                                          parser->top++;
+                                          int table_idx = parser->top;
 
                                           int array_idx = 1;
                                           for (int i = items_start; i < table_idx; i++) {
@@ -8136,7 +8258,7 @@ static bool parse_stat(Parser *parser) {
                                           // Remove all items except table, move table to correct position
                                           if (items_start <= new_stack_size) {
                                             lua_replace(parser->L, items_start);
-                                            lua_settop(parser->L, items_start);
+                                            PGEN_SETTOP(parser, items_start);
                                           }
                                         }
                                       }
@@ -8150,7 +8272,7 @@ static bool parse_stat(Parser *parser) {
                                   if (!parser->success && !parser->throw_label) {
                                     parser->success = true;
                                     { // Capture Table
-                                      int initial_stack_size = lua_gettop(parser->L);
+                                      int initial_stack_size = parser->top;
                                       { // Sequence with 6 patterns
                                         REMEMBER_POSITION(parser, pos);
 
@@ -8158,6 +8280,7 @@ static bool parse_stat(Parser *parser) {
                                           // A constant capture matches the empty string and produces all given values
                                           pgen_checkstack(parser, 1);
                                           lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[0]); // "assign"
+                                          parser->top += 1;
                                         }
                                         if (parser->success) {
                                           parse_varlist(parser);
@@ -8193,7 +8316,7 @@ static bool parse_stat(Parser *parser) {
                                       }
 
                                       if (parser->success) {
-                                        int new_stack_size = lua_gettop(parser->L);
+                                        int new_stack_size = parser->top;
                                         int items_start = initial_stack_size + 1;
 
                                         // Count array items and named items separately
@@ -8212,7 +8335,8 @@ static bool parse_stat(Parser *parser) {
 
                                         pgen_checkstack(parser, 3); // table + two temporaries during fill
                                         lua_createtable(parser->L, array_count, named_count);
-                                        int table_idx = lua_gettop(parser->L);
+                                        parser->top++;
+                                        int table_idx = parser->top;
 
                                         int array_idx = 1;
                                         for (int i = items_start; i < table_idx; i++) {
@@ -8236,7 +8360,7 @@ static bool parse_stat(Parser *parser) {
                                         // Only needed if there were items to remove (items_start <= new_stack_size)
                                         if (items_start <= new_stack_size) {
                                           lua_replace(parser->L, items_start);
-                                          lua_settop(parser->L, items_start);
+                                          PGEN_SETTOP(parser, items_start);
                                         }
                                       }
                                     }
@@ -8254,7 +8378,7 @@ static bool parse_stat(Parser *parser) {
                               if (!parser->success && !parser->throw_label) {
                                 parser->success = true;
                                 { // Capture Table
-                                  int initial_stack_size = lua_gettop(parser->L);
+                                  int initial_stack_size = parser->top;
                                   { // Sequence with 6 patterns
                                     REMEMBER_POSITION(parser, pos);
 
@@ -8262,6 +8386,7 @@ static bool parse_stat(Parser *parser) {
                                       // A constant capture matches the empty string and produces all given values
                                       pgen_checkstack(parser, 1);
                                       lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[24]); // "label"
+                                      parser->top += 1;
                                     }
                                     if (parser->success) {
                                       { // Match literal "::"
@@ -8312,7 +8437,7 @@ static bool parse_stat(Parser *parser) {
                                   }
 
                                   if (parser->success) {
-                                    int new_stack_size = lua_gettop(parser->L);
+                                    int new_stack_size = parser->top;
                                     int items_start = initial_stack_size + 1;
 
                                     // Count array items and named items separately
@@ -8331,7 +8456,8 @@ static bool parse_stat(Parser *parser) {
 
                                     pgen_checkstack(parser, 3); // table + two temporaries during fill
                                     lua_createtable(parser->L, array_count, named_count);
-                                    int table_idx = lua_gettop(parser->L);
+                                    parser->top++;
+                                    int table_idx = parser->top;
 
                                     int array_idx = 1;
                                     for (int i = items_start; i < table_idx; i++) {
@@ -8355,7 +8481,7 @@ static bool parse_stat(Parser *parser) {
                                     // Only needed if there were items to remove (items_start <= new_stack_size)
                                     if (items_start <= new_stack_size) {
                                       lua_replace(parser->L, items_start);
-                                      lua_settop(parser->L, items_start);
+                                      PGEN_SETTOP(parser, items_start);
                                     }
                                   }
                                 }
@@ -8366,7 +8492,7 @@ static bool parse_stat(Parser *parser) {
                             if (!parser->success && !parser->throw_label) {
                               parser->success = true;
                               { // Capture Table (array-only)
-                                int initial_stack_size = lua_gettop(parser->L);
+                                int initial_stack_size = parser->top;
                                 { // Sequence with 2 patterns
                                   REMEMBER_POSITION(parser, pos);
 
@@ -8374,6 +8500,7 @@ static bool parse_stat(Parser *parser) {
                                     // A constant capture matches the empty string and produces all given values
                                     pgen_checkstack(parser, 1);
                                     lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[6]); // "break"
+                                    parser->top += 1;
                                   }
                                   if (parser->success) {
                                     { // Match literal "break"
@@ -8398,13 +8525,14 @@ static bool parse_stat(Parser *parser) {
                                 }
 
                                 if (parser->success) {
-                                  int new_stack_size = lua_gettop(parser->L);
+                                  int new_stack_size = parser->top;
                                   int items_start = initial_stack_size + 1;
                                   int array_count = new_stack_size - initial_stack_size;
 
                                   pgen_checkstack(parser, 2); // table + one temporary during fill
                                   lua_createtable(parser->L, array_count, 0);
-                                  int table_idx = lua_gettop(parser->L);
+                                  parser->top++;
+                                  int table_idx = parser->top;
 
                                   int array_idx = 1;
                                   for (int i = items_start; i < table_idx; i++) {
@@ -8415,7 +8543,7 @@ static bool parse_stat(Parser *parser) {
                                   // Remove all items except table, move table to correct position
                                   if (items_start <= new_stack_size) {
                                     lua_replace(parser->L, items_start);
-                                    lua_settop(parser->L, items_start);
+                                    PGEN_SETTOP(parser, items_start);
                                   }
                                 }
                               }
@@ -8426,7 +8554,7 @@ static bool parse_stat(Parser *parser) {
                           if (!parser->success && !parser->throw_label) {
                             parser->success = true;
                             { // Capture Table
-                              int initial_stack_size = lua_gettop(parser->L);
+                              int initial_stack_size = parser->top;
                               { // Sequence with 4 patterns
                                 REMEMBER_POSITION(parser, pos);
 
@@ -8434,6 +8562,7 @@ static bool parse_stat(Parser *parser) {
                                   // A constant capture matches the empty string and produces all given values
                                   pgen_checkstack(parser, 1);
                                   lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[20]); // "goto"
+                                  parser->top += 1;
                                 }
                                 if (parser->success) {
                                   { // Match literal "goto"
@@ -8464,7 +8593,7 @@ static bool parse_stat(Parser *parser) {
                               }
 
                               if (parser->success) {
-                                int new_stack_size = lua_gettop(parser->L);
+                                int new_stack_size = parser->top;
                                 int items_start = initial_stack_size + 1;
 
                                 // Count array items and named items separately
@@ -8483,7 +8612,8 @@ static bool parse_stat(Parser *parser) {
 
                                 pgen_checkstack(parser, 3); // table + two temporaries during fill
                                 lua_createtable(parser->L, array_count, named_count);
-                                int table_idx = lua_gettop(parser->L);
+                                parser->top++;
+                                int table_idx = parser->top;
 
                                 int array_idx = 1;
                                 for (int i = items_start; i < table_idx; i++) {
@@ -8507,7 +8637,7 @@ static bool parse_stat(Parser *parser) {
                                 // Only needed if there were items to remove (items_start <= new_stack_size)
                                 if (items_start <= new_stack_size) {
                                   lua_replace(parser->L, items_start);
-                                  lua_settop(parser->L, items_start);
+                                  PGEN_SETTOP(parser, items_start);
                                 }
                               }
                             }
@@ -8518,7 +8648,7 @@ static bool parse_stat(Parser *parser) {
                         if (!parser->success && !parser->throw_label) {
                           parser->success = true;
                           { // Capture Table
-                            int initial_stack_size = lua_gettop(parser->L);
+                            int initial_stack_size = parser->top;
                             { // Sequence with 4 patterns
                               REMEMBER_POSITION(parser, pos);
 
@@ -8526,6 +8656,7 @@ static bool parse_stat(Parser *parser) {
                                 // A constant capture matches the empty string and produces all given values
                                 pgen_checkstack(parser, 1);
                                 lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[8]); // "do"
+                                parser->top += 1;
                               }
                               if (parser->success) {
                                 { // Match literal "do"
@@ -8570,7 +8701,7 @@ static bool parse_stat(Parser *parser) {
                             }
 
                             if (parser->success) {
-                              int new_stack_size = lua_gettop(parser->L);
+                              int new_stack_size = parser->top;
                               int items_start = initial_stack_size + 1;
 
                               // Count array items and named items separately
@@ -8589,7 +8720,8 @@ static bool parse_stat(Parser *parser) {
 
                               pgen_checkstack(parser, 3); // table + two temporaries during fill
                               lua_createtable(parser->L, array_count, named_count);
-                              int table_idx = lua_gettop(parser->L);
+                              parser->top++;
+                              int table_idx = parser->top;
 
                               int array_idx = 1;
                               for (int i = items_start; i < table_idx; i++) {
@@ -8613,7 +8745,7 @@ static bool parse_stat(Parser *parser) {
                               // Only needed if there were items to remove (items_start <= new_stack_size)
                               if (items_start <= new_stack_size) {
                                 lua_replace(parser->L, items_start);
-                                lua_settop(parser->L, items_start);
+                                PGEN_SETTOP(parser, items_start);
                               }
                             }
                           }
@@ -8624,7 +8756,7 @@ static bool parse_stat(Parser *parser) {
                       if (!parser->success && !parser->throw_label) {
                         parser->success = true;
                         { // Capture Table
-                          int initial_stack_size = lua_gettop(parser->L);
+                          int initial_stack_size = parser->top;
                           { // Sequence with 8 patterns
                             REMEMBER_POSITION(parser, pos);
 
@@ -8632,6 +8764,7 @@ static bool parse_stat(Parser *parser) {
                               // A constant capture matches the empty string and produces all given values
                               pgen_checkstack(parser, 1);
                               lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[44]); // "while"
+                              parser->top += 1;
                             }
                             if (parser->success) {
                               { // Match literal "while"
@@ -8702,7 +8835,7 @@ static bool parse_stat(Parser *parser) {
                           }
 
                           if (parser->success) {
-                            int new_stack_size = lua_gettop(parser->L);
+                            int new_stack_size = parser->top;
                             int items_start = initial_stack_size + 1;
 
                             // Count array items and named items separately
@@ -8721,7 +8854,8 @@ static bool parse_stat(Parser *parser) {
 
                             pgen_checkstack(parser, 3); // table + two temporaries during fill
                             lua_createtable(parser->L, array_count, named_count);
-                            int table_idx = lua_gettop(parser->L);
+                            parser->top++;
+                            int table_idx = parser->top;
 
                             int array_idx = 1;
                             for (int i = items_start; i < table_idx; i++) {
@@ -8745,7 +8879,7 @@ static bool parse_stat(Parser *parser) {
                             // Only needed if there were items to remove (items_start <= new_stack_size)
                             if (items_start <= new_stack_size) {
                               lua_replace(parser->L, items_start);
-                              lua_settop(parser->L, items_start);
+                              PGEN_SETTOP(parser, items_start);
                             }
                           }
                         }
@@ -8756,7 +8890,7 @@ static bool parse_stat(Parser *parser) {
                     if (!parser->success && !parser->throw_label) {
                       parser->success = true;
                       { // Capture Table
-                        int initial_stack_size = lua_gettop(parser->L);
+                        int initial_stack_size = parser->top;
                         { // Sequence with 6 patterns
                           REMEMBER_POSITION(parser, pos);
 
@@ -8764,6 +8898,7 @@ static bool parse_stat(Parser *parser) {
                             // A constant capture matches the empty string and produces all given values
                             pgen_checkstack(parser, 1);
                             lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[36]); // "repeat"
+                            parser->top += 1;
                           }
                           if (parser->success) {
                             { // Match literal "repeat"
@@ -8814,7 +8949,7 @@ static bool parse_stat(Parser *parser) {
                         }
 
                         if (parser->success) {
-                          int new_stack_size = lua_gettop(parser->L);
+                          int new_stack_size = parser->top;
                           int items_start = initial_stack_size + 1;
 
                           // Count array items and named items separately
@@ -8833,7 +8968,8 @@ static bool parse_stat(Parser *parser) {
 
                           pgen_checkstack(parser, 3); // table + two temporaries during fill
                           lua_createtable(parser->L, array_count, named_count);
-                          int table_idx = lua_gettop(parser->L);
+                          parser->top++;
+                          int table_idx = parser->top;
 
                           int array_idx = 1;
                           for (int i = items_start; i < table_idx; i++) {
@@ -8857,7 +8993,7 @@ static bool parse_stat(Parser *parser) {
                           // Only needed if there were items to remove (items_start <= new_stack_size)
                           if (items_start <= new_stack_size) {
                             lua_replace(parser->L, items_start);
-                            lua_settop(parser->L, items_start);
+                            PGEN_SETTOP(parser, items_start);
                           }
                         }
                       }
@@ -8868,7 +9004,7 @@ static bool parse_stat(Parser *parser) {
                   if (!parser->success && !parser->throw_label) {
                     parser->success = true;
                     { // Capture Table
-                      int initial_stack_size = lua_gettop(parser->L);
+                      int initial_stack_size = parser->top;
                       { // Sequence with 10 patterns
                         REMEMBER_POSITION(parser, pos);
 
@@ -8876,6 +9012,7 @@ static bool parse_stat(Parser *parser) {
                           // A constant capture matches the empty string and produces all given values
                           pgen_checkstack(parser, 1);
                           lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[21]); // "if"
+                          parser->top += 1;
                         }
                         if (parser->success) {
                           { // Match literal "if"
@@ -9058,7 +9195,7 @@ static bool parse_stat(Parser *parser) {
                       }
 
                       if (parser->success) {
-                        int new_stack_size = lua_gettop(parser->L);
+                        int new_stack_size = parser->top;
                         int items_start = initial_stack_size + 1;
 
                         // Count array items and named items separately
@@ -9077,7 +9214,8 @@ static bool parse_stat(Parser *parser) {
 
                         pgen_checkstack(parser, 3); // table + two temporaries during fill
                         lua_createtable(parser->L, array_count, named_count);
-                        int table_idx = lua_gettop(parser->L);
+                        parser->top++;
+                        int table_idx = parser->top;
 
                         int array_idx = 1;
                         for (int i = items_start; i < table_idx; i++) {
@@ -9101,7 +9239,7 @@ static bool parse_stat(Parser *parser) {
                         // Only needed if there were items to remove (items_start <= new_stack_size)
                         if (items_start <= new_stack_size) {
                           lua_replace(parser->L, items_start);
-                          lua_settop(parser->L, items_start);
+                          PGEN_SETTOP(parser, items_start);
                         }
                       }
                     }
@@ -9112,7 +9250,7 @@ static bool parse_stat(Parser *parser) {
                 if (!parser->success && !parser->throw_label) {
                   parser->success = true;
                   { // Capture Table
-                    int initial_stack_size = lua_gettop(parser->L);
+                    int initial_stack_size = parser->top;
                     { // Sequence with 16 patterns
                       REMEMBER_POSITION(parser, pos);
 
@@ -9120,6 +9258,7 @@ static bool parse_stat(Parser *parser) {
                         // A constant capture matches the empty string and produces all given values
                         pgen_checkstack(parser, 1);
                         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[16]); // "for_num"
+                        parser->top += 1;
                       }
                       if (parser->success) {
                         { // Match literal "for"
@@ -9287,7 +9426,7 @@ static bool parse_stat(Parser *parser) {
                     }
 
                     if (parser->success) {
-                      int new_stack_size = lua_gettop(parser->L);
+                      int new_stack_size = parser->top;
                       int items_start = initial_stack_size + 1;
 
                       // Count array items and named items separately
@@ -9306,7 +9445,8 @@ static bool parse_stat(Parser *parser) {
 
                       pgen_checkstack(parser, 3); // table + two temporaries during fill
                       lua_createtable(parser->L, array_count, named_count);
-                      int table_idx = lua_gettop(parser->L);
+                      parser->top++;
+                      int table_idx = parser->top;
 
                       int array_idx = 1;
                       for (int i = items_start; i < table_idx; i++) {
@@ -9330,7 +9470,7 @@ static bool parse_stat(Parser *parser) {
                       // Only needed if there were items to remove (items_start <= new_stack_size)
                       if (items_start <= new_stack_size) {
                         lua_replace(parser->L, items_start);
-                        lua_settop(parser->L, items_start);
+                        PGEN_SETTOP(parser, items_start);
                       }
                     }
                   }
@@ -9341,7 +9481,7 @@ static bool parse_stat(Parser *parser) {
               if (!parser->success && !parser->throw_label) {
                 parser->success = true;
                 { // Capture Table
-                  int initial_stack_size = lua_gettop(parser->L);
+                  int initial_stack_size = parser->top;
                   { // Sequence with 12 patterns
                     REMEMBER_POSITION(parser, pos);
 
@@ -9349,6 +9489,7 @@ static bool parse_stat(Parser *parser) {
                       // A constant capture matches the empty string and produces all given values
                       pgen_checkstack(parser, 1);
                       lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[15]); // "for_in"
+                      parser->top += 1;
                     }
                     if (parser->success) {
                       { // Match literal "for"
@@ -9445,7 +9586,7 @@ static bool parse_stat(Parser *parser) {
                   }
 
                   if (parser->success) {
-                    int new_stack_size = lua_gettop(parser->L);
+                    int new_stack_size = parser->top;
                     int items_start = initial_stack_size + 1;
 
                     // Count array items and named items separately
@@ -9464,7 +9605,8 @@ static bool parse_stat(Parser *parser) {
 
                     pgen_checkstack(parser, 3); // table + two temporaries during fill
                     lua_createtable(parser->L, array_count, named_count);
-                    int table_idx = lua_gettop(parser->L);
+                    parser->top++;
+                    int table_idx = parser->top;
 
                     int array_idx = 1;
                     for (int i = items_start; i < table_idx; i++) {
@@ -9488,7 +9630,7 @@ static bool parse_stat(Parser *parser) {
                     // Only needed if there were items to remove (items_start <= new_stack_size)
                     if (items_start <= new_stack_size) {
                       lua_replace(parser->L, items_start);
-                      lua_settop(parser->L, items_start);
+                      PGEN_SETTOP(parser, items_start);
                     }
                   }
                 }
@@ -9499,7 +9641,7 @@ static bool parse_stat(Parser *parser) {
             if (!parser->success && !parser->throw_label) {
               parser->success = true;
               { // Capture Table
-                int initial_stack_size = lua_gettop(parser->L);
+                int initial_stack_size = parser->top;
                 { // Sequence with 5 patterns
                   REMEMBER_POSITION(parser, pos);
 
@@ -9507,6 +9649,7 @@ static bool parse_stat(Parser *parser) {
                     // A constant capture matches the empty string and produces all given values
                     pgen_checkstack(parser, 1);
                     lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[19]); // "function"
+                    parser->top += 1;
                   }
                   if (parser->success) {
                     { // Match literal "function"
@@ -9540,7 +9683,7 @@ static bool parse_stat(Parser *parser) {
                 }
 
                 if (parser->success) {
-                  int new_stack_size = lua_gettop(parser->L);
+                  int new_stack_size = parser->top;
                   int items_start = initial_stack_size + 1;
 
                   // Count array items and named items separately
@@ -9559,7 +9702,8 @@ static bool parse_stat(Parser *parser) {
 
                   pgen_checkstack(parser, 3); // table + two temporaries during fill
                   lua_createtable(parser->L, array_count, named_count);
-                  int table_idx = lua_gettop(parser->L);
+                  parser->top++;
+                  int table_idx = parser->top;
 
                   int array_idx = 1;
                   for (int i = items_start; i < table_idx; i++) {
@@ -9583,7 +9727,7 @@ static bool parse_stat(Parser *parser) {
                   // Only needed if there were items to remove (items_start <= new_stack_size)
                   if (items_start <= new_stack_size) {
                     lua_replace(parser->L, items_start);
-                    lua_settop(parser->L, items_start);
+                    PGEN_SETTOP(parser, items_start);
                   }
                 }
               }
@@ -9594,7 +9738,7 @@ static bool parse_stat(Parser *parser) {
           if (!parser->success && !parser->throw_label) {
             parser->success = true;
             { // Capture Table
-              int initial_stack_size = lua_gettop(parser->L);
+              int initial_stack_size = parser->top;
               { // Sequence with 7 patterns
                 REMEMBER_POSITION(parser, pos);
 
@@ -9602,6 +9746,7 @@ static bool parse_stat(Parser *parser) {
                   // A constant capture matches the empty string and produces all given values
                   pgen_checkstack(parser, 1);
                   lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[26]); // "local_function"
+                  parser->top += 1;
                 }
                 if (parser->success) {
                   { // Match literal "local"
@@ -9655,7 +9800,7 @@ static bool parse_stat(Parser *parser) {
               }
 
               if (parser->success) {
-                int new_stack_size = lua_gettop(parser->L);
+                int new_stack_size = parser->top;
                 int items_start = initial_stack_size + 1;
 
                 // Count array items and named items separately
@@ -9674,7 +9819,8 @@ static bool parse_stat(Parser *parser) {
 
                 pgen_checkstack(parser, 3); // table + two temporaries during fill
                 lua_createtable(parser->L, array_count, named_count);
-                int table_idx = lua_gettop(parser->L);
+                parser->top++;
+                int table_idx = parser->top;
 
                 int array_idx = 1;
                 for (int i = items_start; i < table_idx; i++) {
@@ -9698,7 +9844,7 @@ static bool parse_stat(Parser *parser) {
                 // Only needed if there were items to remove (items_start <= new_stack_size)
                 if (items_start <= new_stack_size) {
                   lua_replace(parser->L, items_start);
-                  lua_settop(parser->L, items_start);
+                  PGEN_SETTOP(parser, items_start);
                 }
               }
             }
@@ -9709,7 +9855,7 @@ static bool parse_stat(Parser *parser) {
         if (!parser->success && !parser->throw_label) {
           parser->success = true;
           { // Capture Table
-            int initial_stack_size = lua_gettop(parser->L);
+            int initial_stack_size = parser->top;
             { // Sequence with 5 patterns
               REMEMBER_POSITION(parser, pos);
 
@@ -9717,6 +9863,7 @@ static bool parse_stat(Parser *parser) {
                 // A constant capture matches the empty string and produces all given values
                 pgen_checkstack(parser, 1);
                 lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[25]); // "local"
+                parser->top += 1;
               }
               if (parser->success) {
                 { // Match literal "local"
@@ -9800,7 +9947,7 @@ static bool parse_stat(Parser *parser) {
             }
 
             if (parser->success) {
-              int new_stack_size = lua_gettop(parser->L);
+              int new_stack_size = parser->top;
               int items_start = initial_stack_size + 1;
 
               // Count array items and named items separately
@@ -9819,7 +9966,8 @@ static bool parse_stat(Parser *parser) {
 
               pgen_checkstack(parser, 3); // table + two temporaries during fill
               lua_createtable(parser->L, array_count, named_count);
-              int table_idx = lua_gettop(parser->L);
+              parser->top++;
+              int table_idx = parser->top;
 
               int array_idx = 1;
               for (int i = items_start; i < table_idx; i++) {
@@ -9843,7 +9991,7 @@ static bool parse_stat(Parser *parser) {
               // Only needed if there were items to remove (items_start <= new_stack_size)
               if (items_start <= new_stack_size) {
                 lua_replace(parser->L, items_start);
-                lua_settop(parser->L, items_start);
+                PGEN_SETTOP(parser, items_start);
               }
             }
           }
@@ -9923,7 +10071,7 @@ static bool parse_tableconstructor(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 6 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -9931,6 +10079,7 @@ static bool parse_tableconstructor(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[39]); // "table"
+        parser->top += 1;
       }
       if (parser->success) {
         { // Match single character "{"
@@ -10000,7 +10149,7 @@ static bool parse_tableconstructor(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -10019,7 +10168,8 @@ static bool parse_tableconstructor(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -10043,7 +10193,7 @@ static bool parse_tableconstructor(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -10171,6 +10321,7 @@ static bool parse_unop(Parser *parser) {
       size_t capture_length = parser->pos - start_pos;
       pgen_checkstack(parser, 1);
       lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
+      parser->top++;
     }
   }
 
@@ -10202,7 +10353,7 @@ static bool parse_var(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 2 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -10210,6 +10361,7 @@ static bool parse_var(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[41]); // "var"
+        parser->top += 1;
       }
       if (parser->success) {
         parse_prefixexp_inner(parser);
@@ -10220,7 +10372,7 @@ static bool parse_var(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -10239,7 +10391,8 @@ static bool parse_var(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -10263,7 +10416,7 @@ static bool parse_var(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -10297,7 +10450,7 @@ static bool parse_var_suffix(Parser *parser) {
 
   {   // Choice
     { // Capture Table
-      int initial_stack_size = lua_gettop(parser->L);
+      int initial_stack_size = parser->top;
       { // Sequence with 7 patterns
         REMEMBER_POSITION(parser, pos);
 
@@ -10305,6 +10458,7 @@ static bool parse_var_suffix(Parser *parser) {
           // A constant capture matches the empty string and produces all given values
           pgen_checkstack(parser, 1);
           lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[22]); // "index"
+          parser->top += 1;
         }
         if (parser->success) {
           parse_ws(parser);
@@ -10356,7 +10510,7 @@ static bool parse_var_suffix(Parser *parser) {
       }
 
       if (parser->success) {
-        int new_stack_size = lua_gettop(parser->L);
+        int new_stack_size = parser->top;
         int items_start = initial_stack_size + 1;
 
         // Count array items and named items separately
@@ -10375,7 +10529,8 @@ static bool parse_var_suffix(Parser *parser) {
 
         pgen_checkstack(parser, 3); // table + two temporaries during fill
         lua_createtable(parser->L, array_count, named_count);
-        int table_idx = lua_gettop(parser->L);
+        parser->top++;
+        int table_idx = parser->top;
 
         int array_idx = 1;
         for (int i = items_start; i < table_idx; i++) {
@@ -10399,7 +10554,7 @@ static bool parse_var_suffix(Parser *parser) {
         // Only needed if there were items to remove (items_start <= new_stack_size)
         if (items_start <= new_stack_size) {
           lua_replace(parser->L, items_start);
-          lua_settop(parser->L, items_start);
+          PGEN_SETTOP(parser, items_start);
         }
       }
     }
@@ -10408,7 +10563,7 @@ static bool parse_var_suffix(Parser *parser) {
     if (!parser->success && !parser->throw_label) {
       parser->success = true;
       { // Capture Table
-        int initial_stack_size = lua_gettop(parser->L);
+        int initial_stack_size = parser->top;
         { // Sequence with 5 patterns
           REMEMBER_POSITION(parser, pos);
 
@@ -10416,6 +10571,7 @@ static bool parse_var_suffix(Parser *parser) {
             // A constant capture matches the empty string and produces all given values
             pgen_checkstack(parser, 1);
             lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[13]); // "field"
+            parser->top += 1;
           }
           if (parser->success) {
             parse_ws(parser);
@@ -10448,7 +10604,7 @@ static bool parse_var_suffix(Parser *parser) {
         }
 
         if (parser->success) {
-          int new_stack_size = lua_gettop(parser->L);
+          int new_stack_size = parser->top;
           int items_start = initial_stack_size + 1;
 
           // Count array items and named items separately
@@ -10467,7 +10623,8 @@ static bool parse_var_suffix(Parser *parser) {
 
           pgen_checkstack(parser, 3); // table + two temporaries during fill
           lua_createtable(parser->L, array_count, named_count);
-          int table_idx = lua_gettop(parser->L);
+          parser->top++;
+          int table_idx = parser->top;
 
           int array_idx = 1;
           for (int i = items_start; i < table_idx; i++) {
@@ -10491,7 +10648,7 @@ static bool parse_var_suffix(Parser *parser) {
           // Only needed if there were items to remove (items_start <= new_stack_size)
           if (items_start <= new_stack_size) {
             lua_replace(parser->L, items_start);
-            lua_settop(parser->L, items_start);
+            PGEN_SETTOP(parser, items_start);
           }
         }
       }
@@ -10526,7 +10683,7 @@ static bool parse_varlist(Parser *parser) {
 #endif
 
   { // Capture Table
-    int initial_stack_size = lua_gettop(parser->L);
+    int initial_stack_size = parser->top;
     { // Sequence with 3 patterns
       REMEMBER_POSITION(parser, pos);
 
@@ -10534,6 +10691,7 @@ static bool parse_varlist(Parser *parser) {
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
         lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[43]); // "varlist"
+        parser->top += 1;
       }
       if (parser->success) {
         parse_var(parser);
@@ -10587,7 +10745,7 @@ static bool parse_varlist(Parser *parser) {
     }
 
     if (parser->success) {
-      int new_stack_size = lua_gettop(parser->L);
+      int new_stack_size = parser->top;
       int items_start = initial_stack_size + 1;
 
       // Count array items and named items separately
@@ -10606,7 +10764,8 @@ static bool parse_varlist(Parser *parser) {
 
       pgen_checkstack(parser, 3); // table + two temporaries during fill
       lua_createtable(parser->L, array_count, named_count);
-      int table_idx = lua_gettop(parser->L);
+      parser->top++;
+      int table_idx = parser->top;
 
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
@@ -10630,7 +10789,7 @@ static bool parse_varlist(Parser *parser) {
       // Only needed if there were items to remove (items_start <= new_stack_size)
       if (items_start <= new_stack_size) {
         lua_replace(parser->L, items_start);
-        lua_settop(parser->L, items_start);
+        PGEN_SETTOP(parser, items_start);
       }
     }
   }
@@ -10739,6 +10898,8 @@ static Parser *lua_parser_init(const char *input, lua_State *L) {
   parser->throw_label = NULL;
   parser->throw_pos = 0;
   parser->furthest_fail = 0;
+  parser->top = lua_gettop(L);
+  parser->stack_claimed = parser->top;
   parser->L = L;
   return parser;
 }
@@ -10778,6 +10939,7 @@ static int l_lua_parser_parse(lua_State *L) {
   parse_chunk(parser);
 
   int final_stack_size = lua_gettop(parser->L);
+  assert(parser->top == final_stack_size && "Shadow stack top out of sync.");
 
   // Return nil and error info on failure
   if (!parser->success) {
