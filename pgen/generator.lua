@@ -70,6 +70,38 @@ local function collect_cg_names(grammar)
   return result
 end
 
+-- Collect all unique string values from Cc nodes in a grammar. These are
+-- interned into the Lua registry once at module load so matching pushes them
+-- with lua_rawgeti instead of re-interning via lua_pushlstring every time.
+-- Returns a sorted array of strings and a string -> 0-based index map.
+local function collect_constant_strings(grammar)
+  local visitor = require("pgen.visitor")
+  local seen = {}
+  visitor.visit_grammar(grammar, function(node)
+    if node.type == types.Cc then
+      local values = node.value
+      for i = 1, values.count do
+        if type(values[i]) == "string" then
+          seen[values[i]] = true
+        end
+      end
+    end
+  end)
+
+  local pool = {}
+  for str in pairs(seen) do
+    table.insert(pool, str)
+  end
+  table.sort(pool)
+
+  local index = {}
+  for i, str in ipairs(pool) do
+    index[str] = i - 1
+  end
+
+  return pool, index
+end
+
 -- Collect all Cmt nodes from a grammar, assigning each a unique ID
 -- Returns array of {id, code} for unique codes, and a new grammar with cmt_id fields set
 -- Identical code strings share the same ID (deduplication)
@@ -254,12 +286,16 @@ function generator.generate(grammar, parser_name, options)
     assert_valid_c_identifier(name)
   end
 
+  -- Collect Cc string constants for load-time interning
+  local const_pool, const_index = collect_constant_strings(transformed_grammar)
+  local has_consts = #const_pool > 0 or #cg_names > 0
+
   -- Generate the C code
   local c_chunks = {
-    generator.generate_parser_header(parser_name, cg_names, cmt_codes, indenters),
+    generator.generate_parser_header(parser_name, cg_names, cmt_codes, indenters, const_pool),
     generator.generate_forward_declarations(rules, start_rule),
-    generator.generate_rule_functions(rules, start_rule),
-    generator.generate_parser_main(parser_name, start_rule, cmt_codes, indenters),
+    generator.generate_rule_functions(rules, start_rule, const_index),
+    generator.generate_parser_main(parser_name, start_rule, cmt_codes, indenters, has_consts),
     -- Add compilation instructions as a comment
     template_code([[/*
 To compile as a Lua module:
@@ -315,18 +351,33 @@ local function generate_cg_sentinels(cg_names)
     table.insert(lines, "  NULL  // terminator")
     table.insert(lines, "};")
 
-    -- Generate validation function that checks the registry
+    -- Generate lookup functions that check the registry
     table.insert(lines, "")
-    table.insert(lines, [[// Check if a pointer is one of our Cg sentinels
-static bool is_cg_sentinel(void* ptr) {
+    table.insert(lines, template_code([[// Registry refs for the interned sentinel name strings, filled at module load
+static int __cg_name_refs[$COUNT$];
+
+// Return the sentinel's registry index, or -1 if not one of our Cg sentinels
+static int cg_sentinel_index(void* ptr) {
   for (int i = 0; __cg_sentinel_registry[i] != NULL; i++) {
-    if (ptr == __cg_sentinel_registry[i]) return true;
+    if (ptr == __cg_sentinel_registry[i]) return i;
   }
-  return false;
-}]])
+  return -1;
+}
+
+// Check if a pointer is one of our Cg sentinels
+static bool is_cg_sentinel(void* ptr) {
+  return cg_sentinel_index(ptr) >= 0;
+}]], {COUNT = #cg_names}))
   else
-    -- No Cg names - generate a stub function that always returns false
-    table.insert(lines, [[// No Cg sentinels defined - stub function
+    -- No Cg names - generate stubs
+    table.insert(lines, [[// No Cg sentinels defined - stubs
+static int __cg_name_refs[1];
+
+static int cg_sentinel_index(void* ptr) {
+  (void)ptr; // unused
+  return -1;
+}
+
 static bool is_cg_sentinel(void* ptr) {
   (void)ptr; // unused
   return false;
@@ -369,6 +420,46 @@ static void __cmt_init(lua_State *L) {]])
     luaL_error(L, "Failed to load Cmt callback $ID$: %s", lua_tostring(L, -1));
   }
   __cmt_refs[$ID$] = luaL_ref(L, LUA_REGISTRYINDEX);]], {ID = cmt.id}))
+  end
+
+  table.insert(lines, "}")
+  table.insert(lines, "")
+
+  return table.concat(lines, "\n")
+end
+
+-- Generate the constant string interning infrastructure: a registry ref
+-- array for Cc string values plus an init function that interns them (and
+-- the Cg sentinel names) once at module load
+local function generate_const_infrastructure(const_pool, cg_names)
+  if #const_pool == 0 and #cg_names == 0 then
+    return ""
+  end
+
+  local lines = {}
+  table.insert(lines, "// Interned constant strings (pushed once at module load)")
+
+  if #const_pool > 0 then
+    table.insert(lines, template_code("static int __const_refs[$COUNT$];", {COUNT = #const_pool}))
+  end
+
+  table.insert(lines, "")
+  table.insert(lines, "static void __const_init(lua_State *L) {")
+
+  for i, str in ipairs(const_pool) do
+    table.insert(lines, template_code([[  lua_pushlstring(L, $VALUE$, $LENGTH$);
+  __const_refs[$IDX$] = luaL_ref(L, LUA_REGISTRYINDEX);]], {
+      VALUE = escape_c_literal(str),
+      LENGTH = #str,
+      IDX = i - 1
+    }))
+  end
+
+  if #cg_names > 0 then
+    table.insert(lines, [[  for (int i = 0; __cg_sentinel_registry[i] != NULL; i++) {
+    lua_pushstring(L, (const char*)__cg_sentinel_registry[i]);
+    __cg_name_refs[i] = luaL_ref(L, LUA_REGISTRYINDEX);
+  }]])
   end
 
   table.insert(lines, "}")
@@ -518,7 +609,7 @@ static int pgen_ind_measure(Parser *parser, size_t *end_pos, int tab_width) {
 end
 
 -- Generate parser header
-function generator.generate_parser_header(parser_name, cg_names, cmt_codes, indenters)
+function generator.generate_parser_header(parser_name, cg_names, cmt_codes, indenters, const_pool)
   cg_names = cg_names or {}
   indenters = indenters or {}
 
@@ -644,7 +735,9 @@ static void dumpstack (lua_State *L) {
 }
 #endif
 
-]], header_vars) .. generate_cg_sentinels(cg_names) .. generate_cmt_infrastructure(cmt_codes or {})
+]], header_vars) .. generate_cg_sentinels(cg_names) ..
+    generate_const_infrastructure(const_pool or {}, cg_names) ..
+    generate_cmt_infrastructure(cmt_codes or {})
 end
 
 -- Generate forward declarations for all rules
@@ -659,13 +752,14 @@ function generator.generate_forward_declarations(rules, start_rule)
 end
 
 -- Generate functions for each rule
-function generator.generate_rule_functions(rules, start_rule)
+function generator.generate_rule_functions(rules, start_rule, const_index)
   local result = "// Rule functions\n"
   local analyze = require("pgen.analyze")
   local context = {
     analyze = analyze,
     rules = rules,
-    stateful_rules = analyze.stateful_rules(rules)
+    stateful_rules = analyze.stateful_rules(rules),
+    const_index = const_index or {}
   }
   for name, pattern in sorted_rules(rules, start_rule) do
     result = result .. generator.generate_rule_function(name, pattern, context)
@@ -738,7 +832,7 @@ function generator.generate_pattern_code(pattern, context)
   elseif t == types.Cp then -- Cp (capture position)
     return generator.generate_position_capture_code()
   elseif t == types.Cc then -- Cc (constant capture)
-    return generator.generate_constant_capture_code(pattern.value)
+    return generator.generate_constant_capture_code(pattern.value, context)
   elseif t == types.L then -- L (lookahead)
     return generator.generate_lookahead_code(pattern.value, context)
   elseif t == types.Cg then -- Cg (capture group)
@@ -1166,11 +1260,10 @@ function generator.generate_capture_table_code(body, array_only, context)
     int array_idx = 1;
     for (int i = items_start; i < table_idx; i++) {
       if (lua_islightuserdata(parser->L, i)) {
-        void* ptr = lua_touserdata(parser->L, i);
-        if (is_cg_sentinel(ptr)) {
-          // Named capture: sentinel at i, value at i+1
-          const char* name = (const char*)ptr;
-          lua_pushstring(parser->L, name);
+        int sentinel_idx = cg_sentinel_index(lua_touserdata(parser->L, i));
+        if (sentinel_idx >= 0) {
+          // Named capture: sentinel at i, value at i+1; name interned at load
+          lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cg_name_refs[sentinel_idx]);
           lua_pushvalue(parser->L, i + 1);
           lua_rawset(parser->L, table_idx);
           i++; // skip value
@@ -1204,13 +1297,21 @@ function generator.generate_position_capture_code()
 end
 
 -- Generate code for a constant capture (Cc)
-function generator.generate_constant_capture_code(values)
+function generator.generate_constant_capture_code(values, context)
   local push_code = ""
+  local const_index = context and context.const_index or {}
 
   for i=1, values.count do
     local value = values[i]
     local t = type(value)
-    if t == "string" then
+    if t == "string" and const_index[value] then
+      -- Interned at module load; comment shows the value (kept comment-safe)
+      push_code = push_code .. template_code([[
+  lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[$IDX$]); // $COMMENT$]], {
+        IDX = const_index[value],
+        COMMENT = escape_c_literal(value):gsub("%*/", "* /")
+      })
+    elseif t == "string" then
       push_code = push_code .. template_code([[
   lua_pushlstring(parser->L, $VALUE$, $LENGTH$);]], {
         VALUE = escape_c_literal(value),
@@ -1686,9 +1787,10 @@ static void $PARSER_NAME$_free(Parser *parser) {
 end
 
 -- Generate C code for the Lua module interface
-function generator.generate_lua_module_code(parser_name, start_rule, cmt_codes)
+function generator.generate_lua_module_code(parser_name, start_rule, cmt_codes, has_consts)
   cmt_codes = cmt_codes or {}
   local cmt_init = #cmt_codes > 0 and "__cmt_init(L);" or ""
+  local const_init = has_consts and "__const_init(L);" or ""
 
   return template_code([[
 // --- Lua Module Interface ---
@@ -1788,6 +1890,7 @@ static const struct luaL_Reg $PARSER_NAME$_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
   // Lua 5.2+ uses luaL_setfuncs
   int luaopen_$PARSER_NAME$(lua_State *L) {
+    $CONST_INIT$
     $CMT_INIT$
     luaL_newlib(L, $PARSER_NAME$_module); // Creates table and registers functions
     return 1;
@@ -1798,6 +1901,7 @@ static const struct luaL_Reg $PARSER_NAME$_module[] = {
   // two parsers compiled with the same parser_name in one process would
   // silently overwrite the first module's parse function.
   int luaopen_$PARSER_NAME$(lua_State *L) {
+    $CONST_INIT$
     $CMT_INIT$
     lua_newtable(L);
     luaL_register(L, NULL, $PARSER_NAME$_module);
@@ -1807,16 +1911,17 @@ static const struct luaL_Reg $PARSER_NAME$_module[] = {
 ]], {
   PARSER_NAME = parser_name,
   START_RULE = start_rule,
-  CMT_INIT = cmt_init
+  CMT_INIT = cmt_init,
+  CONST_INIT = const_init
 })
 end
 
 -- Generate the final combined parser main C code
-function generator.generate_parser_main(parser_name, start_rule, cmt_codes, indenters)
+function generator.generate_parser_main(parser_name, start_rule, cmt_codes, indenters, has_consts)
   -- core C functions
   local c_core_code = generator.generate_c_core_functions(parser_name, start_rule, indenters)
   -- Lua module interface
-  local lua_module_code = generator.generate_lua_module_code(parser_name, start_rule, cmt_codes)
+  local lua_module_code = generator.generate_lua_module_code(parser_name, start_rule, cmt_codes, has_consts)
 
   return c_core_code .. "\n" .. lua_module_code
 end

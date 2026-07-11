@@ -131,13 +131,29 @@ static const void *__cg_sentinel_registry[] = {
     NULL // terminator
 };
 
-// Check if a pointer is one of our Cg sentinels
-static bool is_cg_sentinel(void *ptr) {
+// Registry refs for the interned sentinel name strings, filled at module load
+static int __cg_name_refs[4];
+
+// Return the sentinel's registry index, or -1 if not one of our Cg sentinels
+static int cg_sentinel_index(void *ptr) {
   for (int i = 0; __cg_sentinel_registry[i] != NULL; i++) {
     if (ptr == __cg_sentinel_registry[i])
-      return true;
+      return i;
   }
-  return false;
+  return -1;
+}
+
+// Check if a pointer is one of our Cg sentinels
+static bool is_cg_sentinel(void *ptr) {
+  return cg_sentinel_index(ptr) >= 0;
+}
+// Interned constant strings (pushed once at module load)
+
+static void __const_init(lua_State *L) {
+  for (int i = 0; __cg_sentinel_registry[i] != NULL; i++) {
+    lua_pushstring(L, (const char *)__cg_sentinel_registry[i]);
+    __cg_name_refs[i] = luaL_ref(L, LUA_REGISTRYINDEX);
+  }
 }
 
 // Forward declarations
@@ -607,11 +623,10 @@ static bool parse_empty_match(Parser *parser) {
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
         if (lua_islightuserdata(parser->L, i)) {
-          void *ptr = lua_touserdata(parser->L, i);
-          if (is_cg_sentinel(ptr)) {
-            // Named capture: sentinel at i, value at i+1
-            const char *name = (const char *)ptr;
-            lua_pushstring(parser->L, name);
+          int sentinel_idx = cg_sentinel_index(lua_touserdata(parser->L, i));
+          if (sentinel_idx >= 0) {
+            // Named capture: sentinel at i, value at i+1; name interned at load
+            lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cg_name_refs[sentinel_idx]);
             lua_pushvalue(parser->L, i + 1);
             lua_rawset(parser->L, table_idx);
             i++; // skip value
@@ -977,11 +992,10 @@ static bool parse_lua_long_string(Parser *parser) {
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
         if (lua_islightuserdata(parser->L, i)) {
-          void *ptr = lua_touserdata(parser->L, i);
-          if (is_cg_sentinel(ptr)) {
-            // Named capture: sentinel at i, value at i+1
-            const char *name = (const char *)ptr;
-            lua_pushstring(parser->L, name);
+          int sentinel_idx = cg_sentinel_index(lua_touserdata(parser->L, i));
+          if (sentinel_idx >= 0) {
+            // Named capture: sentinel at i, value at i+1; name interned at load
+            lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cg_name_refs[sentinel_idx]);
             lua_pushvalue(parser->L, i + 1);
             lua_rawset(parser->L, table_idx);
             i++; // skip value
@@ -1250,6 +1264,7 @@ static const struct luaL_Reg cmb_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_cmb(lua_State *L) {
+  __const_init(L);
 
   luaL_newlib(L, cmb_module); // Creates table and registers functions
   return 1;
@@ -1260,6 +1275,7 @@ int luaopen_cmb(lua_State *L) {
 // two parsers compiled with the same parser_name in one process would
 // silently overwrite the first module's parse function.
 int luaopen_cmb(lua_State *L) {
+  __const_init(L);
 
   lua_newtable(L);
   luaL_register(L, NULL, cmb_module);

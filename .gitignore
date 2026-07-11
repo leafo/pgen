@@ -1,3 +1,4 @@
 /*.so
 /*.c
 /spec/parsers/*.so
+/moonscript/

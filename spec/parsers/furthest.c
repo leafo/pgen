@@ -116,7 +116,14 @@ static void dumpstack(lua_State *L) {
 }
 #endif
 
-// No Cg sentinels defined - stub function
+// No Cg sentinels defined - stubs
+static int __cg_name_refs[1];
+
+static int cg_sentinel_index(void *ptr) {
+  (void)ptr; // unused
+  return -1;
+}
+
 static bool is_cg_sentinel(void *ptr) {
   (void)ptr; // unused
   return false;
@@ -1708,6 +1715,7 @@ static const struct luaL_Reg furthest_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_furthest(lua_State *L) {
+
   __cmt_init(L);
   luaL_newlib(L, furthest_module); // Creates table and registers functions
   return 1;
@@ -1718,6 +1726,7 @@ int luaopen_furthest(lua_State *L) {
 // two parsers compiled with the same parser_name in one process would
 // silently overwrite the first module's parse function.
 int luaopen_furthest(lua_State *L) {
+
   __cmt_init(L);
   lua_newtable(L);
   luaL_register(L, NULL, furthest_module);

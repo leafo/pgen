@@ -226,10 +226,50 @@ static void dumpstack(lua_State *L) {
 }
 #endif
 
-// No Cg sentinels defined - stub function
+// No Cg sentinels defined - stubs
+static int __cg_name_refs[1];
+
+static int cg_sentinel_index(void *ptr) {
+  (void)ptr; // unused
+  return -1;
+}
+
 static bool is_cg_sentinel(void *ptr) {
   (void)ptr; // unused
   return false;
+}
+// Interned constant strings (pushed once at module load)
+static int __const_refs[14];
+
+static void __const_init(lua_State *L) {
+  lua_pushlstring(L, "advanced", 8);
+  __const_refs[0] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "allowed", 7);
+  __const_refs[1] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "blocked", 7);
+  __const_refs[2] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "clean", 5);
+  __const_refs[3] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "cmt-clean", 9);
+  __const_refs[4] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "disabled", 8);
+  __const_refs[5] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "double", 6);
+  __const_refs[6] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "never", 5);
+  __const_refs[7] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "ok", 2);
+  __const_refs[8] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "pure", 4);
+  __const_refs[9] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "single", 6);
+  __const_refs[10] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "tab2", 4);
+  __const_refs[11] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "tab4", 4);
+  __const_refs[12] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "top-check", 9);
+  __const_refs[13] = luaL_ref(L, LUA_REGISTRYINDEX);
 }
 // Match-time capture (Cmt) infrastructure
 
@@ -717,11 +757,10 @@ static bool parse_Block(Parser *parser) {
       int array_idx = 1;
       for (int i = items_start; i < table_idx; i++) {
         if (lua_islightuserdata(parser->L, i)) {
-          void *ptr = lua_touserdata(parser->L, i);
-          if (is_cg_sentinel(ptr)) {
-            // Named capture: sentinel at i, value at i+1
-            const char *name = (const char *)ptr;
-            lua_pushstring(parser->L, name);
+          int sentinel_idx = cg_sentinel_index(lua_touserdata(parser->L, i));
+          if (sentinel_idx >= 0) {
+            // Named capture: sentinel at i, value at i+1; name interned at load
+            lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cg_name_refs[sentinel_idx]);
             lua_pushvalue(parser->L, i + 1);
             lua_rawset(parser->L, table_idx);
             i++; // skip value
@@ -989,7 +1028,7 @@ static bool parse_allowed(Parser *parser) {
       { // Constant Capture
         // A constant capture matches the empty string and produces all given values
         pgen_checkstack(parser, 1);
-        lua_pushlstring(parser->L, "allowed", 7);
+        lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[1]); // "allowed"
       }
       if (!parser->success) {
         RESTORE_POSITION(parser, pos);
@@ -1305,7 +1344,7 @@ static bool parse_bt_fallback(Parser *parser) {
               { // Constant Capture
                 // A constant capture matches the empty string and produces all given values
                 pgen_checkstack(parser, 1);
-                lua_pushlstring(parser->L, "clean", 5);
+                lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[3]); // "clean"
               }
             }
           }
@@ -1444,7 +1483,7 @@ static bool parse_cmt_test(Parser *parser) {
         { // Constant Capture
           // A constant capture matches the empty string and produces all given values
           pgen_checkstack(parser, 1);
-          lua_pushlstring(parser->L, "never", 5);
+          lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[7]); // "never"
         }
         if (!parser->success) {
           RESTORE_POSITION(parser, pos);
@@ -1472,7 +1511,7 @@ static bool parse_cmt_test(Parser *parser) {
           { // Constant Capture
             // A constant capture matches the empty string and produces all given values
             pgen_checkstack(parser, 1);
-            lua_pushlstring(parser->L, "cmt-clean", 9);
+            lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[4]); // "cmt-clean"
           }
           if (!parser->success) {
             RESTORE_POSITION(parser, pos);
@@ -1527,7 +1566,7 @@ static bool parse_flags_test(Parser *parser) {
             { // Constant Capture
               // A constant capture matches the empty string and produces all given values
               pgen_checkstack(parser, 1);
-              lua_pushlstring(parser->L, "disabled", 8);
+              lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[5]); // "disabled"
             }
           }
         }
@@ -1609,7 +1648,7 @@ static bool parse_lookahead_test(Parser *parser) {
         { // Constant Capture
           // A constant capture matches the empty string and produces all given values
           pgen_checkstack(parser, 1);
-          lua_pushlstring(parser->L, "pure", 4);
+          lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[9]); // "pure"
         }
       }
       if (!parser->success) {
@@ -1793,7 +1832,7 @@ static bool parse_pop_test(Parser *parser) {
             { // Constant Capture
               // A constant capture matches the empty string and produces all given values
               pgen_checkstack(parser, 1);
-              lua_pushlstring(parser->L, "double", 6);
+              lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[6]); // "double"
             }
           }
           if (!parser->success) {
@@ -1832,7 +1871,7 @@ static bool parse_pop_test(Parser *parser) {
               { // Constant Capture
                 // A constant capture matches the empty string and produces all given values
                 pgen_checkstack(parser, 1);
-                lua_pushlstring(parser->L, "top-check", 9);
+                lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[13]); // "top-check"
               }
             }
             if (!parser->success) {
@@ -1862,7 +1901,7 @@ static bool parse_pop_test(Parser *parser) {
           { // Constant Capture
             // A constant capture matches the empty string and produces all given values
             pgen_checkstack(parser, 1);
-            lua_pushlstring(parser->L, "single", 6);
+            lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[10]); // "single"
           }
           if (!parser->success) {
             RESTORE_POSITION(parser, pos);
@@ -2000,7 +2039,7 @@ static bool parse_pr_advanced(Parser *parser) {
                 { // Constant Capture
                   // A constant capture matches the empty string and produces all given values
                   pgen_checkstack(parser, 1);
-                  lua_pushlstring(parser->L, "advanced", 8);
+                  lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[0]); // "advanced"
                 }
               }
             }
@@ -2115,7 +2154,7 @@ static bool parse_pr_blocked(Parser *parser) {
             { // Constant Capture
               // A constant capture matches the empty string and produces all given values
               pgen_checkstack(parser, 1);
-              lua_pushlstring(parser->L, "blocked", 7);
+              lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[2]); // "blocked"
             }
           }
         }
@@ -2335,7 +2374,7 @@ static bool parse_push_test(Parser *parser) {
                       { // Constant Capture
                         // A constant capture matches the empty string and produces all given values
                         pgen_checkstack(parser, 1);
-                        lua_pushlstring(parser->L, "ok", 2);
+                        lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[8]); // "ok"
                       }
                     }
                   }
@@ -2491,7 +2530,7 @@ static bool parse_tab2_test(Parser *parser) {
                   { // Constant Capture
                     // A constant capture matches the empty string and produces all given values
                     pgen_checkstack(parser, 1);
-                    lua_pushlstring(parser->L, "tab2", 4);
+                    lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[11]); // "tab2"
                   }
                 }
               }
@@ -2645,7 +2684,7 @@ static bool parse_tab4_test(Parser *parser) {
                   { // Constant Capture
                     // A constant capture matches the empty string and produces all given values
                     pgen_checkstack(parser, 1);
-                    lua_pushlstring(parser->L, "tab4", 4);
+                    lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[12]); // "tab4"
                   }
                 }
               }
@@ -2821,6 +2860,7 @@ static const struct luaL_Reg indent_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_indent(lua_State *L) {
+  __const_init(L);
   __cmt_init(L);
   luaL_newlib(L, indent_module); // Creates table and registers functions
   return 1;
@@ -2831,6 +2871,7 @@ int luaopen_indent(lua_State *L) {
 // two parsers compiled with the same parser_name in one process would
 // silently overwrite the first module's parse function.
 int luaopen_indent(lua_State *L) {
+  __const_init(L);
   __cmt_init(L);
   lua_newtable(L);
   luaL_register(L, NULL, indent_module);

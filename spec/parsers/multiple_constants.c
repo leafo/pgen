@@ -116,10 +116,24 @@ static void dumpstack(lua_State *L) {
 }
 #endif
 
-// No Cg sentinels defined - stub function
+// No Cg sentinels defined - stubs
+static int __cg_name_refs[1];
+
+static int cg_sentinel_index(void *ptr) {
+  (void)ptr; // unused
+  return -1;
+}
+
 static bool is_cg_sentinel(void *ptr) {
   (void)ptr; // unused
   return false;
+}
+// Interned constant strings (pushed once at module load)
+static int __const_refs[1];
+
+static void __const_init(lua_State *L) {
+  lua_pushlstring(L, "test_field", 10);
+  __const_refs[0] = luaL_ref(L, LUA_REGISTRYINDEX);
 }
 
 // Forward declarations
@@ -168,7 +182,7 @@ static bool parse_main(Parser *parser) {
         { // Constant Capture
           // A constant capture matches the empty string and produces all given values
           pgen_checkstack(parser, 1);
-          lua_pushlstring(parser->L, "test_field", 10);
+          lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[0]); // "test_field"
         }
         if (parser->success) {
           { // Constant Capture
@@ -329,6 +343,7 @@ static const struct luaL_Reg multiple_constants_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_multiple_constants(lua_State *L) {
+  __const_init(L);
 
   luaL_newlib(L, multiple_constants_module); // Creates table and registers functions
   return 1;
@@ -339,6 +354,7 @@ int luaopen_multiple_constants(lua_State *L) {
 // two parsers compiled with the same parser_name in one process would
 // silently overwrite the first module's parse function.
 int luaopen_multiple_constants(lua_State *L) {
+  __const_init(L);
 
   lua_newtable(L);
   luaL_register(L, NULL, multiple_constants_module);

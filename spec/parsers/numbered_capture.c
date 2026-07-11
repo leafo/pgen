@@ -129,13 +129,36 @@ static const void *__cg_sentinel_registry[] = {
     NULL // terminator
 };
 
-// Check if a pointer is one of our Cg sentinels
-static bool is_cg_sentinel(void *ptr) {
+// Registry refs for the interned sentinel name strings, filled at module load
+static int __cg_name_refs[3];
+
+// Return the sentinel's registry index, or -1 if not one of our Cg sentinels
+static int cg_sentinel_index(void *ptr) {
   for (int i = 0; __cg_sentinel_registry[i] != NULL; i++) {
     if (ptr == __cg_sentinel_registry[i])
-      return true;
+      return i;
   }
-  return false;
+  return -1;
+}
+
+// Check if a pointer is one of our Cg sentinels
+static bool is_cg_sentinel(void *ptr) {
+  return cg_sentinel_index(ptr) >= 0;
+}
+// Interned constant strings (pushed once at module load)
+static int __const_refs[3];
+
+static void __const_init(lua_State *L) {
+  lua_pushlstring(L, "one", 3);
+  __const_refs[0] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "three", 5);
+  __const_refs[1] = luaL_ref(L, LUA_REGISTRYINDEX);
+  lua_pushlstring(L, "two", 3);
+  __const_refs[2] = luaL_ref(L, LUA_REGISTRYINDEX);
+  for (int i = 0; __cg_sentinel_registry[i] != NULL; i++) {
+    lua_pushstring(L, (const char *)__cg_sentinel_registry[i]);
+    __cg_name_refs[i] = luaL_ref(L, LUA_REGISTRYINDEX);
+  }
 }
 
 // Forward declarations
@@ -691,7 +714,7 @@ static bool parse_test10(Parser *parser) {
         { // Constant Capture
           // A constant capture matches the empty string and produces all given values
           pgen_checkstack(parser, 1);
-          lua_pushlstring(parser->L, "one", 3);
+          lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[0]); // "one"
         }
 
         if (parser->success) {
@@ -722,7 +745,7 @@ static bool parse_test10(Parser *parser) {
         { // Constant Capture
           // A constant capture matches the empty string and produces all given values
           pgen_checkstack(parser, 1);
-          lua_pushlstring(parser->L, "two", 3);
+          lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[2]); // "two"
         }
         if (parser->success) {
           { // Capture Group "b"
@@ -731,7 +754,7 @@ static bool parse_test10(Parser *parser) {
             { // Constant Capture
               // A constant capture matches the empty string and produces all given values
               pgen_checkstack(parser, 1);
-              lua_pushlstring(parser->L, "three", 5);
+              lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[1]); // "three"
             }
 
             if (parser->success) {
@@ -1941,7 +1964,7 @@ static bool parse_test9(Parser *parser) {
         { // Constant Capture
           // A constant capture matches the empty string and produces all given values
           pgen_checkstack(parser, 1);
-          lua_pushlstring(parser->L, "one", 3);
+          lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[0]); // "one"
         }
 
         if (parser->success) {
@@ -1972,7 +1995,7 @@ static bool parse_test9(Parser *parser) {
         { // Constant Capture
           // A constant capture matches the empty string and produces all given values
           pgen_checkstack(parser, 1);
-          lua_pushlstring(parser->L, "two", 3);
+          lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[2]); // "two"
         }
         if (parser->success) {
           { // Capture Group "b"
@@ -1981,7 +2004,7 @@ static bool parse_test9(Parser *parser) {
             { // Constant Capture
               // A constant capture matches the empty string and produces all given values
               pgen_checkstack(parser, 1);
-              lua_pushlstring(parser->L, "three", 5);
+              lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[1]); // "three"
             }
 
             if (parser->success) {
@@ -2183,6 +2206,7 @@ static const struct luaL_Reg numbered_capture_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_numbered_capture(lua_State *L) {
+  __const_init(L);
 
   luaL_newlib(L, numbered_capture_module); // Creates table and registers functions
   return 1;
@@ -2193,6 +2217,7 @@ int luaopen_numbered_capture(lua_State *L) {
 // two parsers compiled with the same parser_name in one process would
 // silently overwrite the first module's parse function.
 int luaopen_numbered_capture(lua_State *L) {
+  __const_init(L);
 
   lua_newtable(L);
   luaL_register(L, NULL, numbered_capture_module);
