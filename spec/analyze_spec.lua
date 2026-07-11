@@ -62,3 +62,60 @@ describe("nullable loop detection", function()
     }
   end)
 end)
+
+describe("backtrack state analysis", function()
+  local analyze = require "pgen.analyze"
+
+  local function changes(pattern, rules)
+    rules = rules or {}
+    return analyze.changes_backtrack_state(pattern, rules, analyze.stateful_rules(rules))
+  end
+
+  it("distinguishes capture-free patterns from captures", function()
+    assert.is_false(changes(P"a" * S"bc"))
+    assert.is_true(changes(P"a" * C(P"b")))
+    assert.is_true(changes(Cc("value")))
+  end)
+
+  it("resolves state changes through rule references", function()
+    local rules = {
+      plain = P"a" * V"tail",
+      tail = P"b",
+      captured = V"value",
+      value = C(P"c"),
+    }
+    assert.is_false(changes(V"plain", rules))
+    assert.is_true(changes(V"captured", rules))
+  end)
+
+  it("handles capture-free and stateful recursive rule graphs", function()
+    local plain = {
+      value = P"(" * V"value" * P")" + P"a",
+    }
+    local stateful = {
+      a = V"b" + C(P"a"),
+      b = V"a" + P"b",
+    }
+    assert.is_false(changes(V"value", plain))
+    assert.is_true(changes(V"a", stateful))
+    assert.is_true(changes(V"b", stateful))
+  end)
+
+  it("treats indenter operations and unknown nodes conservatively", function()
+    local ind = pgen.indenter{}
+    assert.is_true(changes(ind.push))
+    assert.is_true(changes({type = "future_pattern_type"}))
+    assert.is_true(changes(V"missing", {}))
+  end)
+
+  it("emits both input-only and full-state restore paths", function()
+    local output = pgen.compile({
+      "start",
+      start = V"plain" + V"captured",
+      plain = P"a" * P"b",
+      captured = C(P"c") * P"d",
+    }, {optimize = false})
+    assert.matches("REMEMBER_INPUT_POSITION%(parser, pos%);", output)
+    assert.matches("REMEMBER_POSITION%(parser, pos%);", output)
+  end)
+end)

@@ -35,6 +35,10 @@ typedef struct {
   int stack_size;
 } ParserPosition;
 
+typedef struct {
+  size_t pos;
+} ParserInputPosition;
+
 #define REMEMBER_POSITION(parser, pp) \
   ParserPosition pp;                  \
   (pp).pos = (parser)->pos;           \
@@ -44,6 +48,13 @@ typedef struct {
 #define RESTORE_POSITION(parser, pp) \
   (parser)->pos = (pp).pos;          \
   lua_settop((parser)->L, (pp).stack_size);
+
+#define REMEMBER_INPUT_POSITION(parser, pp) \
+  ParserInputPosition pp;                   \
+  (pp).pos = (parser)->pos;
+
+#define RESTORE_INPUT_POSITION(parser, pp) \
+  (parser)->pos = (pp).pos;
 
 // Records the furthest input position where a match attempt failed (only
 // ever increases). Because the parser can only attempt a position it

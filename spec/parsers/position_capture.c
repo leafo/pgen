@@ -35,6 +35,10 @@ typedef struct {
   int stack_size;
 } ParserPosition;
 
+typedef struct {
+  size_t pos;
+} ParserInputPosition;
+
 #define REMEMBER_POSITION(parser, pp) \
   ParserPosition pp;                  \
   (pp).pos = (parser)->pos;           \
@@ -44,6 +48,13 @@ typedef struct {
 #define RESTORE_POSITION(parser, pp) \
   (parser)->pos = (pp).pos;          \
   lua_settop((parser)->L, (pp).stack_size);
+
+#define REMEMBER_INPUT_POSITION(parser, pp) \
+  ParserInputPosition pp;                   \
+  (pp).pos = (parser)->pos;
+
+#define RESTORE_INPUT_POSITION(parser, pp) \
+  (parser)->pos = (pp).pos;
 
 // Records the furthest input position where a match attempt failed (only
 // ever increases). Because the parser can only attempt a position it
@@ -179,7 +190,7 @@ static bool parse_list(Parser *parser) {
         parse_ws(parser);
         if (parser->success) {
           { // Negate (only match if pattern fails)
-            REMEMBER_POSITION(parser, pos);
+            REMEMBER_INPUT_POSITION(parser, pos);
 
             { // Match any 1 characters
               if (parser->pos + 1 <= parser->input_len) {
@@ -195,7 +206,7 @@ static bool parse_list(Parser *parser) {
 
             if (parser->success) {
               // Pattern matched, so negate fails
-              RESTORE_POSITION(parser, pos);
+              RESTORE_INPUT_POSITION(parser, pos);
               parser->success = false;
               PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
@@ -209,7 +220,7 @@ static bool parse_list(Parser *parser) {
                 parser->throw_label = NULL;
                 parser->throw_pos = 0;
               }
-              RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+              RESTORE_INPUT_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
             }
           }
         }
@@ -248,7 +259,7 @@ static bool parse_identifier(Parser *parser) {
 #endif
 
   { // At least 1 repetitions
-    REMEMBER_POSITION(parser, pos);
+    REMEMBER_INPUT_POSITION(parser, pos);
     size_t rep_count = 0;
 
     while (true) {
@@ -305,7 +316,7 @@ static bool parse_identifier(Parser *parser) {
     } else if (rep_count >= 1) {
       parser->success = true;
     } else {
-      RESTORE_POSITION(parser, pos);
+      RESTORE_INPUT_POSITION(parser, pos);
 #ifdef PGEN_ERRORS
       sprintf(parser->error_message, "Expected 1 repetitions at position %zu", parser->pos);
 #endif

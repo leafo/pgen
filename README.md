@@ -372,3 +372,43 @@ Ct(Cg(C(R"az"^1), "first") * P"," * C(R"az"^1))
 
 This optimization follows references through `V()` rules to ensure correctness even when captures are defined in other rules.
 
+### Backtrack State Analysis
+
+Sequences, repetitions (`patt^n`), lookahead (`#patt`), and negation
+(`-patt`) all need to save parser state so they can backtrack. Before
+generating that code, the generator checks whether the enclosed pattern can
+actually change any state besides the input position, meaning captures pushed
+onto the Lua stack or indenter stack operations. If it can't, the generated
+code only saves and restores the input position instead of taking a full
+snapshot (input position, Lua stack top, and indenter stack undo trail).
+
+```lua
+-- Fast path: the loop body is capture-free, so a failed iteration only
+-- restores the input position
+(R"az"^1 * P",")^0
+
+-- Full snapshot: a failed iteration must also unwind pending captures
+(C(R"az"^1) * P",")^0
+```
+
+The analysis resolves `V()` rule references, including recursive and mutually
+recursive rules. It errs on the side of caution: match-time captures (`Cmt`),
+indenter operations, and unrecognized pattern types always get the full
+snapshot.
+
+Note that unlike the transforms above, this happens during code generation
+and is always applied, even with `--no-optimize`.
+
+**Writing grammars that benefit:**
+
+- **Keep predicates capture-free.** Captures inside `#patt` or `-patt` are
+  discarded even when the pattern succeeds, so a capture there never produces
+  a value but still forces the full snapshot. Match with a capture-free
+  predicate, then capture in the pattern that actually consumes the input.
+
+- **Capture where the match is committed.** A single capture anywhere in a
+  sequence puts the whole sequence on the full-snapshot path. In a choice
+  between alternatives that frequently fail and backtrack, discriminate first
+  with capture-free patterns and save the captures for the part of the
+  grammar that runs once the alternative is decided.
+

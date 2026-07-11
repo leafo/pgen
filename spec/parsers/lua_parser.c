@@ -35,6 +35,10 @@ typedef struct {
   int stack_size;
 } ParserPosition;
 
+typedef struct {
+  size_t pos;
+} ParserInputPosition;
+
 #define REMEMBER_POSITION(parser, pp) \
   ParserPosition pp;                  \
   (pp).pos = (parser)->pos;           \
@@ -44,6 +48,13 @@ typedef struct {
 #define RESTORE_POSITION(parser, pp) \
   (parser)->pos = (pp).pos;          \
   lua_settop((parser)->L, (pp).stack_size);
+
+#define REMEMBER_INPUT_POSITION(parser, pp) \
+  ParserInputPosition pp;                   \
+  (pp).pos = (parser)->pos;
+
+#define RESTORE_INPUT_POSITION(parser, pp) \
+  (parser)->pos = (pp).pos;
 
 // Records the furthest input position where a match attempt failed (only
 // ever increases). Because the parser can only attempt a position it
@@ -183,7 +194,7 @@ static bool parse_chunk(Parser *parser) {
     parse_block(parser);
     if (parser->success) {
       { // Negate (only match if pattern fails)
-        REMEMBER_POSITION(parser, pos);
+        REMEMBER_INPUT_POSITION(parser, pos);
 
         { // Match any 1 characters
           if (parser->pos + 1 <= parser->input_len) {
@@ -199,7 +210,7 @@ static bool parse_chunk(Parser *parser) {
 
         if (parser->success) {
           // Pattern matched, so negate fails
-          RESTORE_POSITION(parser, pos);
+          RESTORE_INPUT_POSITION(parser, pos);
           parser->success = false;
           PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
@@ -213,7 +224,7 @@ static bool parse_chunk(Parser *parser) {
             parser->throw_label = NULL;
             parser->throw_pos = 0;
           }
-          RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+          RESTORE_INPUT_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
         }
       }
       if (!parser->success) {
@@ -263,16 +274,16 @@ static bool parse_Name(Parser *parser) {
         { // Capture
           size_t start_pos = parser->pos;
           { // Sequence with 2 patterns
-            REMEMBER_POSITION(parser, pos);
+            REMEMBER_INPUT_POSITION(parser, pos);
 
             { // Negate (only match if pattern fails)
-              REMEMBER_POSITION(parser, pos);
+              REMEMBER_INPUT_POSITION(parser, pos);
 
               parse_keyword(parser);
 
               if (parser->success) {
                 // Pattern matched, so negate fails
-                RESTORE_POSITION(parser, pos);
+                RESTORE_INPUT_POSITION(parser, pos);
                 parser->success = false;
                 PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
@@ -286,13 +297,13 @@ static bool parse_Name(Parser *parser) {
                   parser->throw_label = NULL;
                   parser->throw_pos = 0;
                 }
-                RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+                RESTORE_INPUT_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
               }
             }
             if (parser->success) {
               parse_ident(parser);
               if (!parser->success) {
-                RESTORE_POSITION(parser, pos);
+                RESTORE_INPUT_POSITION(parser, pos);
               }
             }
           }
@@ -375,7 +386,7 @@ static bool parse_Number(Parser *parser) {
           {     // Choice
             {   // Choice
               { // Sequence with 5 patterns
-                REMEMBER_POSITION(parser, pos);
+                REMEMBER_INPUT_POSITION(parser, pos);
 
                 { // Match single character "0"
                   if (parser->pos < parser->input_len &&
@@ -420,7 +431,7 @@ static bool parse_Number(Parser *parser) {
                   }
                   if (parser->success) {
                     { // At least 1 repetitions
-                      REMEMBER_POSITION(parser, pos);
+                      REMEMBER_INPUT_POSITION(parser, pos);
                       size_t rep_count = 0;
 
                       while (true) {
@@ -462,7 +473,7 @@ static bool parse_Number(Parser *parser) {
                       } else if (rep_count >= 1) {
                         parser->success = true;
                       } else {
-                        RESTORE_POSITION(parser, pos);
+                        RESTORE_INPUT_POSITION(parser, pos);
 #ifdef PGEN_ERRORS
                         sprintf(parser->error_message, "Expected 1 repetitions at position %zu", parser->pos);
 #endif
@@ -477,7 +488,7 @@ static bool parse_Number(Parser *parser) {
 
                           {
                             { // Sequence with 2 patterns
-                              REMEMBER_POSITION(parser, pos);
+                              REMEMBER_INPUT_POSITION(parser, pos);
 
                               { // Match single character "."
                                 if (parser->pos < parser->input_len &&
@@ -530,7 +541,7 @@ static bool parse_Number(Parser *parser) {
                                   }
                                 }
                                 if (!parser->success) {
-                                  RESTORE_POSITION(parser, pos);
+                                  RESTORE_INPUT_POSITION(parser, pos);
                                 }
                               }
                             }
@@ -557,7 +568,7 @@ static bool parse_Number(Parser *parser) {
 
                             {
                               { // Sequence with 3 patterns
-                                REMEMBER_POSITION(parser, pos);
+                                REMEMBER_INPUT_POSITION(parser, pos);
 
                                 { // Match character set "pP"
                                   if (parser->pos < parser->input_len) {
@@ -635,7 +646,7 @@ static bool parse_Number(Parser *parser) {
                                   }
                                   if (parser->success) {
                                     { // At least 1 repetitions
-                                      REMEMBER_POSITION(parser, pos);
+                                      REMEMBER_INPUT_POSITION(parser, pos);
                                       size_t rep_count = 0;
 
                                       while (true) {
@@ -669,7 +680,7 @@ static bool parse_Number(Parser *parser) {
                                       } else if (rep_count >= 1) {
                                         parser->success = true;
                                       } else {
-                                        RESTORE_POSITION(parser, pos);
+                                        RESTORE_INPUT_POSITION(parser, pos);
 #ifdef PGEN_ERRORS
                                         sprintf(parser->error_message, "Expected 1 repetitions at position %zu", parser->pos);
 #endif
@@ -677,7 +688,7 @@ static bool parse_Number(Parser *parser) {
                                     }
                                   }
                                   if (!parser->success) {
-                                    RESTORE_POSITION(parser, pos);
+                                    RESTORE_INPUT_POSITION(parser, pos);
                                   }
                                 }
                               }
@@ -699,7 +710,7 @@ static bool parse_Number(Parser *parser) {
                     }
                   }
                   if (!parser->success) {
-                    RESTORE_POSITION(parser, pos);
+                    RESTORE_INPUT_POSITION(parser, pos);
                   }
                 }
               }
@@ -708,10 +719,10 @@ static bool parse_Number(Parser *parser) {
               if (!parser->success && !parser->throw_label) {
                 parser->success = true;
                 { // Sequence with 3 patterns
-                  REMEMBER_POSITION(parser, pos);
+                  REMEMBER_INPUT_POSITION(parser, pos);
 
                   { // At least 1 repetitions
-                    REMEMBER_POSITION(parser, pos);
+                    REMEMBER_INPUT_POSITION(parser, pos);
                     size_t rep_count = 0;
 
                     while (true) {
@@ -745,7 +756,7 @@ static bool parse_Number(Parser *parser) {
                     } else if (rep_count >= 1) {
                       parser->success = true;
                     } else {
-                      RESTORE_POSITION(parser, pos);
+                      RESTORE_INPUT_POSITION(parser, pos);
 #ifdef PGEN_ERRORS
                       sprintf(parser->error_message, "Expected 1 repetitions at position %zu", parser->pos);
 #endif
@@ -760,7 +771,7 @@ static bool parse_Number(Parser *parser) {
 
                         {
                           { // Sequence with 2 patterns
-                            REMEMBER_POSITION(parser, pos);
+                            REMEMBER_INPUT_POSITION(parser, pos);
 
                             { // Match single character "."
                               if (parser->pos < parser->input_len &&
@@ -805,7 +816,7 @@ static bool parse_Number(Parser *parser) {
                                 }
                               }
                               if (!parser->success) {
-                                RESTORE_POSITION(parser, pos);
+                                RESTORE_INPUT_POSITION(parser, pos);
                               }
                             }
                           }
@@ -832,7 +843,7 @@ static bool parse_Number(Parser *parser) {
 
                           {
                             { // Sequence with 3 patterns
-                              REMEMBER_POSITION(parser, pos);
+                              REMEMBER_INPUT_POSITION(parser, pos);
 
                               { // Match character set "eE"
                                 if (parser->pos < parser->input_len) {
@@ -910,7 +921,7 @@ static bool parse_Number(Parser *parser) {
                                 }
                                 if (parser->success) {
                                   { // At least 1 repetitions
-                                    REMEMBER_POSITION(parser, pos);
+                                    REMEMBER_INPUT_POSITION(parser, pos);
                                     size_t rep_count = 0;
 
                                     while (true) {
@@ -944,7 +955,7 @@ static bool parse_Number(Parser *parser) {
                                     } else if (rep_count >= 1) {
                                       parser->success = true;
                                     } else {
-                                      RESTORE_POSITION(parser, pos);
+                                      RESTORE_INPUT_POSITION(parser, pos);
 #ifdef PGEN_ERRORS
                                       sprintf(parser->error_message, "Expected 1 repetitions at position %zu", parser->pos);
 #endif
@@ -952,7 +963,7 @@ static bool parse_Number(Parser *parser) {
                                   }
                                 }
                                 if (!parser->success) {
-                                  RESTORE_POSITION(parser, pos);
+                                  RESTORE_INPUT_POSITION(parser, pos);
                                 }
                               }
                             }
@@ -972,7 +983,7 @@ static bool parse_Number(Parser *parser) {
                       }
                     }
                     if (!parser->success) {
-                      RESTORE_POSITION(parser, pos);
+                      RESTORE_INPUT_POSITION(parser, pos);
                     }
                   }
                 }
@@ -983,7 +994,7 @@ static bool parse_Number(Parser *parser) {
             if (!parser->success && !parser->throw_label) {
               parser->success = true;
               { // Sequence with 3 patterns
-                REMEMBER_POSITION(parser, pos);
+                REMEMBER_INPUT_POSITION(parser, pos);
 
                 { // Match single character "."
                   if (parser->pos < parser->input_len &&
@@ -1001,7 +1012,7 @@ static bool parse_Number(Parser *parser) {
                 }
                 if (parser->success) {
                   { // At least 1 repetitions
-                    REMEMBER_POSITION(parser, pos);
+                    REMEMBER_INPUT_POSITION(parser, pos);
                     size_t rep_count = 0;
 
                     while (true) {
@@ -1035,7 +1046,7 @@ static bool parse_Number(Parser *parser) {
                     } else if (rep_count >= 1) {
                       parser->success = true;
                     } else {
-                      RESTORE_POSITION(parser, pos);
+                      RESTORE_INPUT_POSITION(parser, pos);
 #ifdef PGEN_ERRORS
                       sprintf(parser->error_message, "Expected 1 repetitions at position %zu", parser->pos);
 #endif
@@ -1050,7 +1061,7 @@ static bool parse_Number(Parser *parser) {
 
                         {
                           { // Sequence with 3 patterns
-                            REMEMBER_POSITION(parser, pos);
+                            REMEMBER_INPUT_POSITION(parser, pos);
 
                             { // Match character set "eE"
                               if (parser->pos < parser->input_len) {
@@ -1128,7 +1139,7 @@ static bool parse_Number(Parser *parser) {
                               }
                               if (parser->success) {
                                 { // At least 1 repetitions
-                                  REMEMBER_POSITION(parser, pos);
+                                  REMEMBER_INPUT_POSITION(parser, pos);
                                   size_t rep_count = 0;
 
                                   while (true) {
@@ -1162,7 +1173,7 @@ static bool parse_Number(Parser *parser) {
                                   } else if (rep_count >= 1) {
                                     parser->success = true;
                                   } else {
-                                    RESTORE_POSITION(parser, pos);
+                                    RESTORE_INPUT_POSITION(parser, pos);
 #ifdef PGEN_ERRORS
                                     sprintf(parser->error_message, "Expected 1 repetitions at position %zu", parser->pos);
 #endif
@@ -1170,7 +1181,7 @@ static bool parse_Number(Parser *parser) {
                                 }
                               }
                               if (!parser->success) {
-                                RESTORE_POSITION(parser, pos);
+                                RESTORE_INPUT_POSITION(parser, pos);
                               }
                             }
                           }
@@ -1190,7 +1201,7 @@ static bool parse_Number(Parser *parser) {
                     }
                   }
                   if (!parser->success) {
-                    RESTORE_POSITION(parser, pos);
+                    RESTORE_INPUT_POSITION(parser, pos);
                   }
                 }
               }
@@ -1366,13 +1377,13 @@ static bool parse_String(Parser *parser) {
                         { // Zero or more repetitions
                           while (true) {
                             { // Sequence with 2 patterns
-                              REMEMBER_POSITION(parser, pos);
+                              REMEMBER_INPUT_POSITION(parser, pos);
 
                               { // Negate (only match if pattern fails)
-                                REMEMBER_POSITION(parser, pos);
+                                REMEMBER_INPUT_POSITION(parser, pos);
 
                                 { // Sequence with 3 patterns
-                                  REMEMBER_POSITION(parser, pos);
+                                  REMEMBER_INPUT_POSITION(parser, pos);
 
                                   { // Match single character "]"
                                     if (parser->pos < parser->input_len &&
@@ -1436,14 +1447,14 @@ static bool parse_String(Parser *parser) {
                                       }
                                     }
                                     if (!parser->success) {
-                                      RESTORE_POSITION(parser, pos);
+                                      RESTORE_INPUT_POSITION(parser, pos);
                                     }
                                   }
                                 }
 
                                 if (parser->success) {
                                   // Pattern matched, so negate fails
-                                  RESTORE_POSITION(parser, pos);
+                                  RESTORE_INPUT_POSITION(parser, pos);
                                   parser->success = false;
                                   PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
@@ -1457,7 +1468,7 @@ static bool parse_String(Parser *parser) {
                                     parser->throw_label = NULL;
                                     parser->throw_pos = 0;
                                   }
-                                  RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+                                  RESTORE_INPUT_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
                                 }
                               }
                               if (parser->success) {
@@ -1473,7 +1484,7 @@ static bool parse_String(Parser *parser) {
                                   }
                                 }
                                 if (!parser->success) {
-                                  RESTORE_POSITION(parser, pos);
+                                  RESTORE_INPUT_POSITION(parser, pos);
                                 }
                               }
                             }
@@ -1601,7 +1612,7 @@ static bool parse_String(Parser *parser) {
               { // Capture
                 size_t start_pos = parser->pos;
                 { // Sequence with 3 patterns
-                  REMEMBER_POSITION(parser, pos);
+                  REMEMBER_INPUT_POSITION(parser, pos);
 
                   { // Match single character "'"
                     if (parser->pos < parser->input_len &&
@@ -1622,7 +1633,7 @@ static bool parse_String(Parser *parser) {
                       while (true) {
                         {   // Choice
                           { // Sequence with 2 patterns
-                            REMEMBER_POSITION(parser, pos);
+                            REMEMBER_INPUT_POSITION(parser, pos);
 
                             { // Match single character "\\"
                               if (parser->pos < parser->input_len &&
@@ -1651,7 +1662,7 @@ static bool parse_String(Parser *parser) {
                                 }
                               }
                               if (!parser->success) {
-                                RESTORE_POSITION(parser, pos);
+                                RESTORE_INPUT_POSITION(parser, pos);
                               }
                             }
                           }
@@ -1660,10 +1671,10 @@ static bool parse_String(Parser *parser) {
                           if (!parser->success && !parser->throw_label) {
                             parser->success = true;
                             { // Sequence with 2 patterns
-                              REMEMBER_POSITION(parser, pos);
+                              REMEMBER_INPUT_POSITION(parser, pos);
 
                               { // Negate (only match if pattern fails)
-                                REMEMBER_POSITION(parser, pos);
+                                REMEMBER_INPUT_POSITION(parser, pos);
 
                                 { // Match single character "'"
                                   if (parser->pos < parser->input_len &&
@@ -1682,7 +1693,7 @@ static bool parse_String(Parser *parser) {
 
                                 if (parser->success) {
                                   // Pattern matched, so negate fails
-                                  RESTORE_POSITION(parser, pos);
+                                  RESTORE_INPUT_POSITION(parser, pos);
                                   parser->success = false;
                                   PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
@@ -1696,7 +1707,7 @@ static bool parse_String(Parser *parser) {
                                     parser->throw_label = NULL;
                                     parser->throw_pos = 0;
                                   }
-                                  RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+                                  RESTORE_INPUT_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
                                 }
                               }
                               if (parser->success) {
@@ -1712,7 +1723,7 @@ static bool parse_String(Parser *parser) {
                                   }
                                 }
                                 if (!parser->success) {
-                                  RESTORE_POSITION(parser, pos);
+                                  RESTORE_INPUT_POSITION(parser, pos);
                                 }
                               }
                             }
@@ -1744,7 +1755,7 @@ static bool parse_String(Parser *parser) {
                       }
                     }
                     if (!parser->success) {
-                      RESTORE_POSITION(parser, pos);
+                      RESTORE_INPUT_POSITION(parser, pos);
                     }
                   }
                 }
@@ -1764,7 +1775,7 @@ static bool parse_String(Parser *parser) {
             { // Capture
               size_t start_pos = parser->pos;
               { // Sequence with 3 patterns
-                REMEMBER_POSITION(parser, pos);
+                REMEMBER_INPUT_POSITION(parser, pos);
 
                 { // Match single character "\""
                   if (parser->pos < parser->input_len &&
@@ -1785,7 +1796,7 @@ static bool parse_String(Parser *parser) {
                     while (true) {
                       {   // Choice
                         { // Sequence with 2 patterns
-                          REMEMBER_POSITION(parser, pos);
+                          REMEMBER_INPUT_POSITION(parser, pos);
 
                           { // Match single character "\\"
                             if (parser->pos < parser->input_len &&
@@ -1814,7 +1825,7 @@ static bool parse_String(Parser *parser) {
                               }
                             }
                             if (!parser->success) {
-                              RESTORE_POSITION(parser, pos);
+                              RESTORE_INPUT_POSITION(parser, pos);
                             }
                           }
                         }
@@ -1823,10 +1834,10 @@ static bool parse_String(Parser *parser) {
                         if (!parser->success && !parser->throw_label) {
                           parser->success = true;
                           { // Sequence with 2 patterns
-                            REMEMBER_POSITION(parser, pos);
+                            REMEMBER_INPUT_POSITION(parser, pos);
 
                             { // Negate (only match if pattern fails)
-                              REMEMBER_POSITION(parser, pos);
+                              REMEMBER_INPUT_POSITION(parser, pos);
 
                               { // Match single character "\""
                                 if (parser->pos < parser->input_len &&
@@ -1845,7 +1856,7 @@ static bool parse_String(Parser *parser) {
 
                               if (parser->success) {
                                 // Pattern matched, so negate fails
-                                RESTORE_POSITION(parser, pos);
+                                RESTORE_INPUT_POSITION(parser, pos);
                                 parser->success = false;
                                 PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
@@ -1859,7 +1870,7 @@ static bool parse_String(Parser *parser) {
                                   parser->throw_label = NULL;
                                   parser->throw_pos = 0;
                                 }
-                                RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+                                RESTORE_INPUT_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
                               }
                             }
                             if (parser->success) {
@@ -1875,7 +1886,7 @@ static bool parse_String(Parser *parser) {
                                 }
                               }
                               if (!parser->success) {
-                                RESTORE_POSITION(parser, pos);
+                                RESTORE_INPUT_POSITION(parser, pos);
                               }
                             }
                           }
@@ -1907,7 +1918,7 @@ static bool parse_String(Parser *parser) {
                     }
                   }
                   if (!parser->success) {
-                    RESTORE_POSITION(parser, pos);
+                    RESTORE_INPUT_POSITION(parser, pos);
                   }
                 }
               }
@@ -3291,13 +3302,13 @@ static bool parse_comment(Parser *parser) {
                   { // Zero or more repetitions
                     while (true) {
                       { // Sequence with 2 patterns
-                        REMEMBER_POSITION(parser, pos);
+                        REMEMBER_INPUT_POSITION(parser, pos);
 
                         { // Negate (only match if pattern fails)
-                          REMEMBER_POSITION(parser, pos);
+                          REMEMBER_INPUT_POSITION(parser, pos);
 
                           { // Sequence with 3 patterns
-                            REMEMBER_POSITION(parser, pos);
+                            REMEMBER_INPUT_POSITION(parser, pos);
 
                             { // Match single character "]"
                               if (parser->pos < parser->input_len &&
@@ -3361,14 +3372,14 @@ static bool parse_comment(Parser *parser) {
                                 }
                               }
                               if (!parser->success) {
-                                RESTORE_POSITION(parser, pos);
+                                RESTORE_INPUT_POSITION(parser, pos);
                               }
                             }
                           }
 
                           if (parser->success) {
                             // Pattern matched, so negate fails
-                            RESTORE_POSITION(parser, pos);
+                            RESTORE_INPUT_POSITION(parser, pos);
                             parser->success = false;
                             PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
@@ -3382,7 +3393,7 @@ static bool parse_comment(Parser *parser) {
                               parser->throw_label = NULL;
                               parser->throw_pos = 0;
                             }
-                            RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+                            RESTORE_INPUT_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
                           }
                         }
                         if (parser->success) {
@@ -3398,7 +3409,7 @@ static bool parse_comment(Parser *parser) {
                             }
                           }
                           if (!parser->success) {
-                            RESTORE_POSITION(parser, pos);
+                            RESTORE_INPUT_POSITION(parser, pos);
                           }
                         }
                       }
@@ -3492,16 +3503,16 @@ static bool parse_comment(Parser *parser) {
         if (!parser->success && !parser->throw_label) {
           parser->success = true;
           { // Sequence with 2 patterns
-            REMEMBER_POSITION(parser, pos);
+            REMEMBER_INPUT_POSITION(parser, pos);
 
             { // Negate (only match if pattern fails)
-              REMEMBER_POSITION(parser, pos);
+              REMEMBER_INPUT_POSITION(parser, pos);
 
               { // Lookahead (match without consuming input)
-                REMEMBER_POSITION(parser, pos);
+                REMEMBER_INPUT_POSITION(parser, pos);
 
                 { // Sequence with 3 patterns
-                  REMEMBER_POSITION(parser, pos);
+                  REMEMBER_INPUT_POSITION(parser, pos);
 
                   { // Match single character "["
                     if (parser->pos < parser->input_len &&
@@ -3560,20 +3571,20 @@ static bool parse_comment(Parser *parser) {
                       }
                     }
                     if (!parser->success) {
-                      RESTORE_POSITION(parser, pos);
+                      RESTORE_INPUT_POSITION(parser, pos);
                     }
                   }
                 }
 
                 if (parser->success) {
                   // Pattern matched, but we don't consume any input
-                  RESTORE_POSITION(parser, pos);
+                  RESTORE_INPUT_POSITION(parser, pos);
                 }
               }
 
               if (parser->success) {
                 // Pattern matched, so negate fails
-                RESTORE_POSITION(parser, pos);
+                RESTORE_INPUT_POSITION(parser, pos);
                 parser->success = false;
                 PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
@@ -3587,17 +3598,17 @@ static bool parse_comment(Parser *parser) {
                   parser->throw_label = NULL;
                   parser->throw_pos = 0;
                 }
-                RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+                RESTORE_INPUT_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
               }
             }
             if (parser->success) {
               { // Zero or more repetitions
                 while (true) {
                   { // Sequence with 2 patterns
-                    REMEMBER_POSITION(parser, pos);
+                    REMEMBER_INPUT_POSITION(parser, pos);
 
                     { // Negate (only match if pattern fails)
-                      REMEMBER_POSITION(parser, pos);
+                      REMEMBER_INPUT_POSITION(parser, pos);
 
                       { // Match single character "\n"
                         if (parser->pos < parser->input_len &&
@@ -3616,7 +3627,7 @@ static bool parse_comment(Parser *parser) {
 
                       if (parser->success) {
                         // Pattern matched, so negate fails
-                        RESTORE_POSITION(parser, pos);
+                        RESTORE_INPUT_POSITION(parser, pos);
                         parser->success = false;
                         PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
@@ -3630,7 +3641,7 @@ static bool parse_comment(Parser *parser) {
                           parser->throw_label = NULL;
                           parser->throw_pos = 0;
                         }
-                        RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+                        RESTORE_INPUT_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
                       }
                     }
                     if (parser->success) {
@@ -3646,7 +3657,7 @@ static bool parse_comment(Parser *parser) {
                         }
                       }
                       if (!parser->success) {
-                        RESTORE_POSITION(parser, pos);
+                        RESTORE_INPUT_POSITION(parser, pos);
                       }
                     }
                   }
@@ -3660,7 +3671,7 @@ static bool parse_comment(Parser *parser) {
                 }
               }
               if (!parser->success) {
-                RESTORE_POSITION(parser, pos);
+                RESTORE_INPUT_POSITION(parser, pos);
               }
             }
           }
@@ -5094,7 +5105,7 @@ static bool parse_ident(Parser *parser) {
 #endif
 
   { // Sequence with 2 patterns
-    REMEMBER_POSITION(parser, pos);
+    REMEMBER_INPUT_POSITION(parser, pos);
 
     { // Match character range: "az,AZ,__"
       if (parser->pos < parser->input_len &&
@@ -5161,7 +5172,7 @@ static bool parse_ident(Parser *parser) {
         }
       }
       if (!parser->success) {
-        RESTORE_POSITION(parser, pos);
+        RESTORE_INPUT_POSITION(parser, pos);
       }
     }
   }
@@ -5194,7 +5205,7 @@ static bool parse_keyword(Parser *parser) {
 #endif
 
   { // Sequence with 2 patterns
-    REMEMBER_POSITION(parser, pos);
+    REMEMBER_INPUT_POSITION(parser, pos);
 
     { // Trie match for: "and", "break", "do", "elseif", "else", "end", "false", "for", "function", "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while"
       REMEMBER_POSITION(parser, trie_start);
@@ -6665,7 +6676,7 @@ static bool parse_keyword(Parser *parser) {
     }
     if (parser->success) {
       { // Negate (only match if pattern fails)
-        REMEMBER_POSITION(parser, pos);
+        REMEMBER_INPUT_POSITION(parser, pos);
 
         { // Match character range: "az,AZ,09,__"
           if (parser->pos < parser->input_len &&
@@ -6698,7 +6709,7 @@ static bool parse_keyword(Parser *parser) {
 
         if (parser->success) {
           // Pattern matched, so negate fails
-          RESTORE_POSITION(parser, pos);
+          RESTORE_INPUT_POSITION(parser, pos);
           parser->success = false;
           PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
@@ -6712,11 +6723,11 @@ static bool parse_keyword(Parser *parser) {
             parser->throw_label = NULL;
             parser->throw_pos = 0;
           }
-          RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+          RESTORE_INPUT_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
         }
       }
       if (!parser->success) {
-        RESTORE_POSITION(parser, pos);
+        RESTORE_INPUT_POSITION(parser, pos);
       }
     }
   }

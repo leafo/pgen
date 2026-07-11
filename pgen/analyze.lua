@@ -1,6 +1,69 @@
 local analyze = {}
 local types = require("pgen.types")
 
+-- Determine whether matching a pattern may change state that must be rolled
+-- back with the input position (captures pushed onto the Lua stack, indenter
+-- stack operations). Rule references are resolved through rule_states, a
+-- precomputed name -> boolean table from analyze.stateful_rules; rules
+-- missing from the grammar are treated as stateful.
+function analyze.changes_backtrack_state(pattern, rules, rule_states)
+  if type(pattern) ~= "table" then
+    return true
+  end
+
+  rules = rules or {}
+  rule_states = rule_states or {}
+
+  local t = pattern.type
+
+  if t == types.C or t == types.Ct or t == types.Cp or t == types.Cc or
+      t == types.Cg or t == types.Cn or t == types.Cmt or t == types.Ind then
+    return true
+  elseif t == types.P or t == types.R or t == types.S or t == types.Cmb or
+      t == types.T or t == "literal_trie" then
+    return false
+  elseif t == types.V then
+    local name = pattern.value
+    if type(rules[name]) ~= "table" then
+      return true
+    end
+    return rule_states[name] or false
+  elseif t == types.L then
+    return analyze.changes_backtrack_state(pattern.value, rules, rule_states)
+  elseif t == "repeat" or t == "negate" then
+    return analyze.changes_backtrack_state(pattern[1], rules, rule_states)
+  elseif t == "sequence" or t == "choice" then
+    for _, child in ipairs(pattern) do
+      if analyze.changes_backtrack_state(child, rules, rule_states) then
+        return true
+      end
+    end
+    return false
+  end
+
+  -- New pattern types must opt into the capture-free fast path explicitly.
+  return true
+end
+
+-- Compute changes_backtrack_state for every rule in the grammar as a least
+-- fixed point: rules start assumed state-free and are flipped to stateful
+-- until stable, so cycles of state-free rules correctly resolve to false.
+function analyze.stateful_rules(rules)
+  local states = {}
+  local changed = true
+  while changed do
+    changed = false
+    for name, pattern in pairs(rules) do
+      if not states[name] and
+          analyze.changes_backtrack_state(pattern, rules, states) then
+        states[name] = true
+        changed = true
+      end
+    end
+  end
+  return states
+end
+
 -- Determine whether a pattern can succeed without consuming any input.
 -- Conservative: returns true when uncertain (recursive or unknown rules), so
 -- a `true` result means "may match empty", never "definitely matches empty".

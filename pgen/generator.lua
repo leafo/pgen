@@ -200,6 +200,15 @@ local function sorted_rules(rules, start_rule)
   end
 end
 
+local function position_operations(pattern, context)
+  local needs_state = context.analyze.changes_backtrack_state(
+    pattern, context.rules, context.stateful_rules)
+  if needs_state then
+    return "REMEMBER_POSITION(parser, pos);", "RESTORE_POSITION(parser, pos);"
+  end
+  return "REMEMBER_INPUT_POSITION(parser, pos);", "RESTORE_INPUT_POSITION(parser, pos);"
+end
+
 -- Compile a grammar definition to C code
 function generator.generate(grammar, parser_name, options)
   options = options or {}
@@ -552,6 +561,10 @@ typedef struct {
   int stack_size;$IND_PP_FIELD$
 } ParserPosition;
 
+typedef struct {
+  size_t pos;
+} ParserInputPosition;
+
 #define REMEMBER_POSITION(parser, pp) \
   ParserPosition pp; \
   (pp).pos = (parser)->pos; \
@@ -561,6 +574,13 @@ typedef struct {
 #define RESTORE_POSITION(parser, pp) \
   (parser)->pos = (pp).pos; \
   lua_settop((parser)->L, (pp).stack_size);$IND_RESTORE$
+
+#define REMEMBER_INPUT_POSITION(parser, pp) \
+  ParserInputPosition pp; \
+  (pp).pos = (parser)->pos;
+
+#define RESTORE_INPUT_POSITION(parser, pp) \
+  (parser)->pos = (pp).pos;
 
 // Records the furthest input position where a match attempt failed (only
 // ever increases). Because the parser can only attempt a position it
@@ -641,16 +661,21 @@ end
 -- Generate functions for each rule
 function generator.generate_rule_functions(rules, start_rule)
   local result = "// Rule functions\n"
-
+  local analyze = require("pgen.analyze")
+  local context = {
+    analyze = analyze,
+    rules = rules,
+    stateful_rules = analyze.stateful_rules(rules)
+  }
   for name, pattern in sorted_rules(rules, start_rule) do
-    result = result .. generator.generate_rule_function(name, pattern)
+    result = result .. generator.generate_rule_function(name, pattern, context)
   end
 
   return result
 end
 
 -- Generate a function for a specific rule
-function generator.generate_rule_function(name, pattern)
+function generator.generate_rule_function(name, pattern, context)
   return template_code([[static bool parse_$NAME$(Parser *parser) {
   size_t start = parser->pos;
 
@@ -682,12 +707,12 @@ function generator.generate_rule_function(name, pattern)
 
 ]], {
     NAME = name,
-    BODY = generator.generate_pattern_code(pattern)
+    BODY = generator.generate_pattern_code(pattern, context)
   })
 end
 
 -- Generate code for a pattern
-function generator.generate_pattern_code(pattern)
+function generator.generate_pattern_code(pattern, context)
   local t = pattern.type
 
   if t == types.P then -- P (literal string)
@@ -707,38 +732,38 @@ function generator.generate_pattern_code(pattern)
     local rule_name = pattern.value
     return generator.generate_rule_call_code(rule_name)
   elseif t == types.C then -- C (capture)
-    return generator.generate_capture_code(pattern.value)
+    return generator.generate_capture_code(pattern.value, context)
   elseif t == types.Ct then -- Ct (capture table)
-    return generator.generate_capture_table_code(pattern.value, pattern.array_only)
+    return generator.generate_capture_table_code(pattern.value, pattern.array_only, context)
   elseif t == types.Cp then -- Cp (capture position)
     return generator.generate_position_capture_code()
   elseif t == types.Cc then -- Cc (constant capture)
     return generator.generate_constant_capture_code(pattern.value)
   elseif t == types.L then -- L (lookahead)
-    return generator.generate_lookahead_code(pattern.value)
+    return generator.generate_lookahead_code(pattern.value, context)
   elseif t == types.Cg then -- Cg (capture group)
-    return generator.generate_capture_group_code(pattern.value, pattern.name)
+    return generator.generate_capture_group_code(pattern.value, pattern.name, context)
   elseif t == types.Cn then -- Cn (numbered capture)
-    return generator.generate_numbered_capture_code(pattern.value, pattern.name)
+    return generator.generate_numbered_capture_code(pattern.value, pattern.name, context)
   elseif t == types.Cmb then -- Cmb (capture match back)
     return generator.generate_capture_match_back_code(pattern.name)
   elseif t == types.Cmt then -- Cmt (match-time capture)
-    return generator.generate_cmt_code(pattern.value, pattern.cmt_id)
+    return generator.generate_cmt_code(pattern.value, pattern.cmt_id, context)
   elseif t == types.T then -- T (labeled failure)
     return generator.generate_labeled_failure_code(pattern.value)
   elseif t == types.Ind then -- Ind (indenter stack operation)
     return generator.generate_indenter_code(pattern)
   elseif t == "sequence" then
-    return generator.generate_sequence_code(unpack(pattern))
+    return generator.generate_sequence_code(pattern, context)
   elseif t == "choice" then
-    return generator.generate_choice_code(pattern[1], pattern[2])
+    return generator.generate_choice_code(pattern[1], pattern[2], context)
   -- TODO: this is redundant, but might be able to optimize ^-1 with reduced code
   --elseif t == "optional" then
   --  return generator.generate_optional_code(pattern[1])
   elseif t == "repeat" then
-    return generator.generate_repeat_code(pattern[1], pattern[2])
+    return generator.generate_repeat_code(pattern[1], pattern[2], context)
   elseif t == "negate" then
-    return generator.generate_negate_code(pattern[1])
+    return generator.generate_negate_code(pattern[1], context)
   elseif t == "literal_trie" then
     return generator.generate_trie_code(pattern.trie, pattern.strings)
   else
@@ -889,43 +914,44 @@ function generator.generate_rule_call_code(rule_name)
 end
 
 -- Generate code for a sequence
-function generator.generate_sequence_code(...)
-  local patterns = {...}
-
+function generator.generate_sequence_code(patterns, context)
   if #patterns == 1 then
     -- TODO: throw an error here? shouldn't happen
-    return generator.generate_pattern_code(patterns[1])
+    return generator.generate_pattern_code(patterns[1], context)
   end
 
-  function step(idx, current, ...)
-    local rest = ... and template_code([[
+  local remember, restore = position_operations(patterns, context)
+
+  local function step(idx)
+    local rest = patterns[idx + 1] and template_code([[
 if (parser->success) {
   $PATTERN$
   $RESET$
 }]], {
-      PATTERN = step(idx + 1, ...),
-      RESET = idx == 1 and "if (!parser->success) { RESTORE_POSITION(parser, pos); }" or ""
+      PATTERN = step(idx + 1),
+      RESET = idx == 1 and "if (!parser->success) { " .. restore .. " }" or ""
     })
 
     return table.concat({
-      generator.generate_pattern_code(current),
+      generator.generate_pattern_code(patterns[idx], context),
       rest
     },"\n")
   end
 
   -- Generate the initial position storage and first pattern
   return template_code([[{// Sequence with $N$ patterns
-REMEMBER_POSITION(parser, pos);
+$REMEMBER$
 
 $SEQUENCE$
 }]], {
     N = #patterns,
-    SEQUENCE = step(1, unpack(patterns))
+    REMEMBER = remember,
+    SEQUENCE = step(1)
   })
 end
 
 -- Generate code for a choice
-function generator.generate_choice_code(a, b)
+function generator.generate_choice_code(a, b, context)
   return template_code([[{ // Choice
   $A$
 
@@ -935,15 +961,15 @@ function generator.generate_choice_code(a, b)
     $B$
   }
 }]], {
-  A = generator.generate_pattern_code(a),
-  B = generator.generate_pattern_code(b)
+  A = generator.generate_pattern_code(a, context),
+  B = generator.generate_pattern_code(b, context)
 })
 end
 
 -- Generate code for number of repetitions
 -- if n is zero or positive, at least n repetitions
 -- if n is negative, at most n repetitions
-function generator.generate_repeat_code(a, n)
+function generator.generate_repeat_code(a, n, context)
   if n < 0 then
     local at_most = -n
 
@@ -970,7 +996,7 @@ function generator.generate_repeat_code(a, n)
   }
 }]], {
       N = at_most,
-      BODY = generator.generate_pattern_code(a)
+      BODY = generator.generate_pattern_code(a, context)
     })
   end
 
@@ -987,13 +1013,15 @@ function generator.generate_repeat_code(a, n)
     parser->success = true;
   }
 }]], {
-      BODY = generator.generate_pattern_code(a)
+      BODY = generator.generate_pattern_code(a, context)
     })
   end
 
 
+  local remember, restore = position_operations(a, context)
+
   return template_code([[{ // At least $N$ repetitions
-  REMEMBER_POSITION(parser, pos);
+  $REMEMBER$
   size_t rep_count = 0;
 
   while(true) {
@@ -1012,27 +1040,31 @@ function generator.generate_repeat_code(a, n)
   } else if (rep_count >= $N$) {
     parser->success = true;
   } else {
-    RESTORE_POSITION(parser, pos);
+    $RESTORE$
 #ifdef PGEN_ERRORS
     sprintf(parser->error_message, "Expected $N$ repetitions at position %zu", parser->pos);
 #endif
   }
 }]], {
     N = n,
-    BODY = generator.generate_pattern_code(a)
+    REMEMBER = remember,
+    RESTORE = restore,
+    BODY = generator.generate_pattern_code(a, context)
   })
 end
 
 -- Generate code for a negated pattern
-function generator.generate_negate_code(a)
+function generator.generate_negate_code(a, context)
+  local remember, restore = position_operations(a, context)
+
   return template_code([[{// Negate (only match if pattern fails)
-  REMEMBER_POSITION(parser, pos);
+  $REMEMBER$
 
   $BODY$
 
   if (parser->success) {
     // Pattern matched, so negate fails
-    RESTORE_POSITION(parser, pos);
+    $RESTORE$
     parser->success = false;
     PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
@@ -1046,15 +1078,17 @@ function generator.generate_negate_code(a)
       parser->throw_label = NULL;
       parser->throw_pos = 0;
     }
-    RESTORE_POSITION(parser, pos); // Restore original position (technically not necessary since failed pattern should make no changes to position)
+    $RESTORE$ // Restore original position (technically not necessary since failed pattern should make no changes to position)
   }
 }]], {
-    BODY = generator.generate_pattern_code(a)
+    REMEMBER = remember,
+    RESTORE = restore,
+    BODY = generator.generate_pattern_code(a, context)
   })
 end
 
 -- Generate code for a capture
-function generator.generate_capture_code(body)
+function generator.generate_capture_code(body, context)
   return template_code([[{ // Capture
   size_t start_pos = parser->pos;
   $BODY$
@@ -1065,13 +1099,13 @@ function generator.generate_capture_code(body)
     lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
   }
 }]], {
-    BODY = generator.generate_pattern_code(body)
+    BODY = generator.generate_pattern_code(body, context)
   })
 end
 
 -- Generate code for a capture table (Ct)
 -- Handles both regular captures (array part) and named captures via Cg (hash part)
-function generator.generate_capture_table_code(body, array_only)
+function generator.generate_capture_table_code(body, array_only, context)
   if array_only then
     return template_code([[{ // Capture Table (array-only)
   int initial_stack_size = lua_gettop(parser->L);
@@ -1099,7 +1133,7 @@ function generator.generate_capture_table_code(body, array_only)
     }
   }
 }]], {
-      BODY = generator.generate_pattern_code(body)
+      BODY = generator.generate_pattern_code(body, context)
     })
   end
 
@@ -1156,7 +1190,7 @@ function generator.generate_capture_table_code(body, array_only)
     }
   }
 }]], {
-    BODY = generator.generate_pattern_code(body)
+    BODY = generator.generate_pattern_code(body, context)
   })
 end
 
@@ -1210,25 +1244,29 @@ function generator.generate_constant_capture_code(values)
 end
 
 -- Generate code for a lookahead pattern (L)
-function generator.generate_lookahead_code(body)
+function generator.generate_lookahead_code(body, context)
+  local remember, restore = position_operations(body, context)
+
   return template_code([[{// Lookahead (match without consuming input)
-  REMEMBER_POSITION(parser, pos);
+  $REMEMBER$
 
   $BODY$
 
   if (parser->success) {
     // Pattern matched, but we don't consume any input
-    RESTORE_POSITION(parser, pos);
+    $RESTORE$
   }
 }]], {
-    BODY = generator.generate_pattern_code(body)
+    REMEMBER = remember,
+    RESTORE = restore,
+    BODY = generator.generate_pattern_code(body, context)
   })
 end
 
 -- Generate code for a capture group (Cg)
 -- Pushes two values to the stack: a sentinel (light userdata) and the captured value
 -- If inner pattern produces captures, uses the first capture; otherwise captures matched text
-function generator.generate_capture_group_code(body, name)
+function generator.generate_capture_group_code(body, name, context)
   return template_code([[{ // Capture Group "$NAME$"
   int cg_stack_start = lua_gettop(parser->L);
   size_t start_pos = parser->pos;
@@ -1258,7 +1296,7 @@ function generator.generate_capture_group_code(body, name)
     }
   }
 }]], {
-    BODY = generator.generate_pattern_code(body),
+    BODY = generator.generate_pattern_code(body, context),
     NAME = name
   })
 end
@@ -1266,7 +1304,7 @@ end
 -- Generate code for a numbered capture (Cn)
 -- Selects the nth capture from inner pattern, or no captures if n=0
 -- If n > capture count, returns nil
-function generator.generate_numbered_capture_code(body, n)
+function generator.generate_numbered_capture_code(body, n, context)
   if n == 0 then
     return template_code([[{ // Numbered Capture (discard all)
   int cn_stack_start = lua_gettop(parser->L);
@@ -1276,7 +1314,7 @@ function generator.generate_numbered_capture_code(body, n)
     lua_settop(parser->L, cn_stack_start);
   }
 }]], {
-      BODY = generator.generate_pattern_code(body)
+      BODY = generator.generate_pattern_code(body, context)
     })
   end
 
@@ -1313,7 +1351,7 @@ function generator.generate_numbered_capture_code(body, n)
     }
   }
 }]], {
-    BODY = generator.generate_pattern_code(body),
+    BODY = generator.generate_pattern_code(body, context),
     N = n
   })
 end
@@ -1357,7 +1395,7 @@ end
 
 -- Generate code for match-time capture (Cmt)
 -- Calls a Lua callback during parsing with (subject, position, ...captures)
-function generator.generate_cmt_code(inner_pattern, cmt_id)
+function generator.generate_cmt_code(inner_pattern, cmt_id, context)
   return template_code([[{ // Match-time capture (Cmt id=$ID$)
   int cmt_stack_base = lua_gettop(parser->L);
   size_t cmt_start_pos = parser->pos;
@@ -1449,7 +1487,7 @@ function generator.generate_cmt_code(inner_pattern, cmt_id)
   }
 }]], {
     ID = cmt_id,
-    INNER_PATTERN_CODE = generator.generate_pattern_code(inner_pattern)
+    INNER_PATTERN_CODE = generator.generate_pattern_code(inner_pattern, context)
   })
 end
 
