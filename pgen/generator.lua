@@ -70,34 +70,49 @@ local function collect_cg_names(grammar)
   return result
 end
 
--- Collect all unique string values from Cc nodes in a grammar. These are
--- interned into the Lua registry once at module load so matching pushes them
--- with lua_rawgeti instead of re-interning via lua_pushlstring every time.
--- Returns a sorted array of strings and a string -> 0-based index map.
-local function collect_constant_strings(grammar)
+-- Collect all unique non-nil values from Cc nodes in a grammar. These are
+-- interned into the Lua registry once at module load; capture-log CONST
+-- entries reference them by registry ref, so matching never constructs
+-- constant values. Returns a deterministically ordered array of values and
+-- a value -> 0-based index map.
+local function collect_constants(grammar)
   local visitor = require("pgen.visitor")
   local seen = {}
   visitor.visit_grammar(grammar, function(node)
     if node.type == types.Cc then
       local values = node.value
       for i = 1, values.count do
-        if type(values[i]) == "string" then
+        if values[i] ~= nil then
           seen[values[i]] = true
         end
       end
     end
   end)
 
-  local pool = {}
-  for str in pairs(seen) do
-    table.insert(pool, str)
+  local strings, numbers = {}, {}
+  local has_false, has_true = false, false
+  for value in pairs(seen) do
+    local t = type(value)
+    if t == "string" then
+      table.insert(strings, value)
+    elseif t == "number" then
+      table.insert(numbers, value)
+    elseif t == "boolean" then
+      if value then has_true = true else has_false = true end
+    end
   end
-  table.sort(pool)
+  table.sort(strings)
+  table.sort(numbers)
 
-  local index = {}
-  for i, str in ipairs(pool) do
-    index[str] = i - 1
+  local pool, index = {}, {}
+  local function add(value)
+    table.insert(pool, value)
+    index[value] = #pool - 1
   end
+  for _, value in ipairs(strings) do add(value) end
+  for _, value in ipairs(numbers) do add(value) end
+  if has_false then add(false) end
+  if has_true then add(true) end
 
   return pool, index
 end
@@ -286,15 +301,15 @@ function generator.generate(grammar, parser_name, options)
     assert_valid_c_identifier(name)
   end
 
-  -- Collect Cc string constants for load-time interning
-  local const_pool, const_index = collect_constant_strings(transformed_grammar)
+  -- Collect Cc constants for load-time interning
+  local const_pool, const_index = collect_constants(transformed_grammar)
   local has_consts = #const_pool > 0 or #cg_names > 0
 
   -- Generate the C code
   local c_chunks = {
     generator.generate_parser_header(parser_name, cg_names, cmt_codes, indenters, const_pool),
     generator.generate_forward_declarations(rules, start_rule),
-    generator.generate_rule_functions(rules, start_rule, const_index),
+    generator.generate_rule_functions(rules, start_rule, const_index, cg_names),
     generator.generate_parser_main(parser_name, start_rule, cmt_codes, indenters, has_consts),
     -- Add compilation instructions as a comment
     template_code([[/*
@@ -325,66 +340,208 @@ local result = $PARSER_NAME$.parse("your input string")
   return table.concat(c_chunks, "\n")
 end
 
--- Generate sentinel declarations for Cg names
--- Always generates is_cg_sentinel function (returns false if no sentinels)
-local function generate_cg_sentinels(cg_names)
+-- Generate the Cg name table: capture-log GROUP entries carry the name as
+-- an index into this table; __cg_name_refs holds registry refs for the
+-- interned name strings (used as table keys during materialization)
+local function generate_cg_names(cg_names)
   local lines = {}
 
   if #cg_names > 0 then
-    table.insert(lines, "// Named capture group sentinels")
-
-    -- Generate sentinel declarations
+    table.insert(lines, "// Named capture group names (GROUP entry aux = index here)")
+    table.insert(lines, "static const char *__cg_names[] = {")
     for _, name in ipairs(cg_names) do
-      table.insert(lines, template_code(
-        "static const char __cg_sentinel_$NAME$[] = $NAME_STR$;",
-        {NAME = name, NAME_STR = escape_c_literal(name)}
-      ))
-    end
-
-    -- Generate registry array
-    table.insert(lines, "")
-    table.insert(lines, "// Registry of all known sentinels (for validation)")
-    table.insert(lines, "static const void* __cg_sentinel_registry[] = {")
-    for _, name in ipairs(cg_names) do
-      table.insert(lines, template_code("  (void*)__cg_sentinel_$NAME$,", {NAME = name}))
+      table.insert(lines, "  " .. escape_c_literal(name) .. ",")
     end
     table.insert(lines, "  NULL  // terminator")
     table.insert(lines, "};")
-
-    -- Generate lookup functions that check the registry
     table.insert(lines, "")
-    table.insert(lines, template_code([[// Registry refs for the interned sentinel name strings, filled at module load
-static int __cg_name_refs[$COUNT$];
-
-// Return the sentinel's registry index, or -1 if not one of our Cg sentinels
-static int cg_sentinel_index(void* ptr) {
-  for (int i = 0; __cg_sentinel_registry[i] != NULL; i++) {
-    if (ptr == __cg_sentinel_registry[i]) return i;
-  }
-  return -1;
-}
-
-// Check if a pointer is one of our Cg sentinels
-static bool is_cg_sentinel(void* ptr) {
-  return cg_sentinel_index(ptr) >= 0;
-}]], {COUNT = #cg_names}))
+    table.insert(lines, template_code(
+      "static int __cg_name_refs[$COUNT$];", {COUNT = #cg_names}))
   else
-    -- No Cg names - generate stubs
-    table.insert(lines, [[// No Cg sentinels defined - stubs
-static int __cg_name_refs[1];
-
-static int cg_sentinel_index(void* ptr) {
-  (void)ptr; // unused
-  return -1;
-}
-
-static bool is_cg_sentinel(void* ptr) {
-  (void)ptr; // unused
-  return false;
-}]])
+    table.insert(lines, "// No named capture groups")
+    table.insert(lines, "static int __cg_name_refs[1];")
   end
 
   return table.concat(lines, "\n") .. "\n"
+end
+
+-- Generate the capture-log evaluator: materializes log entries into Lua
+-- values. Runs once after a successful parse (and on demand at Cmt
+-- boundaries), so it is not on the matching hot path.
+local function generate_cap_evaluator()
+  return [[
+// --- Capture log evaluation ---
+
+static void pgen_cap_eval(Parser *parser, size_t *i);
+
+// Push the single value a capture group produces: its first inner capture,
+// or the text it matched when it contains no captures
+static void pgen_cap_eval_group(Parser *parser, size_t *i) {
+  size_t open = *i;
+  pgen_cap_skip(parser, i);  // *i now points past GROUP_CLOSE
+  size_t close = *i - 1;
+  if (open + 1 == close) {
+    size_t start = parser->caps[open].start;
+    pgen_checkstack(parser, 1);
+    lua_pushlstring(parser->L, parser->input + start, parser->caps[close].start - start);
+    parser->top++;
+  } else {
+    size_t j = open + 1;
+    pgen_cap_eval(parser, &j);  // first value only; extras are discarded
+  }
+}
+
+// Materialize one log item (entry or bracketed range) at *i, pushing
+// exactly one Lua value and advancing *i past the item
+static void pgen_cap_eval(Parser *parser, size_t *i) {
+  PgenCap *cap = &parser->caps[*i];
+  switch (cap->kind) {
+  case PGEN_CAP_STR:
+    pgen_checkstack(parser, 1);
+    lua_pushlstring(parser->L, parser->input + cap->start, cap->len);
+    parser->top++;
+    (*i)++;
+    return;
+  case PGEN_CAP_CONST:
+    pgen_checkstack(parser, 1);
+    lua_rawgeti(parser->L, LUA_REGISTRYINDEX, cap->aux);
+    parser->top++;
+    (*i)++;
+    return;
+  case PGEN_CAP_NIL:
+    pgen_checkstack(parser, 1);
+    lua_pushnil(parser->L);
+    parser->top++;
+    (*i)++;
+    return;
+  case PGEN_CAP_POS:
+    pgen_checkstack(parser, 1);
+    lua_pushinteger(parser->L, (lua_Integer)(cap->start + 1));
+    parser->top++;
+    (*i)++;
+    return;
+  case PGEN_CAP_VALUE:
+    pgen_checkstack(parser, 1);
+    lua_pushvalue(parser->L, cap->aux);
+    parser->top++;
+    (*i)++;
+    return;
+  case PGEN_CAP_GROUP_OPEN:
+    pgen_cap_eval_group(parser, i);
+    return;
+  default: {  // PGEN_CAP_TBL_OPEN
+    // No presizing: counting items would re-walk every nested subtree at
+    // each nesting level, which costs more than letting the table grow
+    pgen_checkstack(parser, 3);
+    lua_createtable(parser->L, 0, 0);
+    parser->top++;
+    int table_idx = parser->top;
+
+    size_t j = *i + 1;
+    int array_idx = 1;
+    while (parser->caps[j].kind != PGEN_CAP_TBL_CLOSE) {
+      if (parser->caps[j].kind == PGEN_CAP_GROUP_OPEN) {
+        pgen_checkstack(parser, 2);
+        lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cg_name_refs[parser->caps[j].aux]);
+        parser->top++;
+        pgen_cap_eval_group(parser, &j);
+        lua_rawset(parser->L, table_idx);
+        parser->top -= 2;
+      } else {
+        pgen_cap_eval(parser, &j);
+        lua_rawseti(parser->L, table_idx, array_idx++);
+        parser->top--;
+      }
+    }
+    *i = j + 1;  // past TBL_CLOSE
+    return;
+  }
+  }
+}
+
+// Run a match-time capture: materialize the inner captures, call the
+// callback with (subject, pos, ...captures), and interpret its results per
+// lpeg semantics: position/true = success, false/nil = failure, extra
+// return values become captures (kept on the Lua stack)
+static void pgen_run_cmt(Parser *parser, int func_ref, size_t start_pos, size_t cap_base, int top_base) {
+  lua_State *L = parser->L;
+  size_t pos_after_inner = parser->pos;
+  int leftovers = parser->top - top_base;  // nested Cmt values still on the stack
+
+  pgen_checkstack(parser, 3);
+  lua_rawgeti(L, LUA_REGISTRYINDEX, func_ref);
+  lua_pushlstring(L, parser->input, parser->input_len);
+  lua_pushinteger(L, (lua_Integer)(pos_after_inner + 1));  // 1-based
+  parser->top += 3;
+
+  int nargs = 2;
+  size_t i = cap_base;
+  while (i < parser->cap_len) {
+    if (parser->caps[i].kind == PGEN_CAP_GROUP_OPEN) {
+      // named groups only matter inside Ct; they aren't passed as arguments
+      pgen_cap_skip(parser, &i);
+    } else {
+      pgen_cap_eval(parser, &i);
+      nargs++;
+    }
+  }
+  parser->cap_len = cap_base;  // consume the inner captures
+
+  // lua_call propagates errors (aborts parse on Lua error)
+  lua_call(L, nargs, LUA_MULTRET);
+  parser->top = lua_gettop(L);
+  if (parser->stack_claimed > parser->top) parser->stack_claimed = parser->top;
+
+  int returns_count = parser->top - (top_base + leftovers);
+
+  if (returns_count == 0) {
+    // No return value = match fails
+    parser->success = false;
+    PGEN_RECORD_FURTHEST(parser);  // record at pos_after_inner, before rewind
+    parser->pos = start_pos;
+  } else {
+    int first = top_base + leftovers + 1;
+    int first_type = lua_type(L, first);
+    if (first_type == LUA_TNUMBER) {
+      // Number = new position (1-based from Lua)
+      lua_Integer new_pos = lua_tointeger(L, first) - 1;
+      // Per lpeg: must be in range [pos_after_inner, input_len]
+      if (new_pos >= (lua_Integer)pos_after_inner && new_pos <= (lua_Integer)parser->input_len) {
+        parser->pos = (size_t)new_pos;
+        parser->success = true;
+      } else {
+        parser->success = false;
+        PGEN_RECORD_FURTHEST(parser);
+        parser->pos = start_pos;
+      }
+    } else if (first_type == LUA_TBOOLEAN && lua_toboolean(L, first)) {
+      // true = succeed without consuming (position stays at pos_after_inner)
+      parser->success = true;
+    } else {
+      // false, nil, or other = fail
+      parser->success = false;
+      PGEN_RECORD_FURTHEST(parser);
+      parser->pos = start_pos;
+    }
+  }
+
+  if (parser->success && returns_count > 1) {
+    // Drop leftover nested-Cmt slots and the first return value; the
+    // remaining returns stay on the stack as the new captures
+    for (int r = 0; r < leftovers + 1; r++) {
+      lua_remove(L, top_base + 1);
+    }
+    parser->top -= leftovers + 1;
+    if (parser->stack_claimed > parser->top) parser->stack_claimed = parser->top;
+    int extras = returns_count - 1;
+    for (int r = 0; r < extras; r++) {
+      pgen_cap_push(parser, PGEN_CAP_VALUE, top_base + 1 + r, 0, 0);
+    }
+  } else {
+    PGEN_SETTOP(parser, top_base);
+  }
+}
+]]
 end
 
 -- Generate Cmt (match-time capture) infrastructure
@@ -428,16 +585,16 @@ static void __cmt_init(lua_State *L) {]])
   return table.concat(lines, "\n")
 end
 
--- Generate the constant string interning infrastructure: a registry ref
--- array for Cc string values plus an init function that interns them (and
--- the Cg sentinel names) once at module load
+-- Generate the constant interning infrastructure: a registry ref array for
+-- Cc values plus an init function that interns them (and the Cg group
+-- names) once at module load
 local function generate_const_infrastructure(const_pool, cg_names)
   if #const_pool == 0 and #cg_names == 0 then
     return ""
   end
 
   local lines = {}
-  table.insert(lines, "// Interned constant strings (pushed once at module load)")
+  table.insert(lines, "// Interned constants (pushed once at module load)")
 
   if #const_pool > 0 then
     table.insert(lines, template_code("static int __const_refs[$COUNT$];", {COUNT = #const_pool}))
@@ -446,18 +603,29 @@ local function generate_const_infrastructure(const_pool, cg_names)
   table.insert(lines, "")
   table.insert(lines, "static void __const_init(lua_State *L) {")
 
-  for i, str in ipairs(const_pool) do
-    table.insert(lines, template_code([[  lua_pushlstring(L, $VALUE$, $LENGTH$);
-  __const_refs[$IDX$] = luaL_ref(L, LUA_REGISTRYINDEX);]], {
-      VALUE = escape_c_literal(str),
-      LENGTH = #str,
-      IDX = i - 1
-    }))
+  for i, value in ipairs(const_pool) do
+    local t = type(value)
+    local push_line
+    if t == "string" then
+      push_line = template_code("  lua_pushlstring(L, $VALUE$, $LENGTH$);", {
+        VALUE = escape_c_literal(value),
+        LENGTH = #value
+      })
+    elseif t == "number" then
+      push_line = template_code("  lua_pushnumber(L, $VALUE$);", {
+        VALUE = string.format("%.17g", value)
+      })
+    else -- boolean
+      push_line = "  lua_pushboolean(L, " .. (value and "1" or "0") .. ");"
+    end
+    table.insert(lines, push_line .. template_code([[
+
+  __const_refs[$IDX$] = luaL_ref(L, LUA_REGISTRYINDEX);]], {IDX = i - 1}))
   end
 
   if #cg_names > 0 then
-    table.insert(lines, [[  for (int i = 0; __cg_sentinel_registry[i] != NULL; i++) {
-    lua_pushstring(L, (const char*)__cg_sentinel_registry[i]);
+    table.insert(lines, [[  for (int i = 0; __cg_names[i] != NULL; i++) {
+    lua_pushstring(L, __cg_names[i]);
     __cg_name_refs[i] = luaL_ref(L, LUA_REGISTRYINDEX);
   }]])
   end
@@ -634,6 +802,31 @@ function generator.generate_parser_header(parser_name, cg_names, cmt_codes, inde
 #define PGEN_MAX_DEPTH 5000
 #endif
 
+// --- Capture log ---
+// Captures are recorded as log entries during matching and only materialized
+// into Lua values after the whole parse succeeds. Backtracking rewinds the
+// log length, so discarded speculative captures never touch the Lua runtime.
+// The exception is Cmt: its callback runs mid-parse and its extra return
+// values live on the Lua stack, referenced by PGEN_CAP_VALUE entries.
+enum {
+  PGEN_CAP_STR,         // start/len: slice of the input
+  PGEN_CAP_CONST,       // aux: registry ref of an interned constant
+  PGEN_CAP_NIL,
+  PGEN_CAP_POS,         // start: input position
+  PGEN_CAP_VALUE,       // aux: absolute Lua stack index (Cmt results)
+  PGEN_CAP_TBL_OPEN,    // Ct brackets
+  PGEN_CAP_TBL_CLOSE,
+  PGEN_CAP_GROUP_OPEN,  // Cg brackets; aux: name index, start: input position
+  PGEN_CAP_GROUP_CLOSE
+};
+
+typedef struct {
+  int kind;
+  int aux;
+  size_t start;
+  size_t len;
+} PgenCap;
+
 $IND_TYPES$typedef struct {
   const char *input;
   size_t input_len;
@@ -646,11 +839,15 @@ $IND_TYPES$typedef struct {
   size_t depth;
   int top;                  // Shadow of lua_gettop(L), exact between patterns
   int stack_claimed;        // Stack index secured so far via lua_checkstack
+  PgenCap *caps;            // Capture log
+  size_t cap_len;
+  size_t cap_cap;
   lua_State *L;$IND_PARSER_FIELDS$
 } Parser;
 
 typedef struct {
   size_t pos;
+  size_t cap_len;
   int stack_size;$IND_PP_FIELD$
 } ParserPosition;
 
@@ -676,11 +873,13 @@ typedef struct {
 #define REMEMBER_POSITION(parser, pp) \
   ParserPosition pp; \
   (pp).pos = (parser)->pos; \
+  (pp).cap_len = (parser)->cap_len; \
   (pp).stack_size = (parser)->top;$IND_REMEMBER$
 
 // Restore parser position
 #define RESTORE_POSITION(parser, pp) \
   (parser)->pos = (pp).pos; \
+  (parser)->cap_len = (pp).cap_len; \
   PGEN_SETTOP(parser, (pp).stack_size);$IND_RESTORE$
 
 #define REMEMBER_INPUT_POSITION(parser, pp) \
@@ -752,6 +951,127 @@ static void pgen_checkstack_slow(Parser *parser, int n) {
       pgen_checkstack_slow(parser, n); \
   } while (0)
 
+static void pgen_cap_grow(Parser *parser) {
+  size_t new_cap = parser->cap_cap * 2;
+  PgenCap *caps = (PgenCap*)realloc(parser->caps, new_cap * sizeof(PgenCap));
+  if (!caps) {
+    luaL_error(parser->L, "pgen: out of memory growing capture log");
+  }
+  parser->caps = caps;
+  parser->cap_cap = new_cap;
+}
+
+// Append one log entry. A macro so the hot path (bounds check + four
+// stores) inlines into every capture site; arguments may be evaluated
+// twice, so call sites must pass side-effect-free expressions.
+#define pgen_cap_push(parser, k, a, s, l) \
+  do { \
+    if ((parser)->cap_len == (parser)->cap_cap) pgen_cap_grow(parser); \
+    PgenCap *pgen_cap_ = &(parser)->caps[(parser)->cap_len++]; \
+    pgen_cap_->kind = (k); \
+    pgen_cap_->aux = (a); \
+    pgen_cap_->start = (s); \
+    pgen_cap_->len = (l); \
+  } while (0)
+
+// Advance *i past one complete log item (a single entry, or a whole
+// bracketed Ct/Cg range including anything nested)
+static void pgen_cap_skip(Parser *parser, size_t *i) {
+  int kind = parser->caps[*i].kind;
+  (*i)++;
+  if (kind == PGEN_CAP_TBL_OPEN || kind == PGEN_CAP_GROUP_OPEN) {
+    int depth = 1;
+    while (depth > 0) {
+      kind = parser->caps[*i].kind;
+      if (kind == PGEN_CAP_TBL_OPEN || kind == PGEN_CAP_GROUP_OPEN) depth++;
+      else if (kind == PGEN_CAP_TBL_CLOSE || kind == PGEN_CAP_GROUP_CLOSE) depth--;
+      (*i)++;
+    }
+  }
+}
+
+// Reduce caps[base..] to only the nth capture value (group captures don't
+// count), or to a single nil when there are fewer than n values
+static void pgen_cap_select(Parser *parser, size_t base, int n) {
+  size_t i = base;
+  int count = 0;
+  while (i < parser->cap_len) {
+    if (parser->caps[i].kind == PGEN_CAP_GROUP_OPEN) {
+      pgen_cap_skip(parser, &i);
+      continue;
+    }
+    size_t item_start = i;
+    pgen_cap_skip(parser, &i);
+    count++;
+    if (count == n) {
+      size_t item_len = i - item_start;
+      memmove(&parser->caps[base], &parser->caps[item_start], item_len * sizeof(PgenCap));
+      parser->cap_len = base + item_len;
+      return;
+    }
+  }
+  parser->cap_len = base;
+  pgen_cap_push(parser, PGEN_CAP_NIL, 0, 0, 0);
+}
+
+// Match the text of the most recent visible "name" capture group at the
+// current input position. Groups inside completed capture tables are not
+// visible, mirroring the previous stack-based behavior where Ct consumed
+// its inner captures.
+static bool pgen_cap_match_back(Parser *parser, int name_idx) {
+  size_t i = parser->cap_len;
+  while (i > 0) {
+    i--;
+    int kind = parser->caps[i].kind;
+    if (kind == PGEN_CAP_TBL_CLOSE || kind == PGEN_CAP_GROUP_CLOSE) {
+      size_t close = i;
+      int depth = 1;
+      while (depth > 0) {
+        i--;
+        int k2 = parser->caps[i].kind;
+        if (k2 == PGEN_CAP_TBL_CLOSE || k2 == PGEN_CAP_GROUP_CLOSE) depth++;
+        else if (k2 == PGEN_CAP_TBL_OPEN || k2 == PGEN_CAP_GROUP_OPEN) depth--;
+      }
+      if (kind == PGEN_CAP_GROUP_CLOSE && parser->caps[i].aux == name_idx) {
+        const char *text;
+        size_t text_len;
+        size_t inner = i + 1;
+        if (inner == close) {
+          // group captured nothing: its value is the text it matched
+          text = parser->input + parser->caps[i].start;
+          text_len = parser->caps[close].start - parser->caps[i].start;
+        } else if (parser->caps[inner].kind == PGEN_CAP_STR) {
+          text = parser->input + parser->caps[inner].start;
+          text_len = parser->caps[inner].len;
+        } else if (parser->caps[inner].kind == PGEN_CAP_CONST) {
+          // interned constant: compare through the materialized value
+          bool matched = false;
+          pgen_checkstack(parser, 1);
+          lua_rawgeti(parser->L, LUA_REGISTRYINDEX, parser->caps[inner].aux);
+          if (lua_type(parser->L, -1) == LUA_TSTRING) {
+            size_t const_len;
+            const char *const_str = lua_tolstring(parser->L, -1, &const_len);
+            matched = parser->pos + const_len <= parser->input_len &&
+                memcmp(parser->input + parser->pos, const_str, const_len) == 0;
+            if (matched) parser->pos += const_len;
+          }
+          lua_pop(parser->L, 1);
+          return matched;
+        } else {
+          return false;  // group holds a non-string value
+        }
+        if (parser->pos + text_len <= parser->input_len &&
+            memcmp(parser->input + parser->pos, text, text_len) == 0) {
+          parser->pos += text_len;
+          return true;
+        }
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
 $IND_HELPERS$
 
 #ifdef PGEN_DEBUG
@@ -780,8 +1100,9 @@ static void dumpstack (lua_State *L) {
 }
 #endif
 
-]], header_vars) .. generate_cg_sentinels(cg_names) ..
+]], header_vars) .. generate_cg_names(cg_names) ..
     generate_const_infrastructure(const_pool or {}, cg_names) ..
+    generate_cap_evaluator() ..
     generate_cmt_infrastructure(cmt_codes or {})
 end
 
@@ -797,14 +1118,19 @@ function generator.generate_forward_declarations(rules, start_rule)
 end
 
 -- Generate functions for each rule
-function generator.generate_rule_functions(rules, start_rule, const_index)
+function generator.generate_rule_functions(rules, start_rule, const_index, cg_names)
   local result = "// Rule functions\n"
   local analyze = require("pgen.analyze")
+  local cg_name_index = {}
+  for i, name in ipairs(cg_names or {}) do
+    cg_name_index[name] = i - 1
+  end
   local context = {
     analyze = analyze,
     rules = rules,
     stateful_rules = analyze.stateful_rules(rules),
-    const_index = const_index or {}
+    const_index = const_index or {},
+    cg_name_index = cg_name_index
   }
   for name, pattern in sorted_rules(rules, start_rule) do
     result = result .. generator.generate_rule_function(name, pattern, context)
@@ -885,7 +1211,7 @@ function generator.generate_pattern_code(pattern, context)
   elseif t == types.Cn then -- Cn (numbered capture)
     return generator.generate_numbered_capture_code(pattern.value, pattern.name, context)
   elseif t == types.Cmb then -- Cmb (capture match back)
-    return generator.generate_capture_match_back_code(pattern.name)
+    return generator.generate_capture_match_back_code(pattern.name, context)
   elseif t == types.Cmt then -- Cmt (match-time capture)
     return generator.generate_cmt_code(pattern.value, pattern.cmt_id, context)
   elseif t == types.T then -- T (labeled failure)
@@ -1233,10 +1559,7 @@ function generator.generate_capture_code(body, context)
   $BODY$
 
   if (parser->success) {
-    size_t capture_length = parser->pos - start_pos;
-    pgen_checkstack(parser, 1);
-    lua_pushlstring(parser->L, parser->input + start_pos, capture_length);
-    parser->top++;
+    pgen_cap_push(parser, PGEN_CAP_STR, 0, start_pos, parser->pos - start_pos);
   }
 }]], {
     BODY = generator.generate_pattern_code(body, context)
@@ -1244,91 +1567,20 @@ function generator.generate_capture_code(body, context)
 end
 
 -- Generate code for a capture table (Ct)
--- Handles both regular captures (array part) and named captures via Cg (hash part)
+-- Emits open/close brackets in the capture log; the table itself (array
+-- part plus named Cg fields) is built by the evaluator after the parse.
+-- The array_only flag is no longer needed: materialization happens once
+-- per surviving table, so there is no per-attempt cost to optimize away.
 function generator.generate_capture_table_code(body, array_only, context)
-  if array_only then
-    return template_code([[{ // Capture Table (array-only)
-  int initial_stack_size = parser->top;
-  $BODY$
-
-  if (parser->success) {
-    int new_stack_size = parser->top;
-    int items_start = initial_stack_size + 1;
-    int array_count = new_stack_size - initial_stack_size;
-
-    pgen_checkstack(parser, 2); // table + one temporary during fill
-    lua_createtable(parser->L, array_count, 0);
-    parser->top++;
-    int table_idx = parser->top;
-
-    int array_idx = 1;
-    for (int i = items_start; i < table_idx; i++) {
-      lua_pushvalue(parser->L, i);
-      lua_rawseti(parser->L, table_idx, array_idx++);
-    }
-
-    // Remove all items except table, move table to correct position
-    if (items_start <= new_stack_size) {
-      lua_replace(parser->L, items_start);
-      PGEN_SETTOP(parser, items_start);
-    }
-  }
-}]], {
-      BODY = generator.generate_pattern_code(body, context)
-    })
-  end
-
   return template_code([[{ // Capture Table
-  int initial_stack_size = parser->top;
+  size_t ct_cap_start = parser->cap_len;
+  pgen_cap_push(parser, PGEN_CAP_TBL_OPEN, 0, 0, 0);
   $BODY$
 
   if (parser->success) {
-    int new_stack_size = parser->top;
-    int items_start = initial_stack_size + 1;
-
-    // Count array items and named items separately
-    // Named captures are sentinel (light userdata) + value pairs
-    int array_count = 0;
-    int named_count = 0;
-    for (int i = items_start; i <= new_stack_size; i++) {
-      if (lua_islightuserdata(parser->L, i) &&
-          is_cg_sentinel(lua_touserdata(parser->L, i))) {
-        named_count++;
-        i++; // skip the value that follows the sentinel
-      } else {
-        array_count++;
-      }
-    }
-
-    pgen_checkstack(parser, 3); // table + two temporaries during fill
-    lua_createtable(parser->L, array_count, named_count);
-    parser->top++;
-    int table_idx = parser->top;
-
-    int array_idx = 1;
-    for (int i = items_start; i < table_idx; i++) {
-      if (lua_islightuserdata(parser->L, i)) {
-        int sentinel_idx = cg_sentinel_index(lua_touserdata(parser->L, i));
-        if (sentinel_idx >= 0) {
-          // Named capture: sentinel at i, value at i+1; name interned at load
-          lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cg_name_refs[sentinel_idx]);
-          lua_pushvalue(parser->L, i + 1);
-          lua_rawset(parser->L, table_idx);
-          i++; // skip value
-          continue;
-        }
-      }
-      // Regular capture (including non-sentinel light userdata): add to array part
-      lua_pushvalue(parser->L, i);
-      lua_rawseti(parser->L, table_idx, array_idx++);
-    }
-
-    // Remove all items except table, move table to correct position
-    // Only needed if there were items to remove (items_start <= new_stack_size)
-    if (items_start <= new_stack_size) {
-      lua_replace(parser->L, items_start);
-      PGEN_SETTOP(parser, items_start);
-    }
+    pgen_cap_push(parser, PGEN_CAP_TBL_CLOSE, 0, 0, 0);
+  } else {
+    parser->cap_len = ct_cap_start;
   }
 }]], {
     BODY = generator.generate_pattern_code(body, context)
@@ -1338,14 +1590,13 @@ end
 -- Generate code for a position capture (Cp)
 function generator.generate_position_capture_code()
   return template_code([[{ // Position Capture
-  // Push current position + 1 (Lua uses 1-based indexing)
-  pgen_checkstack(parser, 1);
-  lua_pushinteger(parser->L, parser->pos + 1);
-  parser->top++;
+  pgen_cap_push(parser, PGEN_CAP_POS, 0, parser->pos, 0);
 }]], {})
 end
 
 -- Generate code for a constant capture (Cc)
+-- Each value becomes one log entry referencing the interned constant;
+-- matching never constructs the values themselves
 function generator.generate_constant_capture_code(values, context)
   local push_code = ""
   local const_index = context and context.const_index or {}
@@ -1356,43 +1607,28 @@ function generator.generate_constant_capture_code(values, context)
   for i=1, values.count do
     local value = values[i]
     local t = type(value)
-    if t == "string" and const_index[value] then
-      -- Interned at module load; comment shows the value (kept comment-safe)
+    if t == "nil" then
+      push_code = push_code .. "\n  pgen_cap_push(parser, PGEN_CAP_NIL, 0, 0, 0);"
+    elseif t == "string" or t == "number" or t == "boolean" then
+      local idx = const_index[value]
+      if not idx then
+        error("Cc value was not interned during collection: " .. tostring(value))
+      end
+      local comment = t == "string" and
+        " // " .. escape_c_literal(value):gsub("%*/", "* /") or
+        " // " .. tostring(value)
       push_code = push_code .. "\n" .. template_code(
-        [[  lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __const_refs[$IDX$]); // $COMMENT$]], {
-        IDX = const_index[value],
-        COMMENT = escape_c_literal(value):gsub("%*/", "* /")
-      })
-    elseif t == "string" then
-      push_code = push_code .. "\n" .. template_code(
-        [[  lua_pushlstring(parser->L, $VALUE$, $LENGTH$);]], {
-        VALUE = escape_c_literal(value),
-        LENGTH = #value
-      })
-    elseif t == "number" then
-      push_code = push_code .. "\n" .. template_code(
-        [[  lua_pushnumber(parser->L, $VALUE$);]], {
-        VALUE = value
-      })
-    elseif t == "boolean" then
-      push_code = push_code .. "\n" .. template_code(
-        [[  lua_pushboolean(parser->L, $VALUE$);]], {
-        VALUE = value and "1" or "0"
-      })
-    elseif t == "nil" then
-      push_code = push_code .. "\n  lua_pushnil(parser->L);"
+        [[  pgen_cap_push(parser, PGEN_CAP_CONST, __const_refs[$IDX$], 0, 0);]],
+        {IDX = idx}) .. comment
     else
       error("Unsupported constant capture type: " .. t)
     end
   end
 
   return template_code([[{ // Constant Capture
-  // A constant capture matches the empty string and produces all given values
-  pgen_checkstack(parser, $COUNT$);$PUSH_CODE$
-  parser->top += $COUNT$;
+  // A constant capture matches the empty string and produces all given values$PUSH_CODE$
 }]], {
-    PUSH_CODE = push_code,
-    COUNT = values.count
+    PUSH_CODE = push_code
   })
 end
 
@@ -1417,41 +1653,24 @@ function generator.generate_lookahead_code(body, context)
 end
 
 -- Generate code for a capture group (Cg)
--- Pushes two values to the stack: a sentinel (light userdata) and the captured value
--- If inner pattern produces captures, uses the first capture; otherwise captures matched text
+-- Emits open/close brackets in the capture log carrying the name index and
+-- the input span; the evaluator resolves the group's value (first inner
+-- capture, or the matched text when it contains no captures)
 function generator.generate_capture_group_code(body, name, context)
   return template_code([[{ // Capture Group "$NAME$"
-  int cg_stack_start = parser->top;
-  size_t start_pos = parser->pos;
+  size_t cg_cap_start = parser->cap_len;
+  pgen_cap_push(parser, PGEN_CAP_GROUP_OPEN, $NAME_IDX$, parser->pos, 0);
   $BODY$
 
   if (parser->success) {
-    int cg_stack_end = parser->top;
-    int captures_produced = cg_stack_end - cg_stack_start;
-
-    pgen_checkstack(parser, 2); // sentinel + value
-    if (captures_produced > 0) {
-      // Inner pattern produced captures - use the first one
-      // Push sentinel (identifies this as named capture "$NAME$")
-      lua_pushlightuserdata(parser->L, (void*)__cg_sentinel_$NAME$);
-      // Move sentinel before the first capture
-      lua_insert(parser->L, cg_stack_start + 1);
-      // Now stack is: sentinel, first_capture, [other_captures...]
-      // Remove any extra captures (keep only sentinel + first capture)
-      PGEN_SETTOP(parser, cg_stack_start + 2);
-    } else {
-      // No captures - capture the matched text span
-      size_t capture_len = parser->pos - start_pos;
-      // Push sentinel (identifies this as named capture "$NAME$")
-      lua_pushlightuserdata(parser->L, (void*)__cg_sentinel_$NAME$);
-      // Push captured value
-      lua_pushlstring(parser->L, parser->input + start_pos, capture_len);
-      parser->top += 2;
-    }
+    pgen_cap_push(parser, PGEN_CAP_GROUP_CLOSE, $NAME_IDX$, parser->pos, 0);
+  } else {
+    parser->cap_len = cg_cap_start;
   }
 }]], {
     BODY = generator.generate_pattern_code(body, context),
-    NAME = name
+    NAME = name,
+    NAME_IDX = assert(context.cg_name_index[name], "Cg name not collected: " .. name)
   })
 end
 
@@ -1461,11 +1680,11 @@ end
 function generator.generate_numbered_capture_code(body, n, context)
   if n == 0 then
     return template_code([[{ // Numbered Capture (discard all)
-  int cn_stack_start = parser->top;
+  size_t cn_cap_start = parser->cap_len;
   $BODY$
 
   if (parser->success) {
-    PGEN_SETTOP(parser, cn_stack_start);
+    parser->cap_len = cn_cap_start;
   }
 }]], {
       BODY = generator.generate_pattern_code(body, context)
@@ -1473,37 +1692,11 @@ function generator.generate_numbered_capture_code(body, n, context)
   end
 
   return template_code([[{ // Numbered Capture (select $N$)
-  int cn_stack_start = parser->top;
+  size_t cn_cap_start = parser->cap_len;
   $BODY$
 
   if (parser->success) {
-    int final_stack = parser->top;
-    pgen_checkstack(parser, 1);
-
-    // Find the nth non-sentinel capture (Cg sentinel+value pairs don't count)
-    int count = 0;
-    int target_idx = 0;
-    for (int i = cn_stack_start + 1; i <= final_stack; i++) {
-      if (lua_islightuserdata(parser->L, i) && is_cg_sentinel(lua_touserdata(parser->L, i))) {
-        i++; // skip sentinel's value too
-        continue;
-      }
-      count++;
-      if (count == $N$) {
-        target_idx = i;
-        break;
-      }
-    }
-
-    if (target_idx > 0) {
-      lua_pushvalue(parser->L, target_idx);
-      lua_replace(parser->L, cn_stack_start + 1);
-      PGEN_SETTOP(parser, cn_stack_start + 1);
-    } else {
-      PGEN_SETTOP(parser, cn_stack_start);
-      lua_pushnil(parser->L);
-      parser->top++;
-    }
+    pgen_cap_select(parser, cn_cap_start, $N$);
   }
 }]], {
     BODY = generator.generate_pattern_code(body, context),
@@ -1512,31 +1705,11 @@ function generator.generate_numbered_capture_code(body, n, context)
 end
 
 -- Generate code for capture match back (Cmb)
--- Searches backward through stack for named capture sentinel and matches its string value
-function generator.generate_capture_match_back_code(name)
+-- Searches the capture log backward for the named group and matches its
+-- text against the input at the current position
+function generator.generate_capture_match_back_code(name, context)
   return template_code([[{ // Capture Match Back "$NAME$"
-  parser->success = false;
-
-  // Search backward through stack for sentinel "$NAME$"
-  for (int i = parser->top; i >= 1; i--) {
-    if (lua_islightuserdata(parser->L, i)) {
-      void* ptr = lua_touserdata(parser->L, i);
-      if (ptr == (void*)__cg_sentinel_$NAME$) {
-        // Found sentinel - value is at i+1 (use only if it's already a string)
-        if (i + 1 <= parser->top && lua_type(parser->L, i + 1) == LUA_TSTRING) {
-          size_t match_len;
-          const char* match_str = lua_tolstring(parser->L, i + 1, &match_len);
-          // Try to match at current position
-          if (parser->pos + match_len <= parser->input_len &&
-              memcmp(parser->input + parser->pos, match_str, match_len) == 0) {
-            parser->pos += match_len;
-            parser->success = true;
-          }
-        }
-        break;  // Found sentinel, stop searching regardless of match result
-      }
-    }
-  }
+  parser->success = pgen_cap_match_back(parser, $NAME_IDX$);
   if (!parser->success) {
     PGEN_RECORD_FURTHEST(parser);
 #ifdef PGEN_ERRORS
@@ -1544,7 +1717,8 @@ function generator.generate_capture_match_back_code(name)
 #endif
   }
 }]], {
-    NAME = name
+    NAME = name,
+    NAME_IDX = assert(context.cg_name_index[name], "Cmb name not collected: " .. name)
   })
 end
 
@@ -1552,7 +1726,8 @@ end
 -- Calls a Lua callback during parsing with (subject, position, ...captures)
 function generator.generate_cmt_code(inner_pattern, cmt_id, context)
   return template_code([[{ // Match-time capture (Cmt id=$ID$)
-  int cmt_stack_base = parser->top;
+  size_t cmt_cap_base = parser->cap_len;
+  int cmt_top_base = parser->top;
   size_t cmt_start_pos = parser->pos;
 #ifdef PGEN_HAS_IND
   size_t cmt_trail_index = parser->trail_len;
@@ -1561,87 +1736,7 @@ function generator.generate_cmt_code(inner_pattern, cmt_id, context)
   $INNER_PATTERN_CODE$
 
   if (parser->success) {
-    size_t pos_after_inner = parser->pos;
-    int captures_count = parser->top - cmt_stack_base;
-
-    // function + subject + position + copies of the captures
-    pgen_checkstack(parser, captures_count + 3);
-
-    // Get the callback function from registry
-    lua_rawgeti(parser->L, LUA_REGISTRYINDEX, __cmt_refs[$ID$]);
-
-    // Push arguments: subject, position (after inner pattern)
-    lua_pushlstring(parser->L, parser->input, parser->input_len);
-    lua_pushinteger(parser->L, (lua_Integer)(pos_after_inner + 1));  // 1-based
-
-    // Copy captures as additional arguments
-    for (int i = 0; i < captures_count; i++) {
-      lua_pushvalue(parser->L, cmt_stack_base + 1 + i);
-    }
-
-    // Remove original captures from stack before calling
-    // Stack: [captures...][func][subject][pos][captures_copy...]
-    for (int i = 0; i < captures_count; i++) {
-      lua_remove(parser->L, cmt_stack_base + 1);
-    }
-    // Stack now: [func][subject][pos][captures...]
-
-    // Call function: 2 + captures_count args, LUA_MULTRET returns
-    // lua_call propagates errors (aborts parse on Lua error)
-    lua_call(parser->L, 2 + captures_count, LUA_MULTRET);
-
-    // Resync the shadow top: the callee's stack use is arbitrary, and any
-    // batched checkstack claim may have been shrunk away during the call
-    parser->top = lua_gettop(parser->L);
-    if (parser->stack_claimed > parser->top) {
-      parser->stack_claimed = parser->top;
-    }
-
-    int returns_count = parser->top - cmt_stack_base;
-
-    if (returns_count == 0) {
-      // No return value = match fails
-      parser->success = false;
-      PGEN_RECORD_FURTHEST(parser); // record at pos_after_inner, before rewind
-      parser->pos = cmt_start_pos;
-    } else {
-      int first_type = lua_type(parser->L, cmt_stack_base + 1);
-
-      if (first_type == LUA_TNUMBER) {
-        // Number = new position (1-based from Lua)
-        lua_Integer new_pos = lua_tointeger(parser->L, cmt_stack_base + 1);
-        new_pos--;  // Convert to 0-based
-        // Per lpeg: must be in range [pos_after_inner, input_len]
-        if (new_pos >= (lua_Integer)pos_after_inner && new_pos <= (lua_Integer)parser->input_len) {
-          parser->pos = (size_t)new_pos;
-          parser->success = true;
-        } else {
-          parser->success = false;
-          PGEN_RECORD_FURTHEST(parser); // record at pos_after_inner, before rewind
-          parser->pos = cmt_start_pos;
-        }
-      } else if (first_type == LUA_TBOOLEAN && lua_toboolean(parser->L, cmt_stack_base + 1)) {
-        // true = succeed without consuming (position stays at pos_after_inner)
-        parser->success = true;
-      } else {
-        // false, nil, or other = fail
-        parser->success = false;
-        PGEN_RECORD_FURTHEST(parser); // record at pos_after_inner, before rewind
-        parser->pos = cmt_start_pos;
-      }
-    }
-
-    // Handle captures: remove first return value, keep extras as captures
-    if (parser->success && returns_count > 1) {
-      lua_remove(parser->L, cmt_stack_base + 1);  // Remove first return value
-      parser->top--;
-      if (parser->stack_claimed > parser->top) {
-        parser->stack_claimed = parser->top;
-      }
-      // Remaining values are the new captures
-    } else {
-      PGEN_SETTOP(parser, cmt_stack_base);  // Clear all returns
-    }
+    pgen_run_cmt(parser, __cmt_refs[$ID$], cmt_start_pos, cmt_cap_base, cmt_top_base);
 
 #ifdef PGEN_HAS_IND
     // Callback rejected the match: undo indenter operations performed by the
@@ -1833,6 +1928,13 @@ static Parser* $PARSER_NAME$_init(const char *input, lua_State *L) {
   parser->furthest_fail = 0;
   parser->top = lua_gettop(L);
   parser->stack_claimed = parser->top;
+  parser->caps = (PgenCap*)malloc(64 * sizeof(PgenCap));
+  if (!parser->caps) {
+    free(parser);
+    return NULL;
+  }
+  parser->cap_len = 0;
+  parser->cap_cap = 64;
   parser->L = L;$IND_INIT$
   return parser;
 }
@@ -1842,6 +1944,7 @@ static Parser* $PARSER_NAME$_init(const char *input, lua_State *L) {
 static void $PARSER_NAME$_free(Parser *parser) {
   // Check for NULL in case _init failed or was called with NULL
   if (parser) {$IND_FREE$
+     free(parser->caps);
      free(parser);
   }
 }
@@ -1892,6 +1995,7 @@ static int l_$PARSER_NAME$_parse(lua_State *L) {
   // Return nil and error info on failure
   if (!parser->success) {
     assert(final_stack_size == initial_stack_size && "Unexpected stack size change on parse failure.");
+    assert(parser->cap_len == 0 && "Capture log not empty on parse failure.");
     lua_pushnil(L);
     if (parser->throw_label) {
       // Labeled failure: return nil, label, position
@@ -1913,35 +2017,31 @@ static int l_$PARSER_NAME$_parse(lua_State *L) {
     }
   }
 
-  // Strip Cg sentinel+value pairs from stack (they only matter inside Ct)
-  if (final_stack_size > initial_stack_size) {
-    lua_checkstack(L, 1); // one temporary during compaction
-    int read_idx = initial_stack_size + 1;
-    int write_idx = initial_stack_size + 1;
-    while (read_idx <= final_stack_size) {
-      if (lua_islightuserdata(L, read_idx) && is_cg_sentinel(lua_touserdata(L, read_idx))) {
-        // Skip sentinel and its value
-        read_idx += 2;
-      } else {
-        if (read_idx != write_idx) {
-          lua_pushvalue(L, read_idx);
-          lua_replace(L, write_idx);
-        }
-        read_idx++;
-        write_idx++;
-      }
+  // Materialize the capture log into return values. Named groups produce
+  // no top-level values (they only matter inside Ct).
+  int cmt_slots = parser->top - initial_stack_size;  // lingering Cmt values
+  int result_count = 0;
+  size_t cap_i = 0;
+  while (cap_i < parser->cap_len) {
+    if (parser->caps[cap_i].kind == PGEN_CAP_GROUP_OPEN) {
+      pgen_cap_skip(parser, &cap_i);
+    } else {
+      pgen_cap_eval(parser, &cap_i);
+      result_count++;
     }
-    lua_settop(L, write_idx - 1);
-    final_stack_size = lua_gettop(L);
   }
 
-  // If stack size has changed, use new items as return values
-  if (final_stack_size > initial_stack_size) {
+  // Drop the lingering Cmt value slots sitting beneath the results
+  for (int i = 0; i < cmt_slots; i++) {
+    lua_remove(L, initial_stack_size + 1);
+  }
+
+  if (result_count > 0) {
     $PARSER_NAME$_free(parser);
-    return final_stack_size - initial_stack_size; // Return new items
+    return result_count;
   }
 
-  // Success case with no stack change
+  // Success case with no captures
   lua_pushinteger(L, parser->pos + 1);
   $PARSER_NAME$_free(parser);
   return 1; // Return position of consumed input

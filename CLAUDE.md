@@ -146,10 +146,12 @@ InBlock = ind.advance * V"Block" * ind.pop
   5000). Configure per grammar with the `max_depth` option to
   `pgen.compile`/`pgen.require`, or override at C compile time with
   `-DPGEN_MAX_DEPTH=n`.
-- **Capture count**: captures are built on the Lua stack, so simultaneous
-  pending captures are bounded by the Lua build's `LUAI_MAXCSTACK` (8000 in
-  stock Lua 5.1). Exceeding it raises a clean Lua error rather than
-  undefined behavior.
+- **Capture count**: captures are recorded in a C-side log during matching
+  and only materialized into Lua values after the parse succeeds, so
+  captures inside tables are unbounded. Only the number of top-level return
+  values is bounded by the Lua build's `LUAI_MAXCSTACK` (8000 in stock Lua
+  5.1); exceeding it raises a clean Lua error rather than undefined
+  behavior.
 - **Nullable loops**: `pgen.compile` rejects unbounded repetitions (`patt^n`
   for n >= 0) whose body can match the empty string ("loop body may accept
   empty string"), since they would hang the parser. The analysis lives in

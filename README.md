@@ -377,10 +377,11 @@ This optimization follows references through `V()` rules to ensure correctness e
 Sequences, repetitions (`patt^n`), lookahead (`#patt`), and negation
 (`-patt`) all need to save parser state so they can backtrack. Before
 generating that code, the generator checks whether the enclosed pattern can
-actually change any state besides the input position, meaning captures pushed
-onto the Lua stack or indenter stack operations. If it can't, the generated
-code only saves and restores the input position instead of taking a full
-snapshot (input position, Lua stack top, and indenter stack undo trail).
+actually change any state besides the input position, meaning capture log
+entries or indenter stack operations. If it can't, the generated code only
+saves and restores the input position instead of taking a full snapshot
+(input position, capture log length, Lua stack top, and indenter stack undo
+trail).
 
 ```lua
 -- Fast path: the loop body is capture-free, so a failed iteration only

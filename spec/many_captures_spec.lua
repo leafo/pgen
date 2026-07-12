@@ -17,19 +17,20 @@ describe("capture stack growth", function()
     assert.same(1000, #result)
   end)
 
-  -- Captures live on the Lua stack during the parse, so total simultaneous
-  -- captures are bounded by LUAI_MAXCSTACK (8000 in stock Lua 5.1). These
-  -- assert the overflow is a clean Lua error instead of undefined behavior.
+  -- Captures are recorded in a C-side log during the parse and only
+  -- materialized onto the Lua stack afterwards, so only the number of
+  -- top-level return values is bounded by LUAI_MAXCSTACK (8000 in stock
+  -- Lua 5.1). Overflowing that is a clean Lua error, and captures inside
+  -- a table are unbounded (materialized one at a time).
 
-  it("raises a clean error when captures exceed the Lua stack limit", function()
+  it("raises a clean error when return values exceed the Lua stack limit", function()
     local ok, err = pcall(parser.parse, "1:" .. ("a"):rep(20000))
     assert.is_false(ok)
     assert.matches("stack overflow", err)
   end)
 
-  it("raises a clean error inside a capture table as well", function()
-    local ok, err = pcall(parser.parse, "2:" .. ("a"):rep(20000))
-    assert.is_false(ok)
-    assert.matches("stack overflow", err)
+  it("collects captures beyond the stack limit inside a capture table", function()
+    local result = parser.parse("2:" .. ("a"):rep(20000))
+    assert.same(20000, #result)
   end)
 end)
