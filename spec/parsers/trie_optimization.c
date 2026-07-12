@@ -1585,13 +1585,21 @@ static bool parse_test5(Parser *parser) {
   return parser->success;
 }
 
-// Initialize parser
+#define PGEN_PARSER_MT "pgen.trie_optimization"
+
+// Initialize a parser anchored in a Lua userdata (left on the stack). Its
+// metatable's __gc frees the owned allocations, so a Lua error unwinding
+// out of a parse (transform/Cmt callbacks, recursion depth, out of memory)
+// cannot leak them.
 static Parser *trie_optimization_init(const char *input, lua_State *L) {
-  Parser *parser = (Parser *)malloc(sizeof(Parser));
-  if (!parser) {
-    // Handle allocation failure if necessary, though often parser might exit
-    return NULL;
-  }
+  Parser *parser = (Parser *)lua_newuserdata(L, sizeof(Parser));
+
+  // Null the owned pointers before attaching the metatable so __gc is
+  // safe even if a later allocation fails mid-init
+  parser->caps = NULL;
+  luaL_getmetatable(L, PGEN_PARSER_MT);
+  lua_setmetatable(L, -2);
+
   parser->input = input;
   parser->input_len = strlen(input);
   parser->pos = 0;
@@ -1603,27 +1611,33 @@ static Parser *trie_optimization_init(const char *input, lua_State *L) {
   parser->furthest_fail = 0;
   parser->top = lua_gettop(L);
   parser->stack_claimed = parser->top;
+  parser->L = L;
+
   parser->caps = (PgenCap *)malloc(64 * sizeof(PgenCap));
   if (!parser->caps) {
-    free(parser);
-    return NULL;
+    luaL_error(L, "pgen: out of memory initializing parser");
   }
   parser->cap_len = 0;
   parser->cap_cap = 64;
-  parser->L = L;
   return parser;
 }
 
-// Free parser
+// Free the parser's owned allocations. Idempotent: called eagerly on
+// normal completion and again from __gc, which also covers error unwinds
 static void trie_optimization_free(Parser *parser) {
-  // Check for NULL in case _init failed or was called with NULL
   if (parser) {
     free(parser->caps);
-    free(parser);
+    parser->caps = NULL;
   }
 }
 
 // --- Lua Module Interface ---
+
+// __gc for the parser userdata: frees whatever the eager free didn't
+static int l_trie_optimization_gc(lua_State *L) {
+  trie_optimization_free((Parser *)lua_touserdata(L, 1));
+  return 0;
+}
 
 // Lua wrapper function
 static int l_trie_optimization_parse(lua_State *L) {
@@ -1637,13 +1651,8 @@ static int l_trie_optimization_parse(lua_State *L) {
     return luaL_error(L, "Failed to get string argument");
   }
 
-  // Initialize the parser directly
+  // Initialize the parser (a userdata anchored on the stack; see _init)
   Parser *parser = trie_optimization_init(input, L);
-  if (!parser) {
-    lua_pushnil(L);
-    lua_pushstring(L, "Parser initialization failed (memory allocation?)");
-    return 2;
-  }
 
   int initial_stack_size = lua_gettop(parser->L);
 
@@ -1717,6 +1726,11 @@ static const struct luaL_Reg trie_optimization_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_trie_optimization(lua_State *L) {
+  if (luaL_newmetatable(L, PGEN_PARSER_MT)) {
+    lua_pushcfunction(L, l_trie_optimization_gc);
+    lua_setfield(L, -2, "__gc");
+  }
+  lua_pop(L, 1);
 
   luaL_newlib(L, trie_optimization_module); // Creates table and registers functions
   return 1;
@@ -1727,6 +1741,11 @@ int luaopen_trie_optimization(lua_State *L) {
 // two parsers compiled with the same parser_name in one process would
 // silently overwrite the first module's parse function.
 int luaopen_trie_optimization(lua_State *L) {
+  if (luaL_newmetatable(L, PGEN_PARSER_MT)) {
+    lua_pushcfunction(L, l_trie_optimization_gc);
+    lua_setfield(L, -2, "__gc");
+  }
+  lua_pop(L, 1);
 
   lua_newtable(L);
   luaL_register(L, NULL, trie_optimization_module);

@@ -15,7 +15,8 @@ return {
          P"6:" * V"in_table" +
          P"7:" * V"named_value" +
          P"8:" * V"backtracked" +
-         P"9:" * V"number_convert",
+         P"9:" * V"number_convert" +
+         P"10:" * V"boom",
 
   -- single capture in, single value out
   upper = Cfn(C(word), [[return function(s) return s:upper() end]]),
@@ -55,4 +56,12 @@ return {
 
   -- transformed values keep their Lua type
   number_convert = Cfn(C(R"09"^1), [[return function(s) return tonumber(s) + 1 end]]),
+
+  -- callback errors propagate out of parse() with their original value
+  boom = Cfn(C(word), [[return function(s)
+    if s == "boom" then
+      error({"custom_node", "transform exploded"})
+    end
+    return s
+  end]]),
 }

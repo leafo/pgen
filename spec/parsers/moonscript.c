@@ -2187,13 +2187,27 @@ static bool parse_ws(Parser *parser) {
   return parser->success;
 }
 
-// Initialize parser
+#define PGEN_PARSER_MT "pgen.moonscript"
+
+// Initialize a parser anchored in a Lua userdata (left on the stack). Its
+// metatable's __gc frees the owned allocations, so a Lua error unwinding
+// out of a parse (transform/Cmt callbacks, recursion depth, out of memory)
+// cannot leak them.
 static Parser *moonscript_init(const char *input, lua_State *L) {
-  Parser *parser = (Parser *)malloc(sizeof(Parser));
-  if (!parser) {
-    // Handle allocation failure if necessary, though often parser might exit
-    return NULL;
+  Parser *parser = (Parser *)lua_newuserdata(L, sizeof(Parser));
+
+  // Null the owned pointers before attaching the metatable so __gc is
+  // safe even if a later allocation fails mid-init
+  parser->caps = NULL;
+  parser->trail = NULL;
+  parser->trail_len = 0;
+  parser->trail_cap = 0;
+  for (int i = 0; i < PGEN_IND_STACK_COUNT; i++) {
+    parser->ind_stacks[i].items = NULL;
   }
+  luaL_getmetatable(L, PGEN_PARSER_MT);
+  lua_setmetatable(L, -2);
+
   parser->input = input;
   parser->input_len = strlen(input);
   parser->pos = 0;
@@ -2205,28 +2219,21 @@ static Parser *moonscript_init(const char *input, lua_State *L) {
   parser->furthest_fail = 0;
   parser->top = lua_gettop(L);
   parser->stack_claimed = parser->top;
+  parser->L = L;
+
   parser->caps = (PgenCap *)malloc(64 * sizeof(PgenCap));
   if (!parser->caps) {
-    free(parser);
-    return NULL;
+    luaL_error(L, "pgen: out of memory initializing parser");
   }
   parser->cap_len = 0;
   parser->cap_cap = 64;
-  parser->L = L;
 
   // Initialize indenter stacks (each starts holding its initial value)
   static const int pgen_ind_initials[PGEN_IND_STACK_COUNT] = {0};
-  parser->trail = NULL;
-  parser->trail_len = 0;
-  parser->trail_cap = 0;
   for (int i = 0; i < PGEN_IND_STACK_COUNT; i++) {
     parser->ind_stacks[i].items = (int *)malloc(8 * sizeof(int));
     if (!parser->ind_stacks[i].items) {
-      for (int j = 0; j < i; j++) {
-        free(parser->ind_stacks[j].items);
-      }
-      free(parser);
-      return NULL;
+      luaL_error(L, "pgen: out of memory initializing parser");
     }
     parser->ind_stacks[i].cap = 8;
     parser->ind_stacks[i].size = 1;
@@ -2236,20 +2243,28 @@ static Parser *moonscript_init(const char *input, lua_State *L) {
   return parser;
 }
 
-// Free parser
+// Free the parser's owned allocations. Idempotent: called eagerly on
+// normal completion and again from __gc, which also covers error unwinds
 static void moonscript_free(Parser *parser) {
-  // Check for NULL in case _init failed or was called with NULL
   if (parser) {
     for (int i = 0; i < PGEN_IND_STACK_COUNT; i++) {
       free(parser->ind_stacks[i].items);
+      parser->ind_stacks[i].items = NULL;
     }
     free(parser->trail);
+    parser->trail = NULL;
     free(parser->caps);
-    free(parser);
+    parser->caps = NULL;
   }
 }
 
 // --- Lua Module Interface ---
+
+// __gc for the parser userdata: frees whatever the eager free didn't
+static int l_moonscript_gc(lua_State *L) {
+  moonscript_free((Parser *)lua_touserdata(L, 1));
+  return 0;
+}
 
 // Lua wrapper function
 static int l_moonscript_parse(lua_State *L) {
@@ -2263,13 +2278,8 @@ static int l_moonscript_parse(lua_State *L) {
     return luaL_error(L, "Failed to get string argument");
   }
 
-  // Initialize the parser directly
+  // Initialize the parser (a userdata anchored on the stack; see _init)
   Parser *parser = moonscript_init(input, L);
-  if (!parser) {
-    lua_pushnil(L);
-    lua_pushstring(L, "Parser initialization failed (memory allocation?)");
-    return 2;
-  }
 
   int initial_stack_size = lua_gettop(parser->L);
 
@@ -2343,6 +2353,11 @@ static const struct luaL_Reg moonscript_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_moonscript(lua_State *L) {
+  if (luaL_newmetatable(L, PGEN_PARSER_MT)) {
+    lua_pushcfunction(L, l_moonscript_gc);
+    lua_setfield(L, -2, "__gc");
+  }
+  lua_pop(L, 1);
   __const_init(L);
 
   luaL_newlib(L, moonscript_module); // Creates table and registers functions
@@ -2354,6 +2369,11 @@ int luaopen_moonscript(lua_State *L) {
 // two parsers compiled with the same parser_name in one process would
 // silently overwrite the first module's parse function.
 int luaopen_moonscript(lua_State *L) {
+  if (luaL_newmetatable(L, PGEN_PARSER_MT)) {
+    lua_pushcfunction(L, l_moonscript_gc);
+    lua_setfield(L, -2, "__gc");
+  }
+  lua_pop(L, 1);
   __const_init(L);
 
   lua_newtable(L);

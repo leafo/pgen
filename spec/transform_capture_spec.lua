@@ -54,4 +54,26 @@ describe("transform captures", function()
     assert.is_false(ok)
     assert.matches("did not return a function", tostring(err))
   end)
+
+  it("propagates callback errors with their original value", function()
+    local ok, err = pcall(parser.parse, "10:boom")
+    assert.is_false(ok)
+    assert.same({"custom_node", "transform exploded"}, err)
+  end)
+
+  it("stays usable after a callback error", function()
+    pcall(parser.parse, "10:boom")
+    assert.same("fine", parser.parse("10:fine"))
+  end)
+
+  it("survives repeated callback errors and collection", function()
+    -- the parser userdata's __gc must free the state abandoned by the
+    -- error unwind, without double-freeing on the normal path
+    for _ = 1, 30 do
+      local ok = pcall(parser.parse, "10:boom")
+      assert.is_false(ok)
+      assert.same("fine", parser.parse("10:fine"))
+      collectgarbage("collect")
+    end
+  end)
 end)

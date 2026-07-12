@@ -589,8 +589,9 @@ static const char __cmt_code_5[] = "return function(s) return s:upper() end";
 static const char __cmt_code_6[] = "return function(s) return \"O:\" .. s end";
 static const char __cmt_code_7[] = "return function(s) return \"I:\" .. s end";
 static const char __cmt_code_8[] = "return function(s) return s, s:upper() end";
+static const char __cmt_code_9[] = "return function(s)\n    if s == \"boom\" then\n      error({\"custom_node\", \"transform exploded\"})\n    end\n    return s\n  end";
 
-static int __cmt_refs[9];
+static int __cmt_refs[10];
 
 // Initialize callbacks by loading their Lua code
 static void __cmt_init(lua_State *L) {
@@ -684,11 +685,22 @@ static void __cmt_init(lua_State *L) {
     luaL_error(L, "Cfn chunk 8 did not return a function");
   }
   __cmt_refs[8] = luaL_ref(L, LUA_REGISTRYINDEX);
+  if (luaL_loadstring(L, __cmt_code_9) != 0) {
+    luaL_error(L, "Failed to load Cfn callback 9: %s", lua_tostring(L, -1));
+  }
+  if (lua_pcall(L, 0, 1, 0) != 0) {
+    luaL_error(L, "Failed to run Cfn chunk 9: %s", lua_tostring(L, -1));
+  }
+  if (!lua_isfunction(L, -1)) {
+    luaL_error(L, "Cfn chunk 9 did not return a function");
+  }
+  __cmt_refs[9] = luaL_ref(L, LUA_REGISTRYINDEX);
 }
 
 // Forward declarations
 static bool parse_test(Parser *parser);
 static bool parse_backtracked(Parser *parser);
+static bool parse_boom(Parser *parser);
 static bool parse_in_table(Parser *parser);
 static bool parse_multi(Parser *parser);
 static bool parse_named_value(Parser *parser);
@@ -713,36 +725,68 @@ static bool parse_test(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "test", start);
 #endif
 
-  {                 // Choice
-    {               // Choice
-      {             // Choice
-        {           // Choice
-          {         // Choice
-            {       // Choice
-              {     // Choice
-                {   // Choice
-                  { // Sequence with 2 patterns
-                    REMEMBER_POSITION(parser, pos);
+  {                   // Choice
+    {                 // Choice
+      {               // Choice
+        {             // Choice
+          {           // Choice
+            {         // Choice
+              {       // Choice
+                {     // Choice
+                  {   // Choice
+                    { // Sequence with 2 patterns
+                      REMEMBER_POSITION(parser, pos);
 
-                    { // Match literal "1:"
-                      if (parser->pos + 2 <= parser->input_len &&
-                          memcmp(parser->input + parser->pos, "1:", 2) == 0) {
-                        parser->pos += 2;
-                      } else {
+                      { // Match literal "1:"
+                        if (parser->pos + 2 <= parser->input_len &&
+                            memcmp(parser->input + parser->pos, "1:", 2) == 0) {
+                          parser->pos += 2;
+                        } else {
 #ifdef PGEN_ERRORS
-                        sprintf(parser->error_message, "Expected `"
-                                                       "1:"
-                                                       "` at position %zu",
-                                parser->pos);
+                          sprintf(parser->error_message, "Expected `"
+                                                         "1:"
+                                                         "` at position %zu",
+                                  parser->pos);
 #endif
-                        parser->success = false;
-                        PGEN_RECORD_FURTHEST(parser);
+                          parser->success = false;
+                          PGEN_RECORD_FURTHEST(parser);
+                        }
+                      }
+                      if (parser->success) {
+                        parse_upper(parser);
+                        if (!parser->success) {
+                          RESTORE_POSITION(parser, pos);
+                        }
                       }
                     }
-                    if (parser->success) {
-                      parse_upper(parser);
-                      if (!parser->success) {
-                        RESTORE_POSITION(parser, pos);
+
+                    // Only try alternative if ordinary failure (not labeled failure from T())
+                    if (!parser->success && !parser->throw_label) {
+                      parser->success = true;
+                      { // Sequence with 2 patterns
+                        REMEMBER_POSITION(parser, pos);
+
+                        { // Match literal "2:"
+                          if (parser->pos + 2 <= parser->input_len &&
+                              memcmp(parser->input + parser->pos, "2:", 2) == 0) {
+                            parser->pos += 2;
+                          } else {
+#ifdef PGEN_ERRORS
+                            sprintf(parser->error_message, "Expected `"
+                                                           "2:"
+                                                           "` at position %zu",
+                                    parser->pos);
+#endif
+                            parser->success = false;
+                            PGEN_RECORD_FURTHEST(parser);
+                          }
+                        }
+                        if (parser->success) {
+                          parse_multi(parser);
+                          if (!parser->success) {
+                            RESTORE_POSITION(parser, pos);
+                          }
+                        }
                       }
                     }
                   }
@@ -753,14 +797,14 @@ static bool parse_test(Parser *parser) {
                     { // Sequence with 2 patterns
                       REMEMBER_POSITION(parser, pos);
 
-                      { // Match literal "2:"
+                      { // Match literal "3:"
                         if (parser->pos + 2 <= parser->input_len &&
-                            memcmp(parser->input + parser->pos, "2:", 2) == 0) {
+                            memcmp(parser->input + parser->pos, "3:", 2) == 0) {
                           parser->pos += 2;
                         } else {
 #ifdef PGEN_ERRORS
                           sprintf(parser->error_message, "Expected `"
-                                                         "2:"
+                                                         "3:"
                                                          "` at position %zu",
                                   parser->pos);
 #endif
@@ -769,7 +813,7 @@ static bool parse_test(Parser *parser) {
                         }
                       }
                       if (parser->success) {
-                        parse_multi(parser);
+                        parse_vanish(parser);
                         if (!parser->success) {
                           RESTORE_POSITION(parser, pos);
                         }
@@ -784,14 +828,14 @@ static bool parse_test(Parser *parser) {
                   { // Sequence with 2 patterns
                     REMEMBER_POSITION(parser, pos);
 
-                    { // Match literal "3:"
+                    { // Match literal "4:"
                       if (parser->pos + 2 <= parser->input_len &&
-                          memcmp(parser->input + parser->pos, "3:", 2) == 0) {
+                          memcmp(parser->input + parser->pos, "4:", 2) == 0) {
                         parser->pos += 2;
                       } else {
 #ifdef PGEN_ERRORS
                         sprintf(parser->error_message, "Expected `"
-                                                       "3:"
+                                                       "4:"
                                                        "` at position %zu",
                                 parser->pos);
 #endif
@@ -800,7 +844,7 @@ static bool parse_test(Parser *parser) {
                       }
                     }
                     if (parser->success) {
-                      parse_vanish(parser);
+                      parse_whole_match(parser);
                       if (!parser->success) {
                         RESTORE_POSITION(parser, pos);
                       }
@@ -815,14 +859,14 @@ static bool parse_test(Parser *parser) {
                 { // Sequence with 2 patterns
                   REMEMBER_POSITION(parser, pos);
 
-                  { // Match literal "4:"
+                  { // Match literal "5:"
                     if (parser->pos + 2 <= parser->input_len &&
-                        memcmp(parser->input + parser->pos, "4:", 2) == 0) {
+                        memcmp(parser->input + parser->pos, "5:", 2) == 0) {
                       parser->pos += 2;
                     } else {
 #ifdef PGEN_ERRORS
                       sprintf(parser->error_message, "Expected `"
-                                                     "4:"
+                                                     "5:"
                                                      "` at position %zu",
                               parser->pos);
 #endif
@@ -831,7 +875,7 @@ static bool parse_test(Parser *parser) {
                     }
                   }
                   if (parser->success) {
-                    parse_whole_match(parser);
+                    parse_nested(parser);
                     if (!parser->success) {
                       RESTORE_POSITION(parser, pos);
                     }
@@ -846,14 +890,14 @@ static bool parse_test(Parser *parser) {
               { // Sequence with 2 patterns
                 REMEMBER_POSITION(parser, pos);
 
-                { // Match literal "5:"
+                { // Match literal "6:"
                   if (parser->pos + 2 <= parser->input_len &&
-                      memcmp(parser->input + parser->pos, "5:", 2) == 0) {
+                      memcmp(parser->input + parser->pos, "6:", 2) == 0) {
                     parser->pos += 2;
                   } else {
 #ifdef PGEN_ERRORS
                     sprintf(parser->error_message, "Expected `"
-                                                   "5:"
+                                                   "6:"
                                                    "` at position %zu",
                             parser->pos);
 #endif
@@ -862,7 +906,7 @@ static bool parse_test(Parser *parser) {
                   }
                 }
                 if (parser->success) {
-                  parse_nested(parser);
+                  parse_in_table(parser);
                   if (!parser->success) {
                     RESTORE_POSITION(parser, pos);
                   }
@@ -877,14 +921,14 @@ static bool parse_test(Parser *parser) {
             { // Sequence with 2 patterns
               REMEMBER_POSITION(parser, pos);
 
-              { // Match literal "6:"
+              { // Match literal "7:"
                 if (parser->pos + 2 <= parser->input_len &&
-                    memcmp(parser->input + parser->pos, "6:", 2) == 0) {
+                    memcmp(parser->input + parser->pos, "7:", 2) == 0) {
                   parser->pos += 2;
                 } else {
 #ifdef PGEN_ERRORS
                   sprintf(parser->error_message, "Expected `"
-                                                 "6:"
+                                                 "7:"
                                                  "` at position %zu",
                           parser->pos);
 #endif
@@ -893,7 +937,7 @@ static bool parse_test(Parser *parser) {
                 }
               }
               if (parser->success) {
-                parse_in_table(parser);
+                parse_named_value(parser);
                 if (!parser->success) {
                   RESTORE_POSITION(parser, pos);
                 }
@@ -908,14 +952,14 @@ static bool parse_test(Parser *parser) {
           { // Sequence with 2 patterns
             REMEMBER_POSITION(parser, pos);
 
-            { // Match literal "7:"
+            { // Match literal "8:"
               if (parser->pos + 2 <= parser->input_len &&
-                  memcmp(parser->input + parser->pos, "7:", 2) == 0) {
+                  memcmp(parser->input + parser->pos, "8:", 2) == 0) {
                 parser->pos += 2;
               } else {
 #ifdef PGEN_ERRORS
                 sprintf(parser->error_message, "Expected `"
-                                               "7:"
+                                               "8:"
                                                "` at position %zu",
                         parser->pos);
 #endif
@@ -924,7 +968,7 @@ static bool parse_test(Parser *parser) {
               }
             }
             if (parser->success) {
-              parse_named_value(parser);
+              parse_backtracked(parser);
               if (!parser->success) {
                 RESTORE_POSITION(parser, pos);
               }
@@ -939,14 +983,14 @@ static bool parse_test(Parser *parser) {
         { // Sequence with 2 patterns
           REMEMBER_POSITION(parser, pos);
 
-          { // Match literal "8:"
+          { // Match literal "9:"
             if (parser->pos + 2 <= parser->input_len &&
-                memcmp(parser->input + parser->pos, "8:", 2) == 0) {
+                memcmp(parser->input + parser->pos, "9:", 2) == 0) {
               parser->pos += 2;
             } else {
 #ifdef PGEN_ERRORS
               sprintf(parser->error_message, "Expected `"
-                                             "8:"
+                                             "9:"
                                              "` at position %zu",
                       parser->pos);
 #endif
@@ -955,7 +999,7 @@ static bool parse_test(Parser *parser) {
             }
           }
           if (parser->success) {
-            parse_backtracked(parser);
+            parse_number_convert(parser);
             if (!parser->success) {
               RESTORE_POSITION(parser, pos);
             }
@@ -970,14 +1014,14 @@ static bool parse_test(Parser *parser) {
       { // Sequence with 2 patterns
         REMEMBER_POSITION(parser, pos);
 
-        { // Match literal "9:"
-          if (parser->pos + 2 <= parser->input_len &&
-              memcmp(parser->input + parser->pos, "9:", 2) == 0) {
-            parser->pos += 2;
+        { // Match literal "10:"
+          if (parser->pos + 3 <= parser->input_len &&
+              memcmp(parser->input + parser->pos, "10:", 3) == 0) {
+            parser->pos += 3;
           } else {
 #ifdef PGEN_ERRORS
             sprintf(parser->error_message, "Expected `"
-                                           "9:"
+                                           "10:"
                                            "` at position %zu",
                     parser->pos);
 #endif
@@ -986,7 +1030,7 @@ static bool parse_test(Parser *parser) {
           }
         }
         if (parser->success) {
-          parse_number_convert(parser);
+          parse_boom(parser);
           if (!parser->success) {
             RESTORE_POSITION(parser, pos);
           }
@@ -1198,6 +1242,92 @@ static bool parse_backtracked(Parser *parser) {
     fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
   } else {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "backtracked", parser->pos);
+  }
+#endif
+
+  parser->depth -= 1;
+  return parser->success;
+}
+
+static bool parse_boom(Parser *parser) {
+  size_t start = parser->pos;
+
+  parser->depth += 1;
+  if (parser->depth > PGEN_MAX_DEPTH) {
+    // A Lua error (rather than a match failure) so the overflow can't be
+    // silently converted into a successful parse by a predicate or choice
+    luaL_error(parser->L, "pgen: max recursion depth (%d) exceeded at position %d", (int)PGEN_MAX_DEPTH, (int)(parser->pos + 1));
+  }
+
+#ifdef PGEN_DEBUG
+  fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "boom", start);
+#endif
+
+  { // Transform Capture (Cfn id=9)
+    size_t fn_cap_start = parser->cap_len;
+    pgen_cap_push(parser, PGEN_CAP_FN_OPEN, __cmt_refs[9], parser->pos, 0);
+    { // Capture
+      size_t start_pos = parser->pos;
+      { // At least 1 repetitions
+        REMEMBER_INPUT_POSITION(parser, pos);
+        size_t rep_count = 0;
+
+        while (true) {
+          { // Match character range: "az"
+            if (parser->pos < parser->input_len &&
+                ((parser->input[parser->pos] >= 97 && parser->input[parser->pos] <= 122))) {
+              parser->pos++;
+            } else {
+#ifdef PGEN_ERRORS
+              sprintf(parser->error_message, "Expected character in ranges ["
+                                             "a"
+                                             " - "
+                                             "z"
+                                             "] at position %zu",
+                      parser->pos);
+#endif
+              parser->success = false;
+            }
+          }
+
+          if (!parser->success) {
+            break;
+          }
+
+          rep_count += 1;
+        }
+
+        // Don't recover if labeled failure was thrown
+        if (parser->throw_label) {
+          // Keep failure state, propagate labeled failure
+        } else if (rep_count >= 1) {
+          parser->success = true;
+        } else {
+          RESTORE_INPUT_POSITION(parser, pos);
+#ifdef PGEN_ERRORS
+          sprintf(parser->error_message, "Expected 1 repetitions at position %zu", parser->pos);
+#endif
+        }
+      }
+
+      if (parser->success) {
+        pgen_cap_push(parser, PGEN_CAP_STR, 0, start_pos, parser->pos - start_pos);
+      }
+    }
+
+    if (parser->success) {
+      pgen_cap_push(parser, PGEN_CAP_FN_CLOSE, 0, parser->pos, 0);
+    } else {
+      parser->cap_len = fn_cap_start;
+    }
+  }
+
+#ifdef PGEN_DEBUG
+  if (parser->success) {
+    fprintf(stderr, "%*sRule %s matched range: %zu-%zu\n", (int)parser->depth, "", "boom", start, parser->pos);
+    fprintf(stderr, "%*s\t%.*s\n", (int)parser->depth, "", (int)(parser->pos - start), parser->input + start);
+  } else {
+    fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "boom", parser->pos);
   }
 #endif
 
@@ -2046,13 +2176,21 @@ static bool parse_whole_match(Parser *parser) {
   return parser->success;
 }
 
-// Initialize parser
+#define PGEN_PARSER_MT "pgen.transform_capture"
+
+// Initialize a parser anchored in a Lua userdata (left on the stack). Its
+// metatable's __gc frees the owned allocations, so a Lua error unwinding
+// out of a parse (transform/Cmt callbacks, recursion depth, out of memory)
+// cannot leak them.
 static Parser *transform_capture_init(const char *input, lua_State *L) {
-  Parser *parser = (Parser *)malloc(sizeof(Parser));
-  if (!parser) {
-    // Handle allocation failure if necessary, though often parser might exit
-    return NULL;
-  }
+  Parser *parser = (Parser *)lua_newuserdata(L, sizeof(Parser));
+
+  // Null the owned pointers before attaching the metatable so __gc is
+  // safe even if a later allocation fails mid-init
+  parser->caps = NULL;
+  luaL_getmetatable(L, PGEN_PARSER_MT);
+  lua_setmetatable(L, -2);
+
   parser->input = input;
   parser->input_len = strlen(input);
   parser->pos = 0;
@@ -2064,27 +2202,33 @@ static Parser *transform_capture_init(const char *input, lua_State *L) {
   parser->furthest_fail = 0;
   parser->top = lua_gettop(L);
   parser->stack_claimed = parser->top;
+  parser->L = L;
+
   parser->caps = (PgenCap *)malloc(64 * sizeof(PgenCap));
   if (!parser->caps) {
-    free(parser);
-    return NULL;
+    luaL_error(L, "pgen: out of memory initializing parser");
   }
   parser->cap_len = 0;
   parser->cap_cap = 64;
-  parser->L = L;
   return parser;
 }
 
-// Free parser
+// Free the parser's owned allocations. Idempotent: called eagerly on
+// normal completion and again from __gc, which also covers error unwinds
 static void transform_capture_free(Parser *parser) {
-  // Check for NULL in case _init failed or was called with NULL
   if (parser) {
     free(parser->caps);
-    free(parser);
+    parser->caps = NULL;
   }
 }
 
 // --- Lua Module Interface ---
+
+// __gc for the parser userdata: frees whatever the eager free didn't
+static int l_transform_capture_gc(lua_State *L) {
+  transform_capture_free((Parser *)lua_touserdata(L, 1));
+  return 0;
+}
 
 // Lua wrapper function
 static int l_transform_capture_parse(lua_State *L) {
@@ -2098,13 +2242,8 @@ static int l_transform_capture_parse(lua_State *L) {
     return luaL_error(L, "Failed to get string argument");
   }
 
-  // Initialize the parser directly
+  // Initialize the parser (a userdata anchored on the stack; see _init)
   Parser *parser = transform_capture_init(input, L);
-  if (!parser) {
-    lua_pushnil(L);
-    lua_pushstring(L, "Parser initialization failed (memory allocation?)");
-    return 2;
-  }
 
   int initial_stack_size = lua_gettop(parser->L);
 
@@ -2178,6 +2317,11 @@ static const struct luaL_Reg transform_capture_module[] = {
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502
 // Lua 5.2+ uses luaL_setfuncs
 int luaopen_transform_capture(lua_State *L) {
+  if (luaL_newmetatable(L, PGEN_PARSER_MT)) {
+    lua_pushcfunction(L, l_transform_capture_gc);
+    lua_setfield(L, -2, "__gc");
+  }
+  lua_pop(L, 1);
   __const_init(L);
   __cmt_init(L);
   luaL_newlib(L, transform_capture_module); // Creates table and registers functions
@@ -2189,6 +2333,11 @@ int luaopen_transform_capture(lua_State *L) {
 // two parsers compiled with the same parser_name in one process would
 // silently overwrite the first module's parse function.
 int luaopen_transform_capture(lua_State *L) {
+  if (luaL_newmetatable(L, PGEN_PARSER_MT)) {
+    lua_pushcfunction(L, l_transform_capture_gc);
+    lua_setfield(L, -2, "__gc");
+  }
+  lua_pop(L, 1);
   __const_init(L);
   __cmt_init(L);
   lua_newtable(L);
