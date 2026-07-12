@@ -13,7 +13,8 @@ local types = {
   Cmb = 12,
   Cmt = 13,
   T = 14,
-  Ind = 15
+  Ind = 15,
+  Cfn = 16
 }
 
 return types

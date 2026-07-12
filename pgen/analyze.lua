@@ -17,7 +17,8 @@ function analyze.changes_backtrack_state(pattern, rules, rule_states)
   local t = pattern.type
 
   if t == types.C or t == types.Ct or t == types.Cp or t == types.Cc or
-      t == types.Cg or t == types.Cn or t == types.Cmt or t == types.Ind then
+      t == types.Cg or t == types.Cn or t == types.Cmt or t == types.Cfn or
+      t == types.Ind then
     return true
   elseif t == types.P or t == types.R or t == types.S or t == types.Cmb or
       t == types.T or t == "literal_trie" then
@@ -96,7 +97,8 @@ function analyze.is_nullable(pattern, rules, rule_memo, visiting)
     return true -- the referenced capture may be the empty string
   elseif t == types.L then
     return true -- lookahead consumes nothing
-  elseif t == types.C or t == types.Ct or t == types.Cg or t == types.Cn then
+  elseif t == types.C or t == types.Ct or t == types.Cg or t == types.Cn or
+      t == types.Cfn then
     return analyze.is_nullable(pattern.value, rules, rule_memo, visiting)
   elseif t == types.Cmt then
     -- the callback can only advance past the inner match, so an empty match

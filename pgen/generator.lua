@@ -117,27 +117,31 @@ local function collect_constants(grammar)
   return pool, index
 end
 
--- Collect all Cmt nodes from a grammar, assigning each a unique ID
--- Returns array of {id, code} for unique codes, and a new grammar with cmt_id fields set
--- Identical code strings share the same ID (deduplication)
+-- Collect all Cmt and Cfn nodes from a grammar, assigning each a unique ID
+-- into a shared callback registry. Returns array of {id, code, kind} for
+-- unique codes, and a new grammar with cmt_id fields set. Identical code
+-- strings of the same kind share an ID; the kinds are registered separately
+-- because their load conventions differ (a Cmt chunk IS the callback, while
+-- a Cfn chunk is run once and must return the callback).
 local function collect_cmt_codes(grammar)
   local visitor = require("pgen.visitor")
   local pgen = require("pgen")
-  local codes = {}           -- Array of {id, code} for unique codes only
-  local code_to_id = {}      -- Map: code string -> id (for deduplication)
+  local codes = {}           -- Array of {id, code, kind} for unique codes only
+  local code_to_id = {}      -- Map: kind-tagged code string -> id (deduplication)
   local next_id = 0
 
   local new_grammar = visitor.visit_grammar(grammar, function(node, replace)
-    -- Only replace Cmt nodes that don't already have an ID assigned
-    if node.type == types.Cmt and node.cmt_id == nil then
+    if (node.type == types.Cmt or node.type == types.Cfn) and node.cmt_id == nil then
+      local kind = node.type == types.Cmt and "cmt" or "cfn"
       local code = node.code
-      local id = code_to_id[code]
+      local key = kind .. "\0" .. code
+      local id = code_to_id[key]
 
       if id == nil then
         -- First time seeing this code, assign new ID
         id = next_id
-        code_to_id[code] = id
-        table.insert(codes, {id = id, code = code})
+        code_to_id[key] = id
+        table.insert(codes, {id = id, code = code, kind = kind})
         next_id = next_id + 1
       end
 
@@ -372,28 +376,39 @@ local function generate_cap_evaluator()
   return [[
 // --- Capture log evaluation ---
 
-static void pgen_cap_eval(Parser *parser, size_t *i);
+static int pgen_cap_eval(Parser *parser, size_t *i);
 
-// Push the single value a capture group produces: its first inner capture,
-// or the text it matched when it contains no captures
+// Push the single value a capture group produces: its first inner capture
+// value, or the text it matched when its contents produce no values
 static void pgen_cap_eval_group(Parser *parser, size_t *i) {
   size_t open = *i;
   pgen_cap_skip(parser, i);  // *i now points past GROUP_CLOSE
   size_t close = *i - 1;
-  if (open + 1 == close) {
-    size_t start = parser->caps[open].start;
-    pgen_checkstack(parser, 1);
-    lua_pushlstring(parser->L, parser->input + start, parser->caps[close].start - start);
-    parser->top++;
-  } else {
-    size_t j = open + 1;
-    pgen_cap_eval(parser, &j);  // first value only; extras are discarded
+
+  size_t j = open + 1;
+  while (j < close) {
+    int produced = pgen_cap_eval(parser, &j);
+    if (produced > 0) {
+      if (produced > 1) {
+        // keep only the first value
+        lua_pop(parser->L, produced - 1);
+        parser->top -= produced - 1;
+      }
+      return;
+    }
   }
+
+  // no values: the group's value is the text it matched
+  size_t start = parser->caps[open].start;
+  pgen_checkstack(parser, 1);
+  lua_pushlstring(parser->L, parser->input + start, parser->caps[close].start - start);
+  parser->top++;
 }
 
-// Materialize one log item (entry or bracketed range) at *i, pushing
-// exactly one Lua value and advancing *i past the item
-static void pgen_cap_eval(Parser *parser, size_t *i) {
+// Materialize one log item (entry or bracketed range) at *i, advancing *i
+// past the item. Returns the number of Lua values pushed: always 1 except
+// for transform captures, whose callbacks may return any number of values.
+static int pgen_cap_eval(Parser *parser, size_t *i) {
   PgenCap *cap = &parser->caps[*i];
   switch (cap->kind) {
   case PGEN_CAP_STR:
@@ -401,34 +416,71 @@ static void pgen_cap_eval(Parser *parser, size_t *i) {
     lua_pushlstring(parser->L, parser->input + cap->start, cap->len);
     parser->top++;
     (*i)++;
-    return;
+    return 1;
   case PGEN_CAP_CONST:
     pgen_checkstack(parser, 1);
     lua_rawgeti(parser->L, LUA_REGISTRYINDEX, cap->aux);
     parser->top++;
     (*i)++;
-    return;
+    return 1;
   case PGEN_CAP_NIL:
     pgen_checkstack(parser, 1);
     lua_pushnil(parser->L);
     parser->top++;
     (*i)++;
-    return;
+    return 1;
   case PGEN_CAP_POS:
     pgen_checkstack(parser, 1);
     lua_pushinteger(parser->L, (lua_Integer)(cap->start + 1));
     parser->top++;
     (*i)++;
-    return;
+    return 1;
   case PGEN_CAP_VALUE:
     pgen_checkstack(parser, 1);
     lua_pushvalue(parser->L, cap->aux);
     parser->top++;
     (*i)++;
-    return;
+    return 1;
   case PGEN_CAP_GROUP_OPEN:
     pgen_cap_eval_group(parser, i);
-    return;
+    return 1;
+  case PGEN_CAP_FN_OPEN: {
+    // Transform capture: inner values become arguments, the callback's
+    // return values become the capture values (innermost-first order falls
+    // out of the recursion here)
+    size_t open = *i;
+    int func_base = parser->top;
+    pgen_checkstack(parser, 1);
+    lua_rawgeti(parser->L, LUA_REGISTRYINDEX, cap->aux);
+    parser->top++;
+
+    int nargs = 0;
+    size_t j = open + 1;
+    while (parser->caps[j].kind != PGEN_CAP_FN_CLOSE) {
+      if (parser->caps[j].kind == PGEN_CAP_GROUP_OPEN) {
+        // named groups are not visible as arguments (as at the top level)
+        pgen_cap_skip(parser, &j);
+      } else {
+        nargs += pgen_cap_eval(parser, &j);
+      }
+    }
+
+    if (nargs == 0) {
+      // no inner captures: the callback receives the matched text
+      size_t start = parser->caps[open].start;
+      pgen_checkstack(parser, 1);
+      lua_pushlstring(parser->L, parser->input + start, parser->caps[j].start - start);
+      nargs = 1;
+    }
+
+    // lua_call propagates errors (aborts materialization on Lua error)
+    lua_call(parser->L, nargs, LUA_MULTRET);
+    parser->top = lua_gettop(parser->L);
+    if (parser->stack_claimed > parser->top) parser->stack_claimed = parser->top;
+
+    *i = j + 1;  // past FN_CLOSE
+    return parser->top - func_base;
+  }
   default: {  // PGEN_CAP_TBL_OPEN
     // No presizing: counting items would re-walk every nested subtree at
     // each nesting level, which costs more than letting the table grow
@@ -448,13 +500,18 @@ static void pgen_cap_eval(Parser *parser, size_t *i) {
         lua_rawset(parser->L, table_idx);
         parser->top -= 2;
       } else {
-        pgen_cap_eval(parser, &j);
-        lua_rawseti(parser->L, table_idx, array_idx++);
-        parser->top--;
+        // rawseti pops the top value, so multi-value items assign their
+        // indexes in reverse
+        int produced = pgen_cap_eval(parser, &j);
+        for (int v = produced - 1; v >= 0; v--) {
+          lua_rawseti(parser->L, table_idx, array_idx + v);
+        }
+        array_idx += produced;
+        parser->top -= produced;
       }
     }
     *i = j + 1;  // past TBL_CLOSE
-    return;
+    return 1;
   }
   }
 }
@@ -481,8 +538,7 @@ static void pgen_run_cmt(Parser *parser, int func_ref, size_t start_pos, size_t 
       // named groups only matter inside Ct; they aren't passed as arguments
       pgen_cap_skip(parser, &i);
     } else {
-      pgen_cap_eval(parser, &i);
-      nargs++;
+      nargs += pgen_cap_eval(parser, &i);
     }
   }
   parser->cap_len = cap_base;  // consume the inner captures
@@ -552,7 +608,7 @@ local function generate_cmt_infrastructure(cmt_codes)
   end
 
   local lines = {}
-  table.insert(lines, "// Match-time capture (Cmt) infrastructure")
+  table.insert(lines, "// Callback (Cmt/Cfn) infrastructure")
   table.insert(lines, "")
 
   -- Generate static code strings
@@ -569,14 +625,28 @@ local function generate_cmt_infrastructure(cmt_codes)
 
   -- Generate init function
   table.insert(lines, "")
-  table.insert(lines, [[// Initialize Cmt callbacks by loading their Lua code
+  table.insert(lines, [[// Initialize callbacks by loading their Lua code
 static void __cmt_init(lua_State *L) {]])
 
   for _, cmt in ipairs(cmt_codes) do
-    table.insert(lines, template_code([[  if (luaL_loadstring(L, __cmt_code_$ID$) != 0) {
+    if cmt.kind == "cfn" then
+      -- Cfn: the chunk runs once at load and must return the callback
+      table.insert(lines, template_code([[  if (luaL_loadstring(L, __cmt_code_$ID$) != 0) {
+    luaL_error(L, "Failed to load Cfn callback $ID$: %s", lua_tostring(L, -1));
+  }
+  if (lua_pcall(L, 0, 1, 0) != 0) {
+    luaL_error(L, "Failed to run Cfn chunk $ID$: %s", lua_tostring(L, -1));
+  }
+  if (!lua_isfunction(L, -1)) {
+    luaL_error(L, "Cfn chunk $ID$ did not return a function");
+  }
+  __cmt_refs[$ID$] = luaL_ref(L, LUA_REGISTRYINDEX);]], {ID = cmt.id}))
+    else
+      table.insert(lines, template_code([[  if (luaL_loadstring(L, __cmt_code_$ID$) != 0) {
     luaL_error(L, "Failed to load Cmt callback $ID$: %s", lua_tostring(L, -1));
   }
   __cmt_refs[$ID$] = luaL_ref(L, LUA_REGISTRYINDEX);]], {ID = cmt.id}))
+    end
   end
 
   table.insert(lines, "}")
@@ -817,8 +887,17 @@ enum {
   PGEN_CAP_TBL_OPEN,    // Ct brackets
   PGEN_CAP_TBL_CLOSE,
   PGEN_CAP_GROUP_OPEN,  // Cg brackets; aux: name index, start: input position
-  PGEN_CAP_GROUP_CLOSE
+  PGEN_CAP_GROUP_CLOSE,
+  PGEN_CAP_FN_OPEN,     // Cfn brackets; aux: callback registry ref, start: pos
+  PGEN_CAP_FN_CLOSE
 };
+
+// Bracket kind tests: OPEN kinds and their CLOSE kinds are laid out in
+// matching order after the scalar kinds
+#define PGEN_CAP_IS_OPEN(k) \
+  ((k) == PGEN_CAP_TBL_OPEN || (k) == PGEN_CAP_GROUP_OPEN || (k) == PGEN_CAP_FN_OPEN)
+#define PGEN_CAP_IS_CLOSE(k) \
+  ((k) == PGEN_CAP_TBL_CLOSE || (k) == PGEN_CAP_GROUP_CLOSE || (k) == PGEN_CAP_FN_CLOSE)
 
 typedef struct {
   int kind;
@@ -979,12 +1058,12 @@ static void pgen_cap_grow(Parser *parser) {
 static void pgen_cap_skip(Parser *parser, size_t *i) {
   int kind = parser->caps[*i].kind;
   (*i)++;
-  if (kind == PGEN_CAP_TBL_OPEN || kind == PGEN_CAP_GROUP_OPEN) {
+  if (PGEN_CAP_IS_OPEN(kind)) {
     int depth = 1;
     while (depth > 0) {
       kind = parser->caps[*i].kind;
-      if (kind == PGEN_CAP_TBL_OPEN || kind == PGEN_CAP_GROUP_OPEN) depth++;
-      else if (kind == PGEN_CAP_TBL_CLOSE || kind == PGEN_CAP_GROUP_CLOSE) depth--;
+      if (PGEN_CAP_IS_OPEN(kind)) depth++;
+      else if (PGEN_CAP_IS_CLOSE(kind)) depth--;
       (*i)++;
     }
   }
@@ -1023,14 +1102,14 @@ static bool pgen_cap_match_back(Parser *parser, int name_idx) {
   while (i > 0) {
     i--;
     int kind = parser->caps[i].kind;
-    if (kind == PGEN_CAP_TBL_CLOSE || kind == PGEN_CAP_GROUP_CLOSE) {
+    if (PGEN_CAP_IS_CLOSE(kind)) {
       size_t close = i;
       int depth = 1;
       while (depth > 0) {
         i--;
         int k2 = parser->caps[i].kind;
-        if (k2 == PGEN_CAP_TBL_CLOSE || k2 == PGEN_CAP_GROUP_CLOSE) depth++;
-        else if (k2 == PGEN_CAP_TBL_OPEN || k2 == PGEN_CAP_GROUP_OPEN) depth--;
+        if (PGEN_CAP_IS_CLOSE(k2)) depth++;
+        else if (PGEN_CAP_IS_OPEN(k2)) depth--;
       }
       if (kind == PGEN_CAP_GROUP_CLOSE && parser->caps[i].aux == name_idx) {
         const char *text;
@@ -1214,6 +1293,8 @@ function generator.generate_pattern_code(pattern, context)
     return generator.generate_capture_match_back_code(pattern.name, context)
   elseif t == types.Cmt then -- Cmt (match-time capture)
     return generator.generate_cmt_code(pattern.value, pattern.cmt_id, context)
+  elseif t == types.Cfn then -- Cfn (transform capture)
+    return generator.generate_cfn_code(pattern.value, pattern.cmt_id, context)
   elseif t == types.T then -- T (labeled failure)
     return generator.generate_labeled_failure_code(pattern.value)
   elseif t == types.Ind then -- Ind (indenter stack operation)
@@ -1752,6 +1833,27 @@ function generator.generate_cmt_code(inner_pattern, cmt_id, context)
   })
 end
 
+-- Generate code for a transform capture (Cfn)
+-- Emits open/close brackets in the capture log carrying the callback's
+-- registry ref and the matched span; the callback runs during
+-- materialization, so backtracked-over transforms are never called
+function generator.generate_cfn_code(body, cmt_id, context)
+  return template_code([[{ // Transform Capture (Cfn id=$ID$)
+  size_t fn_cap_start = parser->cap_len;
+  pgen_cap_push(parser, PGEN_CAP_FN_OPEN, __cmt_refs[$ID$], parser->pos, 0);
+  $BODY$
+
+  if (parser->success) {
+    pgen_cap_push(parser, PGEN_CAP_FN_CLOSE, 0, parser->pos, 0);
+  } else {
+    parser->cap_len = fn_cap_start;
+  }
+}]], {
+    ID = cmt_id,
+    BODY = generator.generate_pattern_code(body, context)
+  })
+end
+
 -- Generate code for an indenter stack operation (Ind)
 -- All operations are transactional: pushes/pops are recorded on the trail
 -- and undone when the parser backtracks past them
@@ -2026,8 +2128,7 @@ static int l_$PARSER_NAME$_parse(lua_State *L) {
     if (parser->caps[cap_i].kind == PGEN_CAP_GROUP_OPEN) {
       pgen_cap_skip(parser, &cap_i);
     } else {
-      pgen_cap_eval(parser, &cap_i);
-      result_count++;
+      result_count += pgen_cap_eval(parser, &cap_i);
     }
   }
 

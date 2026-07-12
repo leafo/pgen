@@ -13,7 +13,6 @@
 
 local pgen = require "pgen"
 local errors = require "pgen.errors"
-local tree = require "moonscript_pgen.tree"
 
 local parse = {}
 
@@ -29,18 +28,12 @@ local function get_parser()
 end
 
 function parse.string(str)
-  local raw, label, err_pos = get_parser().parse(str)
-  if not raw then
-    if err_pos then
-      return nil, errors.format(str, err_pos, label or "failed to parse")
-    end
-    return nil, "failed to parse"
-  end
-
-  local ok, result = pcall(tree.normalize, raw)
+  local parser = get_parser()
+  -- Grammar transforms run during parse(); format_assign raises
+  -- error({node, msg}) for invalid assignment targets, like the reference
+  local ok, result, label, err_pos = pcall(parser.parse, str)
   if not ok then
     if type(result) == "table" then
-      -- error({node, msg}) raised from format_assign, like the reference
       local node, msg = result[1], result[2]
       local pos = type(node) == "table" and node[-1]
       if pos then
@@ -49,6 +42,13 @@ function parse.string(str)
       return nil, "failed to parse: " .. tostring(msg)
     end
     error(result, 0)
+  end
+
+  if not result then
+    if err_pos then
+      return nil, errors.format(str, err_pos, label or "failed to parse")
+    end
+    return nil, "failed to parse"
   end
 
   return result

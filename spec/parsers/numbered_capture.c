@@ -32,8 +32,17 @@ enum {
   PGEN_CAP_TBL_OPEN, // Ct brackets
   PGEN_CAP_TBL_CLOSE,
   PGEN_CAP_GROUP_OPEN, // Cg brackets; aux: name index, start: input position
-  PGEN_CAP_GROUP_CLOSE
+  PGEN_CAP_GROUP_CLOSE,
+  PGEN_CAP_FN_OPEN, // Cfn brackets; aux: callback registry ref, start: pos
+  PGEN_CAP_FN_CLOSE
 };
+
+// Bracket kind tests: OPEN kinds and their CLOSE kinds are laid out in
+// matching order after the scalar kinds
+#define PGEN_CAP_IS_OPEN(k) \
+  ((k) == PGEN_CAP_TBL_OPEN || (k) == PGEN_CAP_GROUP_OPEN || (k) == PGEN_CAP_FN_OPEN)
+#define PGEN_CAP_IS_CLOSE(k) \
+  ((k) == PGEN_CAP_TBL_CLOSE || (k) == PGEN_CAP_GROUP_CLOSE || (k) == PGEN_CAP_FN_CLOSE)
 
 typedef struct {
   int kind;
@@ -199,13 +208,13 @@ static void pgen_cap_grow(Parser *parser) {
 static void pgen_cap_skip(Parser *parser, size_t *i) {
   int kind = parser->caps[*i].kind;
   (*i)++;
-  if (kind == PGEN_CAP_TBL_OPEN || kind == PGEN_CAP_GROUP_OPEN) {
+  if (PGEN_CAP_IS_OPEN(kind)) {
     int depth = 1;
     while (depth > 0) {
       kind = parser->caps[*i].kind;
-      if (kind == PGEN_CAP_TBL_OPEN || kind == PGEN_CAP_GROUP_OPEN)
+      if (PGEN_CAP_IS_OPEN(kind))
         depth++;
-      else if (kind == PGEN_CAP_TBL_CLOSE || kind == PGEN_CAP_GROUP_CLOSE)
+      else if (PGEN_CAP_IS_CLOSE(kind))
         depth--;
       (*i)++;
     }
@@ -245,15 +254,15 @@ static bool pgen_cap_match_back(Parser *parser, int name_idx) {
   while (i > 0) {
     i--;
     int kind = parser->caps[i].kind;
-    if (kind == PGEN_CAP_TBL_CLOSE || kind == PGEN_CAP_GROUP_CLOSE) {
+    if (PGEN_CAP_IS_CLOSE(kind)) {
       size_t close = i;
       int depth = 1;
       while (depth > 0) {
         i--;
         int k2 = parser->caps[i].kind;
-        if (k2 == PGEN_CAP_TBL_CLOSE || k2 == PGEN_CAP_GROUP_CLOSE)
+        if (PGEN_CAP_IS_CLOSE(k2))
           depth++;
-        else if (k2 == PGEN_CAP_TBL_OPEN || k2 == PGEN_CAP_GROUP_OPEN)
+        else if (PGEN_CAP_IS_OPEN(k2))
           depth--;
       }
       if (kind == PGEN_CAP_GROUP_CLOSE && parser->caps[i].aux == name_idx) {
@@ -349,28 +358,39 @@ static void __const_init(lua_State *L) {
 }
 // --- Capture log evaluation ---
 
-static void pgen_cap_eval(Parser *parser, size_t *i);
+static int pgen_cap_eval(Parser *parser, size_t *i);
 
-// Push the single value a capture group produces: its first inner capture,
-// or the text it matched when it contains no captures
+// Push the single value a capture group produces: its first inner capture
+// value, or the text it matched when its contents produce no values
 static void pgen_cap_eval_group(Parser *parser, size_t *i) {
   size_t open = *i;
   pgen_cap_skip(parser, i); // *i now points past GROUP_CLOSE
   size_t close = *i - 1;
-  if (open + 1 == close) {
-    size_t start = parser->caps[open].start;
-    pgen_checkstack(parser, 1);
-    lua_pushlstring(parser->L, parser->input + start, parser->caps[close].start - start);
-    parser->top++;
-  } else {
-    size_t j = open + 1;
-    pgen_cap_eval(parser, &j); // first value only; extras are discarded
+
+  size_t j = open + 1;
+  while (j < close) {
+    int produced = pgen_cap_eval(parser, &j);
+    if (produced > 0) {
+      if (produced > 1) {
+        // keep only the first value
+        lua_pop(parser->L, produced - 1);
+        parser->top -= produced - 1;
+      }
+      return;
+    }
   }
+
+  // no values: the group's value is the text it matched
+  size_t start = parser->caps[open].start;
+  pgen_checkstack(parser, 1);
+  lua_pushlstring(parser->L, parser->input + start, parser->caps[close].start - start);
+  parser->top++;
 }
 
-// Materialize one log item (entry or bracketed range) at *i, pushing
-// exactly one Lua value and advancing *i past the item
-static void pgen_cap_eval(Parser *parser, size_t *i) {
+// Materialize one log item (entry or bracketed range) at *i, advancing *i
+// past the item. Returns the number of Lua values pushed: always 1 except
+// for transform captures, whose callbacks may return any number of values.
+static int pgen_cap_eval(Parser *parser, size_t *i) {
   PgenCap *cap = &parser->caps[*i];
   switch (cap->kind) {
   case PGEN_CAP_STR:
@@ -378,34 +398,72 @@ static void pgen_cap_eval(Parser *parser, size_t *i) {
     lua_pushlstring(parser->L, parser->input + cap->start, cap->len);
     parser->top++;
     (*i)++;
-    return;
+    return 1;
   case PGEN_CAP_CONST:
     pgen_checkstack(parser, 1);
     lua_rawgeti(parser->L, LUA_REGISTRYINDEX, cap->aux);
     parser->top++;
     (*i)++;
-    return;
+    return 1;
   case PGEN_CAP_NIL:
     pgen_checkstack(parser, 1);
     lua_pushnil(parser->L);
     parser->top++;
     (*i)++;
-    return;
+    return 1;
   case PGEN_CAP_POS:
     pgen_checkstack(parser, 1);
     lua_pushinteger(parser->L, (lua_Integer)(cap->start + 1));
     parser->top++;
     (*i)++;
-    return;
+    return 1;
   case PGEN_CAP_VALUE:
     pgen_checkstack(parser, 1);
     lua_pushvalue(parser->L, cap->aux);
     parser->top++;
     (*i)++;
-    return;
+    return 1;
   case PGEN_CAP_GROUP_OPEN:
     pgen_cap_eval_group(parser, i);
-    return;
+    return 1;
+  case PGEN_CAP_FN_OPEN: {
+    // Transform capture: inner values become arguments, the callback's
+    // return values become the capture values (innermost-first order falls
+    // out of the recursion here)
+    size_t open = *i;
+    int func_base = parser->top;
+    pgen_checkstack(parser, 1);
+    lua_rawgeti(parser->L, LUA_REGISTRYINDEX, cap->aux);
+    parser->top++;
+
+    int nargs = 0;
+    size_t j = open + 1;
+    while (parser->caps[j].kind != PGEN_CAP_FN_CLOSE) {
+      if (parser->caps[j].kind == PGEN_CAP_GROUP_OPEN) {
+        // named groups are not visible as arguments (as at the top level)
+        pgen_cap_skip(parser, &j);
+      } else {
+        nargs += pgen_cap_eval(parser, &j);
+      }
+    }
+
+    if (nargs == 0) {
+      // no inner captures: the callback receives the matched text
+      size_t start = parser->caps[open].start;
+      pgen_checkstack(parser, 1);
+      lua_pushlstring(parser->L, parser->input + start, parser->caps[j].start - start);
+      nargs = 1;
+    }
+
+    // lua_call propagates errors (aborts materialization on Lua error)
+    lua_call(parser->L, nargs, LUA_MULTRET);
+    parser->top = lua_gettop(parser->L);
+    if (parser->stack_claimed > parser->top)
+      parser->stack_claimed = parser->top;
+
+    *i = j + 1; // past FN_CLOSE
+    return parser->top - func_base;
+  }
   default: { // PGEN_CAP_TBL_OPEN
     // No presizing: counting items would re-walk every nested subtree at
     // each nesting level, which costs more than letting the table grow
@@ -425,13 +483,18 @@ static void pgen_cap_eval(Parser *parser, size_t *i) {
         lua_rawset(parser->L, table_idx);
         parser->top -= 2;
       } else {
-        pgen_cap_eval(parser, &j);
-        lua_rawseti(parser->L, table_idx, array_idx++);
-        parser->top--;
+        // rawseti pops the top value, so multi-value items assign their
+        // indexes in reverse
+        int produced = pgen_cap_eval(parser, &j);
+        for (int v = produced - 1; v >= 0; v--) {
+          lua_rawseti(parser->L, table_idx, array_idx + v);
+        }
+        array_idx += produced;
+        parser->top -= produced;
       }
     }
     *i = j + 1; // past TBL_CLOSE
-    return;
+    return 1;
   }
   }
 }
@@ -458,8 +521,7 @@ static void pgen_run_cmt(Parser *parser, int func_ref, size_t start_pos, size_t 
       // named groups only matter inside Ct; they aren't passed as arguments
       pgen_cap_skip(parser, &i);
     } else {
-      pgen_cap_eval(parser, &i);
-      nargs++;
+      nargs += pgen_cap_eval(parser, &i);
     }
   }
   parser->cap_len = cap_base; // consume the inner captures
@@ -2108,8 +2170,7 @@ static int l_numbered_capture_parse(lua_State *L) {
     if (parser->caps[cap_i].kind == PGEN_CAP_GROUP_OPEN) {
       pgen_cap_skip(parser, &cap_i);
     } else {
-      pgen_cap_eval(parser, &cap_i);
-      result_count++;
+      result_count += pgen_cap_eval(parser, &cap_i);
     }
   }
 

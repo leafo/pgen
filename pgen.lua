@@ -119,6 +119,23 @@ function pgen.Cmt(patt, code)
   }
 end
 
+-- Transform capture: the captures of patt are passed to a Lua callback and
+-- its return values become the captures (lpeg `patt / fn` semantics,
+-- evaluated innermost-first after the whole parse succeeds, so transforms
+-- that get backtracked over are never called). The code string is evaluated
+-- once at module load and must return the callback function:
+--   Cfn(patt, [[return function(...) ... end]])
+-- The callback receives patt's captures (or the matched text when patt
+-- captures nothing); returning no values makes the capture vanish.
+function pgen.Cfn(patt, code)
+  assert(type(code) == "string", "Cfn requires a string of Lua code")
+  return make{
+    type = types.Cfn,
+    value = coerce_pattern(patt),
+    code = code
+  }
+end
+
 -- Indenter: a match-time integer stack that lives alongside the parser, with
 -- indentation-flavored operations. Backed by a stack in the generated C
 -- parser; all operations are transactional (undone when the parser

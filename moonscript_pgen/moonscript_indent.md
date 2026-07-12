@@ -384,11 +384,17 @@ give `parser->depth` a configurable limit and clean error.
    indenter with constant ops (`initial = 1`, `cpush(0)`/`ctop("ne", 0)`);
    all `ensure`/`Cut` cleanup dropped in favor of transactional rollback.
    `Cx` turned out to be unnecessary.
-6. **[DONE] Normalization pass** — `moonscript_pgen/tree.lua` resolves the
-   `@` tags bottom-up (matching LPeg's deferred innermost-first evaluation),
-   including `error({node, msg})` for non-assignable targets, exactly like
-   the reference. `moonscript_pgen/init.lua` wraps compile + parse +
-   normalize behind `parse.string()`.
+6. **[DONE] Normalization pass, since replaced by transform captures** —
+   originally `moonscript_pgen/tree.lua` resolved `@` tags in a bottom-up
+   post-parse walk. Once pgen gained `Cfn` transform captures (evaluated
+   innermost-first during capture materialization, like LPeg's `/ fn`),
+   the tags were migrated to in-grammar transforms and the normalize walk
+   deleted; `tree.lua` now only holds the shared transform helpers.
+   `error({node, msg})` for non-assignable targets propagates out of
+   `parse()` and is formatted by `moonscript_pgen/init.lua`. One ordering
+   constraint from the migration: a tag-style node must never sit beneath
+   a `Cfn` (the transform would run before the tag's rewrite), so the
+   grammar uses transforms for every node that needs rewriting.
 7. **[DONE] Differential test harness** — `spec/moonscript_diff_spec.lua`
    compares trees (including `[-1]` positions) against the reference parser
    over every `.moon` file in `moonscript/` (80 files, 175KB) plus targeted
@@ -396,8 +402,9 @@ give `parser->depth` a configurable limit and clean error.
    anchors. Result: **zero mismatches**, including an 8.5k-case
    line-boundary truncation fuzz (agreement on success/failure and trees).
    No reference-parser quirk deviations surfaced — transactional rollback
-   produced identical trees on the entire corpus. Corpus parse timing:
-   ~1.6x faster than the reference API (which rebuilds its grammar per
-   call), ~0.7x of a reused LPeg grammar; the Lua-side normalize pass is a
-   third of our total, and eager capture construction remains the known
-   optimization target.
+   produced identical trees on the entire corpus. Corpus parse timing at
+   the time: ~1.6x faster than the reference API, ~0.7x of a reused LPeg
+   grammar. Both known optimization targets have since landed — deferred
+   capture materialization (the capture log) and in-grammar transform
+   captures replacing the normalize pass — putting the parser at ~3x a
+   reused LPeg grammar on both PUC Lua and LuaJIT.

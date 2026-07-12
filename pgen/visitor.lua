@@ -61,7 +61,7 @@ function visitor.visit_pattern(pattern, visitor_fn)
   -- Leaf types (P, R, S, V, Cp, Cc, Cmb, T, Ind) have no child patterns and
   -- need no traversal case here
   local t = pattern.type
-  if t == types.C or t == types.Ct or t == types.L or t == types.Cg or t == types.Cn or t == types.Cmt then
+  if t == types.C or t == types.Ct or t == types.L or t == types.Cg or t == types.Cn or t == types.Cmt or t == types.Cfn then
     local new_value, stopped = visitor.visit_pattern(pattern.value, visitor_fn)
     if stopped then
       return pattern, true

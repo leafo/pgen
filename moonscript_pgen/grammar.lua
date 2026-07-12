@@ -15,9 +15,9 @@
 -- automatically when the parser backtracks.
 
 local pgen = require "pgen"
-local P, R, S, V, C, Ct, Cc, Cp, Cg, Cmb, Cmt, L =
+local P, R, S, V, C, Ct, Cc, Cp, Cg, Cmb, Cmt, Cfn, L =
   pgen.P, pgen.R, pgen.S, pgen.V, pgen.C, pgen.Ct, pgen.Cc, pgen.Cp,
-  pgen.Cg, pgen.Cmb, pgen.Cmt, pgen.L
+  pgen.Cg, pgen.Cmb, pgen.Cmt, pgen.Cfn, pgen.L
 
 -- indentation stack: space = 1, tab = 4, starts with 0 on it (matches the
 -- reference's count_width and `Stack(0)`)
@@ -58,10 +58,23 @@ local function mark(name, patt)
   return Ct(Cc(name) * patt)
 end
 
--- position-annotated node: resolved by tree.lua to node[-1] = pos
+-- position-annotated node: node[-1] = pos, like the reference's / pos()
 local function pos(patt)
-  return Ct(Cc"@pos" * Cp() * patt)
+  return Cfn(Cp() * patt, [[return function(p, value)
+    if type(value) == "table" then
+      value[-1] = p
+    end
+    return value
+  end]])
 end
+
+-- Shared by Statement and WithExp; may raise error({node, msg}) for invalid
+-- assignment targets, surfaced from parse() (see moonscript_pgen/init.lua)
+local assign_transform = [[
+  local tree = require("moonscript_pgen.tree")
+  return function(lhs, assign)
+    return tree.format_assign(lhs, assign)
+  end]]
 
 local function sym(chars)
   return V"Space" * P(chars)
@@ -120,15 +133,21 @@ return {
   CheckIndent = ind.check,
   Line = V"CheckIndent" * V"Statement" + V"Space" * L(V"Stop"),
 
-  Statement = Ct(Cc"@decorated" *
+  Statement = Cfn(
     pos(
       V"Import" + V"While" + V"With" + V"For" + V"ForEach" + V"Switch" +
       V"Return" + V"Local" + V"Export" + V"BreakLoop" +
-      Ct(Cc"@assign" * Ct(V"ExpList") * (V"Update" + V"Assign")^-1)
+      Cfn(Ct(V"ExpList") * (V"Update" + V"Assign")^-1, assign_transform)
     ) * V"Space" *
     ((mark("if", key"if" * V"Exp" * (key"else" * V"Exp")^-1 * V"Space") +
       mark("unless", key"unless" * V"Exp") +
-      mark("comprehension", V"CompInner")) * V"Space")^-1),
+      mark("comprehension", V"CompInner")) * V"Space")^-1,
+    [[return function(stm, dec)
+      if dec then
+        return {"decorated", stm, dec}
+      end
+      return stm
+    end]]),
 
   Body = V"Space" * V"Break" * V"EmptyLine"^0 * V"InBlock" + Ct(V"Statement"),
 
@@ -153,7 +172,7 @@ return {
   Return = mark("return",
     key"return" * (mark("explist", V"ExpListLow") + C(P""))),
 
-  WithExp = Ct(Cc"@assign" * Ct(V"ExpList") * V"Assign"^-1),
+  WithExp = Cfn(Ct(V"ExpList") * V"Assign"^-1, assign_transform),
   With = mark("with",
     key"with" * DisableDo * V"WithExp" * PopDo * key"do"^-1 * V"Body"),
 
@@ -167,7 +186,11 @@ return {
     key"when" * Ct(V"ExpList") * key"then"^-1 * V"Body"),
   SwitchElse = mark("else", key"else" * V"Body"),
 
-  IfCond = Ct(Cc"@singleassign" * V"Exp" * V"Assign"^-1),
+  IfCond = Cfn(V"Exp" * V"Assign"^-1, [[
+    local tree = require("moonscript_pgen.tree")
+    return function(lhs, assign)
+      return tree.format_single_assign(lhs, assign)
+    end]]),
   IfElse = mark("else",
     (V"Break" * V"EmptyLine"^0 * V"CheckIndent")^-1 * key"else" * V"Body"),
   IfElseIf = mark("elseif",
@@ -236,7 +259,13 @@ return {
     return false
   ]]) + V"Name" + V"SelfName",
 
-  Exp = Ct(Cc"@exp" * V"Value" * (V"BinaryOperator" * V"Value")^0),
+  -- flatten_or_mark("exp"): a single value passes through unwrapped
+  Exp = Cfn(V"Value" * (V"BinaryOperator" * V"Value")^0, [[return function(...)
+    if select("#", ...) == 1 then
+      return ...
+    end
+    return {"exp", ...}
+  end]]),
 
   SimpleValue =
     V"If" + V"Unless" + V"Switch" + V"With" + V"ClassDecl" +
@@ -248,8 +277,11 @@ return {
     mark("not", key"not" * V"Exp") +
     V"TblComprehension" + V"TableLit" + V"Comprehension" + V"FunLit" + V"Num",
 
-  ChainValue = Ct(Cc"@chainvalue" *
-    (V"Chain" + V"Callable") * Ct(V"InvokeArgs"^-1)),
+  ChainValue = Cfn((V"Chain" + V"Callable") * Ct(V"InvokeArgs"^-1), [[
+    local tree = require("moonscript_pgen.tree")
+    return function(callee, args)
+      return tree.join_chain(callee, args)
+    end]]),
 
   Value = pos(
     V"SimpleValue" +
@@ -282,10 +314,15 @@ return {
 
   -- Lua long strings: the "=" run is captured as a named group and the
   -- closing delimiter matched with a backreference ("]" .. eq .. "]").
-  -- tree.lua rebuilds the reference's open-delimiter string from lua_eq.
-  LuaString = Ct(Cc"@luastring" *
-    V"Space" * P"[" * Cg(P"="^0, "lua_eq") * P"[" *
-    V"Break"^-1 * C((P(1) - V"LuaStringClose")^0) * V"LuaStringClose"),
+  -- The open-delimiter string is rebuilt from the positions around the
+  -- run. The group must sit at this Cfn's own level, not nested inside
+  -- another transform, or Cmb couldn't see it from LuaStringClose.
+  LuaString = Cfn(
+    V"Space" * P"[" * Cp() * Cg(P"="^0, "lua_eq") * Cp() * P"[" *
+    V"Break"^-1 * C((P(1) - V"LuaStringClose")^0) * V"LuaStringClose",
+    [[return function(eq_start, eq_end, content)
+      return {"string", "[" .. ("="):rep(eq_end - eq_start) .. "[", content}
+    end]]),
   LuaStringClose = P"]" * Cmb"lua_eq" * P"]",
 
   Callable = pos(mark("ref", V"Name")) + V"SelfName" + V"VarArg" +
@@ -354,7 +391,13 @@ return {
     Ct(V"NameList") * (sym"=" * Ct(V"ExpListLow"))^-1)),
 
   KeyValue =
-    Ct(Cc"@selfassign" * sym":" * -V"SomeSpace" * V"Name" * Cp()) +
+    -- {:name} shorthand expands to the key/value pair
+    Cfn(sym":" * -V"SomeSpace" * V"Name" * Cp(), [[return function(name, p)
+      return {
+        {"key_literal", name},
+        {"ref", name, [-1] = p},
+      }
+    end]]) +
     Ct((V"KeyName" + sym"[" * V"Exp" * sym"]" +
         V"Space" * V"DoubleString" + V"Space" * V"SingleString") *
       P":" *

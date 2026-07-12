@@ -1,15 +1,11 @@
--- Post-parse normalization for the pgen MoonScript grammar.
+-- Transform helpers for the pgen MoonScript grammar's Cfn callbacks
+-- (ports of the reference parser's transformation functions from
+-- moonscript/parse.lua and parse/util.lua). The callbacks themselves live
+-- as code strings in grammar.lua and require this module at parser load.
 --
--- The reference parser shapes its AST with LPeg `/ fn` transformation
--- captures, which LPeg only evaluates (innermost first) once the whole
--- match succeeds. The pgen grammar instead emits those nodes tagged with
--- an "@"-prefixed marker; normalize() walks the raw tree bottom-up and
--- applies the equivalent transform, reproducing the reference's
--- evaluation order and final shapes.
---
--- Like the reference (parse/util.lua), format_assign raises
--- error({node, msg}) for invalid assignment targets; callers should pcall
--- normalize and format the error (see moonscript_pgen/init.lua).
+-- Like the reference, format_assign raises error({node, msg}) for invalid
+-- assignment targets; it propagates out of parse() and is formatted by
+-- moonscript_pgen/init.lua.
 
 local unpack = unpack or table.unpack
 
@@ -77,6 +73,8 @@ local function format_single_assign(lhs, assign)
   end
   return lhs
 end
+tree.format_assign = format_assign
+tree.format_single_assign = format_single_assign
 
 local function join_chain(callee, args)
   if #args == 0 then
@@ -89,85 +87,6 @@ local function join_chain(callee, args)
   end
   return {"chain", callee, args}
 end
-
-local transforms = {
-  -- pos(patt): {"@pos", pos, value} -> value[-1] = pos
-  ["@pos"] = function(node)
-    local p, value = node[2], node[3]
-    if type(value) == "table" then
-      value[-1] = p
-    end
-    return value
-  end,
-
-  -- flatten_or_mark("exp"): single value passes through unwrapped
-  ["@exp"] = function(node)
-    if #node == 2 then
-      return node[2]
-    end
-    node[1] = "exp"
-    return node
-  end,
-
-  ["@assign"] = function(node)
-    return format_assign(node[2], node[3])
-  end,
-
-  ["@singleassign"] = function(node)
-    return format_single_assign(node[2], node[3])
-  end,
-
-  ["@chainvalue"] = function(node)
-    return join_chain(node[2], node[3])
-  end,
-
-  ["@decorated"] = function(node)
-    if node[3] then
-      return {"decorated", node[2], node[3]}
-    end
-    return node[2]
-  end,
-
-  -- {:name} shorthand: {"@selfassign", name, pos}
-  ["@selfassign"] = function(node)
-    local name, p = node[2], node[3]
-    return {
-      {"key_literal", name},
-      {"ref", name, [-1] = p},
-    }
-  end,
-
-  -- {"@luastring", content, ["lua_eq"] = "=="} -> {"string", "[==[", content}
-  ["@luastring"] = function(node)
-    return {"string", "[" .. node["lua_eq"] .. "[", node[2]}
-  end,
-}
-
--- table.maxn: the class node can contain a genuine nil hole at [2]
--- (anonymous class), so #node is not a reliable iteration bound
-local maxn = table.maxn or function(t)
-  local n = 0
-  for k in pairs(t) do
-    if type(k) == "number" and k > n then
-      n = k
-    end
-  end
-  return n
-end
-
-local function normalize(node)
-  if type(node) ~= "table" then
-    return node
-  end
-  for i = 1, maxn(node) do
-    node[i] = normalize(node[i])
-  end
-  local transform = transforms[node[1]]
-  if transform then
-    return transform(node)
-  end
-  return node
-end
-tree.normalize = normalize
+tree.join_chain = join_chain
 
 return tree

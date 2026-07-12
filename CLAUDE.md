@@ -32,7 +32,7 @@ pgen/
 ├── examples/             # Example grammars (calc, JSON, numbers)
 ├── moonscript_pgen/      # Full MoonScript parser built on pgen
 │   ├── grammar.lua       # Grammar (port of moonscript/moonscript/parse.lua)
-│   ├── tree.lua          # Post-parse AST normalization ("@"-tag transforms)
+│   ├── tree.lua          # Transform helpers for the grammar's Cfn callbacks
 │   └── init.lua          # parse.string() API (compiles parser on first use)
 └── spec/                 # Test suite (busted framework)
     ├── *_spec.lua        # Test files
