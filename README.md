@@ -54,6 +54,7 @@ See [Compilation](#compilation) for more details on how to compile the generated
 - `L(patt)` - Lookahead pattern (matches without consuming input)
 - `Cg(patt, name)` - Named capture group (creates named field in parent `Ct`)
 - `Cmt(patt, code)` - Match-time capture (evaluates Lua code during matching)
+- `Cfn(patt, code)` - Transform capture (passes captures to a Lua callback after the parse; the equivalent of LPeg's `patt / fn`)
 
 ### Extensions and Differences
 
@@ -65,6 +66,44 @@ Patterns specific to this library that aren't in LPeg:
 **Lua 5.1 compatibility note:** pgen patterns are plain Lua tables, and Lua 5.1's `__len` metamethod only works on userdata, not tables. This means the `#` operator for lookahead doesn't work in Lua 5.1. Use `L(patt)` explicitly instead of `#patt`.
 
 Unlike LPeg's `Cmt` which takes a function, pgen's `Cmt(patt, code)` takes a **string of Lua code**. This code is embedded into the generated C parser and executed via the Lua C API during parsing. The code receives `(subject, pos, ...)` where `...` are any captures from the inner pattern, and should return a position (to advance), `true` (to succeed), or `false`/`nil` (to fail).
+
+### Transform Captures
+
+`Cfn(patt, code)` is pgen's version of LPeg's transformation capture
+(`patt / fn`): the captures produced by `patt` are passed to a callback and
+its return values become the captures. Because grammars compile to
+standalone C, the callback is given as a **string of Lua code** that is run
+once when the parser module loads and must return the callback function:
+
+```lua
+-- number literals become Lua numbers in the tree
+number = Cfn(C(R"09"^1), [[return function(s) return tonumber(s) end]]),
+
+-- the chunk runs once at load, so it can require helpers or set up state
+node = Cfn(V"inner", [[
+  local helpers = require("mygrammar.helpers")
+  return function(a, b)
+    return helpers.make_node(a, b)
+  end]]),
+```
+
+Semantics follow LPeg's `/ fn`:
+
+- The callback receives `patt`'s captures as arguments, or the whole
+  matched text when `patt` produces no captures.
+- Its return values become the capture values: multiple returns splice into
+  an enclosing `Ct` in order, and returning nothing makes the capture
+  vanish.
+- Callbacks run **after the whole parse succeeds** (during capture
+  materialization, innermost first), so transforms in backtracked-over
+  alternatives are never called. Use `Cmt` instead when the result must
+  influence matching.
+- An error raised by a callback propagates out of `parse()` with its
+  original error value, so `error({node, msg})`-style structured errors
+  work through `pcall`.
+
+Unlike LPeg, `patt / fn` operator syntax is not supported (`/` with a
+number is pgen's numbered capture `Cn`); use the `Cfn` constructor.
 
 ## Indentation-Sensitive Parsing
 
@@ -254,7 +293,10 @@ expected_colon at line 5, column 8:
 - `a^-n` - Matches at most n repetitions of pattern
 - `a - b` - Difference: match a only if b doesn't match at current position (implemented as `-b * a`)
 - `#a` - Lookahead: matches a without consuming input (shorthand for `L(a)`)
-- `a / n` - Numbered capture: shorthand for `Cn(a, n)`
+- `a / n` - Numbered capture: shorthand for `Cn(a, n)`. Note this differs
+  from LPeg, where `/` with a number selects the n-th capture and other
+  operand types create transformation captures; for the latter use
+  `Cfn(a, code)`.
 
 ## Compilation
 
@@ -317,10 +359,11 @@ Generated parsers guard against pathological input and grammars:
   (catch with `pcall`) instead of overflowing the C stack. Configure with the
   `max_depth` option to `pgen.compile`/`pgen.require`, or override at C
   compile time with `-DPGEN_MAX_DEPTH=n`.
-- **Capture count**: captures are built on the Lua stack, so the number of
-  simultaneously pending captures is bounded by the Lua build's
-  `LUAI_MAXCSTACK` (8000 in stock Lua 5.1). Exceeding it raises a clean Lua
-  error.
+- **Capture count**: captures are recorded in a C-side log during matching
+  and only materialized into Lua values after the parse succeeds, so
+  captures inside tables are unbounded. Only the number of top-level return
+  values is bounded by the Lua build's `LUAI_MAXCSTACK` (8000 in stock Lua
+  5.1); exceeding it raises a clean Lua error.
 - **Empty loops**: `pgen.compile` rejects unbounded repetitions (`patt^n` for
   `n >= 0`) whose body can match the empty string, since such a loop would
   never advance. This mirrors LPeg's "loop body may accept empty string"

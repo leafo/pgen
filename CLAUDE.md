@@ -86,6 +86,7 @@ parser.parse("input string")
 - `Cn(patt, n)` - Numbered capture (select nth capture from inner pattern)
 - `Cmb(name)` - Match backreference: matches the same text captured by `Cg(patt, name)`
 - `Cmt(patt, code)` - Match-time capture: evaluates Lua code during matching. Code receives `(subject, pos, ...)` where `...` are captures from inner pattern. Return position to advance, `true` to succeed, `false`/`nil` to fail, or position + values for extra captures
+- `Cfn(patt, code)` - Transform capture (LPeg's `patt / fn`): the code string runs once at module load and must return a callback (`[[return function(...) ... end]]`). The callback receives patt's captures (or the matched text when there are none) and its return values become the captures; it runs after the whole parse succeeds (innermost first), so backtracked-over transforms are never called. Callback errors propagate out of `parse()` with their original error value
 
 If you are adding a new type, please ensure that **pgen/visitor.lua** knows how
 to traverse it. Additionally, it might be worth scanning **pgen/optimize.lua**
