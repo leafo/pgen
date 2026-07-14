@@ -51,6 +51,15 @@ typedef struct {
   size_t len;
 } PgenCap;
 
+// Single-slot memo for position-pure rules: pos is the memoized input
+// position + 1 (0 = empty slot), endpos the resulting position or
+// (size_t)-1 for failure
+#define PGEN_MEMO_COUNT 2
+typedef struct {
+  size_t pos;
+  size_t endpos;
+} PgenMemoSlot;
+
 typedef struct {
   const char *input;
   size_t input_len;
@@ -66,6 +75,7 @@ typedef struct {
   PgenCap *caps;     // Capture log
   size_t cap_len;
   size_t cap_cap;
+  PgenMemoSlot memo[PGEN_MEMO_COUNT];
   lua_State *L;
 } Parser;
 
@@ -994,6 +1004,18 @@ static bool parse_cmt_case(Parser *parser) {
 
 static bool parse_lookahead_case(Parser *parser) {
   size_t start = parser->pos;
+  // Position-pure rule (no captures, labels, or other state): a
+  // single-slot memo short-circuits the repeated calls that backtracking
+  // alternatives make at the same position
+  if (parser->memo[0].pos == start + 1) {
+    if (parser->memo[0].endpos == (size_t)-1) {
+      parser->success = false;
+      return false;
+    }
+    parser->pos = parser->memo[0].endpos;
+    parser->success = true;
+    return true;
+  }
 
   parser->depth += 1;
   if (parser->depth > PGEN_MAX_DEPTH) {
@@ -1099,6 +1121,8 @@ static bool parse_lookahead_case(Parser *parser) {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "lookahead_case", parser->pos);
   }
 #endif
+  parser->memo[0].pos = start + 1;
+  parser->memo[0].endpos = parser->success ? parser->pos : (size_t)-1;
 
   parser->depth -= 1;
   return parser->success;
@@ -1182,6 +1206,18 @@ static bool parse_name(Parser *parser) {
 
 static bool parse_negate_case(Parser *parser) {
   size_t start = parser->pos;
+  // Position-pure rule (no captures, labels, or other state): a
+  // single-slot memo short-circuits the repeated calls that backtracking
+  // alternatives make at the same position
+  if (parser->memo[1].pos == start + 1) {
+    if (parser->memo[1].endpos == (size_t)-1) {
+      parser->success = false;
+      return false;
+    }
+    parser->pos = parser->memo[1].endpos;
+    parser->success = true;
+    return true;
+  }
 
   parser->depth += 1;
   if (parser->depth > PGEN_MAX_DEPTH) {
@@ -1312,6 +1348,8 @@ static bool parse_negate_case(Parser *parser) {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "negate_case", parser->pos);
   }
 #endif
+  parser->memo[1].pos = start + 1;
+  parser->memo[1].endpos = parser->success ? parser->pos : (size_t)-1;
 
   parser->depth -= 1;
   return parser->success;
@@ -1978,6 +2016,9 @@ static Parser *furthest_init(const char *input, lua_State *L) {
   }
   parser->cap_len = 0;
   parser->cap_cap = 64;
+  for (int i = 0; i < PGEN_MEMO_COUNT; i++) {
+    parser->memo[i].pos = 0; // empty slot
+  }
   return parser;
 }
 

@@ -46,6 +46,66 @@ function analyze.changes_backtrack_state(pattern, rules, rule_states)
   return true
 end
 
+-- Determine whether a pattern's outcome depends only on the input position.
+-- Stricter than changes_backtrack_state: besides captures and indenter
+-- state, it excludes labeled failures (T adds a third outcome besides
+-- success/failure) and backreferences (Cmb reads the capture log). A pure
+-- pattern always produces the same success/end-position result at a given
+-- position, which makes it safe to memoize. rule_purity is a precomputed
+-- name -> boolean table from analyze.pure_rules.
+function analyze.position_pure(pattern, rules, rule_purity)
+  if type(pattern) ~= "table" then
+    return false
+  end
+
+  local t = pattern.type
+
+  if t == types.P or t == types.R or t == types.S or t == "literal_trie" then
+    return true
+  elseif t == types.V then
+    local name = pattern.value
+    if type(rules[name]) ~= "table" then
+      return false
+    end
+    return rule_purity[name] or false
+  elseif t == types.L then
+    return analyze.position_pure(pattern.value, rules, rule_purity)
+  elseif t == "repeat" or t == "negate" then
+    return analyze.position_pure(pattern[1], rules, rule_purity)
+  elseif t == "sequence" or t == "choice" then
+    for _, child in ipairs(pattern) do
+      if not analyze.position_pure(child, rules, rule_purity) then
+        return false
+      end
+    end
+    return true
+  end
+
+  -- captures, Cmt/Cfn, indenter ops, T, Cmb, and unknown types
+  return false
+end
+
+-- Compute position purity for every rule as a greatest fixed point: rules
+-- start assumed pure and are flipped until stable, so cycles of pure rules
+-- correctly stay pure.
+function analyze.pure_rules(rules)
+  local purity = {}
+  for name in pairs(rules) do
+    purity[name] = true
+  end
+  local changed = true
+  while changed do
+    changed = false
+    for name, pattern in pairs(rules) do
+      if purity[name] and not analyze.position_pure(pattern, rules, purity) then
+        purity[name] = false
+        changed = true
+      end
+    end
+  end
+  return purity
+end
+
 -- Compute changes_backtrack_state for every rule in the grammar as a least
 -- fixed point: rules start assumed state-free and are flipped to stateful
 -- until stable, so cycles of state-free rules correctly resolve to false.

@@ -309,12 +309,31 @@ function generator.generate(grammar, parser_name, options)
   local const_pool, const_index = collect_constants(transformed_grammar)
   local has_consts = #const_pool > 0 or #cg_names > 0
 
+  -- Assign single-slot memo ids to position-pure rules (sorted for
+  -- deterministic output); see generate_rule_function
+  local memo_ids = {}
+  local memo_count = 0
+  do
+    local purity = analyze.pure_rules(rules)
+    local pure_names = {}
+    for name, pure in pairs(purity) do
+      if pure then
+        table.insert(pure_names, name)
+      end
+    end
+    table.sort(pure_names)
+    for i, name in ipairs(pure_names) do
+      memo_ids[name] = i - 1
+    end
+    memo_count = #pure_names
+  end
+
   -- Generate the C code
   local c_chunks = {
-    generator.generate_parser_header(parser_name, cg_names, cmt_codes, indenters, const_pool),
+    generator.generate_parser_header(parser_name, cg_names, cmt_codes, indenters, const_pool, memo_count),
     generator.generate_forward_declarations(rules, start_rule),
-    generator.generate_rule_functions(rules, start_rule, const_index, cg_names),
-    generator.generate_parser_main(parser_name, start_rule, cmt_codes, indenters, has_consts),
+    generator.generate_rule_functions(rules, start_rule, const_index, cg_names, memo_ids),
+    generator.generate_parser_main(parser_name, start_rule, cmt_codes, indenters, has_consts, memo_count),
     -- Add compilation instructions as a comment
     template_code([[/*
 To compile as a Lua module:
@@ -847,12 +866,30 @@ static int pgen_ind_measure(Parser *parser, size_t *end_pos, int tab_width) {
 end
 
 -- Generate parser header
-function generator.generate_parser_header(parser_name, cg_names, cmt_codes, indenters, const_pool)
+function generator.generate_parser_header(parser_name, cg_names, cmt_codes, indenters, const_pool, memo_count)
   cg_names = cg_names or {}
   indenters = indenters or {}
+  memo_count = memo_count or 0
 
   local header_vars = generate_indenter_header_vars(indenters)
   header_vars.PARSER_NAME = parser_name
+
+  if memo_count > 0 then
+    header_vars.MEMO_TYPES = template_code([[// Single-slot memo for position-pure rules: pos is the memoized input
+// position + 1 (0 = empty slot), endpos the resulting position or
+// (size_t)-1 for failure
+#define PGEN_MEMO_COUNT $COUNT$
+typedef struct {
+  size_t pos;
+  size_t endpos;
+} PgenMemoSlot;
+
+]], {COUNT = memo_count})
+    header_vars.MEMO_FIELD = "\n  PgenMemoSlot memo[PGEN_MEMO_COUNT];"
+  else
+    header_vars.MEMO_TYPES = ""
+    header_vars.MEMO_FIELD = ""
+  end
 
   return template_code([[#include <stdio.h>
 #include <stdlib.h>
@@ -906,7 +943,7 @@ typedef struct {
   size_t len;
 } PgenCap;
 
-$IND_TYPES$typedef struct {
+$MEMO_TYPES$$IND_TYPES$typedef struct {
   const char *input;
   size_t input_len;
   size_t pos;
@@ -920,7 +957,7 @@ $IND_TYPES$typedef struct {
   int stack_claimed;        // Stack index secured so far via lua_checkstack
   PgenCap *caps;            // Capture log
   size_t cap_len;
-  size_t cap_cap;
+  size_t cap_cap;$MEMO_FIELD$
   lua_State *L;$IND_PARSER_FIELDS$
 } Parser;
 
@@ -1197,7 +1234,7 @@ function generator.generate_forward_declarations(rules, start_rule)
 end
 
 -- Generate functions for each rule
-function generator.generate_rule_functions(rules, start_rule, const_index, cg_names)
+function generator.generate_rule_functions(rules, start_rule, const_index, cg_names, memo_ids)
   local result = "// Rule functions\n"
   local analyze = require("pgen.analyze")
   local cg_name_index = {}
@@ -1209,7 +1246,8 @@ function generator.generate_rule_functions(rules, start_rule, const_index, cg_na
     rules = rules,
     stateful_rules = analyze.stateful_rules(rules),
     const_index = const_index or {},
-    cg_name_index = cg_name_index
+    cg_name_index = cg_name_index,
+    memo_ids = memo_ids or {}
   }
   for name, pattern in sorted_rules(rules, start_rule) do
     result = result .. generator.generate_rule_function(name, pattern, context)
@@ -1220,9 +1258,32 @@ end
 
 -- Generate a function for a specific rule
 function generator.generate_rule_function(name, pattern, context)
+  local memo_check, memo_store = "", ""
+  local memo_id = context.memo_ids[name]
+  if memo_id then
+    memo_check = template_code([[
+  // Position-pure rule (no captures, labels, or other state): a
+  // single-slot memo short-circuits the repeated calls that backtracking
+  // alternatives make at the same position
+  if (parser->memo[$ID$].pos == start + 1) {
+    if (parser->memo[$ID$].endpos == (size_t)-1) {
+      parser->success = false;
+      return false;
+    }
+    parser->pos = parser->memo[$ID$].endpos;
+    parser->success = true;
+    return true;
+  }
+]], {ID = memo_id})
+    memo_store = template_code([[
+  parser->memo[$ID$].pos = start + 1;
+  parser->memo[$ID$].endpos = parser->success ? parser->pos : (size_t)-1;
+]], {ID = memo_id})
+  end
+
   return template_code([[static bool parse_$NAME$(Parser *parser) {
   size_t start = parser->pos;
-
+$MEMO_CHECK$
   parser->depth += 1;
   if (parser->depth > PGEN_MAX_DEPTH) {
     // A Lua error (rather than a match failure) so the overflow can't be
@@ -1244,14 +1305,16 @@ function generator.generate_rule_function(name, pattern, context)
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "$NAME$", parser->pos);
   }
 #endif
-
+$MEMO_STORE$
   parser->depth -= 1;
   return parser->success;
 }
 
 ]], {
     NAME = name,
-    BODY = generator.generate_pattern_code(pattern, context)
+    BODY = generator.generate_pattern_code(pattern, context),
+    MEMO_CHECK = memo_check,
+    MEMO_STORE = memo_store
   })
 end
 
@@ -1968,8 +2031,17 @@ function generator.generate_labeled_failure_code(label)
 end
 
 -- Generate core C parser functions (_init, _free, _parse)
-function generator.generate_c_core_functions(parser_name, start_rule, indenters)
+function generator.generate_c_core_functions(parser_name, start_rule, indenters, memo_count)
   indenters = indenters or {}
+
+  local memo_init = ""
+  if (memo_count or 0) > 0 then
+    memo_init = [[
+
+  for (int i = 0; i < PGEN_MEMO_COUNT; i++) {
+    parser->memo[i].pos = 0;  // empty slot
+  }]]
+  end
 
   local ind_null = ""
   local ind_init = ""
@@ -2050,7 +2122,7 @@ static Parser* $PARSER_NAME$_init(const char *input, lua_State *L) {
     luaL_error(L, "pgen: out of memory initializing parser");
   }
   parser->cap_len = 0;
-  parser->cap_cap = 64;$IND_INIT$
+  parser->cap_cap = 64;$MEMO_INIT$$IND_INIT$
   return parser;
 }
 
@@ -2066,6 +2138,7 @@ static void $PARSER_NAME$_free(Parser *parser) {
 ]], {
     PARSER_NAME = parser_name,
     START_RULE = start_rule,
+    MEMO_INIT = memo_init,
     IND_NULL = ind_null,
     IND_INIT = ind_init,
     IND_FREE = ind_free
@@ -2211,9 +2284,9 @@ static const struct luaL_Reg $PARSER_NAME$_module[] = {
 end
 
 -- Generate the final combined parser main C code
-function generator.generate_parser_main(parser_name, start_rule, cmt_codes, indenters, has_consts)
+function generator.generate_parser_main(parser_name, start_rule, cmt_codes, indenters, has_consts, memo_count)
   -- core C functions
-  local c_core_code = generator.generate_c_core_functions(parser_name, start_rule, indenters)
+  local c_core_code = generator.generate_c_core_functions(parser_name, start_rule, indenters, memo_count)
   -- Lua module interface
   local lua_module_code = generator.generate_lua_module_code(parser_name, start_rule, cmt_codes, has_consts)
 

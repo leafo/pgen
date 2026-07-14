@@ -51,6 +51,15 @@ typedef struct {
   size_t len;
 } PgenCap;
 
+// Single-slot memo for position-pure rules: pos is the memoized input
+// position + 1 (0 = empty slot), endpos the resulting position or
+// (size_t)-1 for failure
+#define PGEN_MEMO_COUNT 1
+typedef struct {
+  size_t pos;
+  size_t endpos;
+} PgenMemoSlot;
+
 #include <limits.h>
 
 // Indenter (match-time integer stack) infrastructure
@@ -89,6 +98,7 @@ typedef struct {
   PgenCap *caps;     // Capture log
   size_t cap_len;
   size_t cap_cap;
+  PgenMemoSlot memo[PGEN_MEMO_COUNT];
   lua_State *L;
   PgenIndStack ind_stacks[PGEN_IND_STACK_COUNT];
   PgenTrailEntry *trail;
@@ -2065,6 +2075,18 @@ static bool parse_name(Parser *parser) {
 
 static bool parse_nl(Parser *parser) {
   size_t start = parser->pos;
+  // Position-pure rule (no captures, labels, or other state): a
+  // single-slot memo short-circuits the repeated calls that backtracking
+  // alternatives make at the same position
+  if (parser->memo[0].pos == start + 1) {
+    if (parser->memo[0].endpos == (size_t)-1) {
+      parser->success = false;
+      return false;
+    }
+    parser->pos = parser->memo[0].endpos;
+    parser->success = true;
+    return true;
+  }
 
   parser->depth += 1;
   if (parser->depth > PGEN_MAX_DEPTH) {
@@ -2100,6 +2122,8 @@ static bool parse_nl(Parser *parser) {
     fprintf(stderr, "%*sRule %s failed at position %zu\n", (int)parser->depth, "", "nl", parser->pos);
   }
 #endif
+  parser->memo[0].pos = start + 1;
+  parser->memo[0].endpos = parser->success ? parser->pos : (size_t)-1;
 
   parser->depth -= 1;
   return parser->success;
@@ -3058,6 +3082,9 @@ static Parser *indent_init(const char *input, lua_State *L) {
   }
   parser->cap_len = 0;
   parser->cap_cap = 64;
+  for (int i = 0; i < PGEN_MEMO_COUNT; i++) {
+    parser->memo[i].pos = 0; // empty slot
+  }
 
   // Initialize indenter stacks (each starts holding its initial value)
   static const int pgen_ind_initials[PGEN_IND_STACK_COUNT] = {0, 1, 0};

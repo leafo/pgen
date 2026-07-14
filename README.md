@@ -456,3 +456,33 @@ and is always applied, even with `--no-optimize`.
   with capture-free patterns and save the captures for the part of the
   grammar that runs once the alternative is decided.
 
+### Pure Rule Memoization
+
+A rule whose outcome depends only on the input position (it produces no
+captures, no indenter operations, no labeled failures, and no
+backreferences, including everything it references) always yields the same
+success/end-position result at a given position. The generator gives each
+such rule a single-slot memo in the parser: when backtracking alternatives
+re-invoke the rule at the same position, the cached result is returned
+instead of re-matching.
+
+This mostly benefits lexical rules that run between tokens, like whitespace
+and comments:
+
+```lua
+-- Space runs at every token boundary and is re-run by every backtracked
+-- alternative at the same position; with the memo the repeats cost three
+-- comparisons
+Space = S" \t"^0 * V"Comment"^-1,
+Comment = P"--" * (P(1) - S"\r\n")^0 * L(V"Stop"),
+```
+
+The analysis resolves rule references (including cycles) and errs on the
+side of caution: any capture, `Cmt`/`Cfn`, indenter operation, `T` label,
+or `Cmb` anywhere in a rule's reachable graph disqualifies it. Grammar
+authors don't need to do anything to opt in, but keeping lexical rules free
+of captures (see above) also makes them memoizable.
+
+Like the backtrack state analysis, this is a code-generation decision and
+is always applied, even with `--no-optimize`.
+

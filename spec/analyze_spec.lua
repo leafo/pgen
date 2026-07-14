@@ -119,3 +119,66 @@ describe("backtrack state analysis", function()
     assert.matches("REMEMBER_POSITION%(parser, pos%);", output)
   end)
 end)
+
+describe("position purity analysis", function()
+  local analyze = require "pgen.analyze"
+  local L, T, Cmb = pgen.L, pgen.T, pgen.Cmb
+
+  local function purity(rules)
+    return analyze.pure_rules(rules)
+  end
+
+  it("marks capture-free matching rules pure", function()
+    local p = purity{
+      space = S" \t"^0 * V"comment"^-1,
+      comment = P"--" * (P(1) - S"\r\n")^0 * L(V"stop"),
+      stop = P"\n" + P(-1),
+    }
+    assert.is_true(p.space)
+    assert.is_true(p.comment)
+    assert.is_true(p.stop)
+  end)
+
+  it("keeps cycles of pure rules pure", function()
+    local p = purity{
+      a = P"(" * V"b" * P")" + P"x",
+      b = V"a" + P"y",
+    }
+    assert.is_true(p.a)
+    assert.is_true(p.b)
+  end)
+
+  it("propagates impurity through rule references", function()
+    local p = purity{
+      top = P"a" * V"captured",
+      captured = C(P"b"),
+      plain = P"c",
+    }
+    assert.is_false(p.top)
+    assert.is_false(p.captured)
+    assert.is_true(p.plain)
+  end)
+
+  it("treats labels, backreferences, and indenters as impure", function()
+    local ind = pgen.indenter{}
+    local p = purity{
+      labeled = P"a" + T"expected_a",
+      backref = P"x" * Cmb"eq",
+      indented = ind.check * P"a",
+    }
+    assert.is_false(p.labeled)
+    assert.is_false(p.backref)
+    assert.is_false(p.indented)
+  end)
+
+  it("emits memo slots only for pure rules", function()
+    local output = pgen.compile({
+      "start",
+      start = V"space" * C(V"word"),
+      space = S" \t"^0,
+      word = pgen.R"az"^1,
+    }, {optimize = false})
+    assert.matches("PGEN_MEMO_COUNT", output)
+    assert.matches("parser%->memo%[", output)
+  end)
+end)
