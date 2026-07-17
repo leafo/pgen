@@ -1366,6 +1366,8 @@ function generator.generate_pattern_code(pattern, context)
     return generator.generate_sequence_code(pattern, context)
   elseif t == "choice" then
     return generator.generate_choice_code(pattern[1], pattern[2], context)
+  elseif t == "dispatch_choice" then
+    return generator.generate_dispatch_choice_code(pattern, context)
   -- TODO: this is redundant, but might be able to optimize ^-1 with reduced code
   --elseif t == "optional" then
   --  return generator.generate_optional_code(pattern[1])
@@ -1559,20 +1561,156 @@ $SEQUENCE$
   })
 end
 
+-- Shared ordered-choice protocol: an alternative may only be tried after an
+-- ordinary failure, never after a labeled failure from T(). Choice and
+-- dispatch_choice must both emit exactly this protocol.
+local function generate_alternative_code(body, extra_condition, preamble)
+  return template_code([[if (!parser->success && !parser->throw_label$EXTRA$) {
+  $PREAMBLE$parser->success = true;
+  $BODY$
+}]], {
+    EXTRA = extra_condition and (" && " .. extra_condition) or "",
+    PREAMBLE = preamble and (preamble .. "\n  ") or "",
+    BODY = body,
+  })
+end
+
 -- Generate code for a choice
 function generator.generate_choice_code(a, b, context)
   return template_code([[{ // Choice
   $A$
 
-  // Only try alternative if ordinary failure (not labeled failure from T())
-  if (!parser->success && !parser->throw_label) {
-    parser->success = true;
-    $B$
-  }
+  $B$
 }]], {
   A = generator.generate_pattern_code(a, context),
-  B = generator.generate_pattern_code(b, context)
+  B = generate_alternative_code(generator.generate_pattern_code(b, context))
 })
+end
+
+local function dispatch_mask_literal(candidates)
+  local low, high = 0, 0
+  for _, index in ipairs(candidates) do
+    if index <= 32 then
+      low = low + 2 ^ (index - 1)
+    else
+      high = high + 2 ^ (index - 33)
+    end
+  end
+  return string.format("0x%08x%08xULL", high, low)
+end
+
+-- Generate a non-consuming FIRST-byte dispatcher. A switch selects a mask
+-- of alternatives that may match the upcoming byte, then those alternatives
+-- run in their original order with ordinary PEG backtracking semantics.
+--
+-- Alternatives the mask skips would have failed exactly at the current
+-- position, so their only observable effects are error reporting ones. Those
+-- are preserved: the furthest failure position is recorded whenever an
+-- alternative that precedes an attempted candidate was skipped, and (in
+-- PGEN_ERRORS builds) a failed dispatch that skipped anything replays the
+-- whole choice so error_message matches the undispatched parser's.
+function generator.generate_dispatch_choice_code(pattern, context)
+  local mask_candidates = {}  -- mask literal -> sorted list of bytes
+  local mask_list = {}
+  for byte = 0, 255 do
+    local mask = dispatch_mask_literal(pattern.byte_candidates[byte])
+    if not mask_candidates[mask] then
+      mask_candidates[mask] = {}
+      mask_list[#mask_list + 1] = mask
+    end
+    table.insert(mask_candidates[mask], byte)
+  end
+
+  -- The most common mask becomes the switch default. Sorting first keeps the
+  -- tie-break, and the emitted cases, deterministic.
+  table.sort(mask_list)
+  local default_mask
+  for _, mask in ipairs(mask_list) do
+    if not default_mask or
+        #mask_candidates[mask] > #mask_candidates[default_mask] then
+      default_mask = mask
+    end
+  end
+
+  local cases = {}
+  for _, mask in ipairs(mask_list) do
+    if mask ~= default_mask then
+      local labels = {}
+      for _, byte in ipairs(mask_candidates[mask]) do
+        labels[#labels + 1] = "    case " .. byte .. ":"
+      end
+      cases[#cases + 1] = table.concat(labels, "\n") ..
+        "\n      pgen_dispatch_mask = " .. mask .. ";\n      break;"
+    end
+  end
+
+  local all_indexes = {}
+  for i = 1, #pattern do all_indexes[i] = i end
+  local full_mask = dispatch_mask_literal(all_indexes)
+
+  local alternatives = {}
+  local replays = {}
+  local lower_indexes = {}
+  for i, alternative in ipairs(pattern) do
+    local body = generator.generate_pattern_code(alternative, context)
+    local bit = "(1ULL << " .. (i - 1) .. ")"
+
+    -- Any skipped alternative before this candidate would have failed at the
+    -- current position; record it so the furthest failure position matches
+    -- the undispatched choice.
+    local preamble
+    if i > 1 then
+      local lower_mask = dispatch_mask_literal(lower_indexes)
+      preamble = "if ((pgen_dispatch_mask & " .. lower_mask .. ") != " ..
+        lower_mask .. ") { PGEN_RECORD_FURTHEST(parser); }"
+    end
+    lower_indexes[i] = i
+
+    alternatives[#alternatives + 1] = generate_alternative_code(
+      body, "(pgen_dispatch_mask & " .. bit .. ")", preamble)
+
+    -- Replays run the whole chain in original order (not just the skipped
+    -- alternatives) so error_message ends up written by the same alternative
+    -- as in the undispatched choice. Every alternative is known to fail
+    -- here: the candidates already did, and the rest cannot match this byte.
+    replays[#replays + 1] = generate_alternative_code(body)
+  end
+
+  return template_code([[{ // FIRST-byte dispatched ordered choice
+  unsigned long long pgen_dispatch_mask;
+  if (parser->pos < parser->input_len) {
+    switch ((unsigned char)parser->input[parser->pos]) {
+$CASES$
+    default:
+      pgen_dispatch_mask = $DEFAULT_MASK$;
+      break;
+    }
+  } else {
+    pgen_dispatch_mask = $EOF_MASK$;
+  }
+
+  parser->success = false;
+  $ALTERNATIVES$
+  if (!parser->success && !parser->throw_label) {
+    PGEN_RECORD_FURTHEST(parser);
+#ifdef PGEN_ERRORS
+    if (pgen_dispatch_mask != $FULL_MASK$) {
+      // Some alternatives were skipped: replay the whole choice in original
+      // order so error_message reports the same failure the undispatched
+      // parser would. Every alternative fails, so this only affects error
+      // state.
+      $REPLAYS$
+    }
+#endif
+  }
+}]], {
+    CASES = table.concat(cases, "\n"),
+    DEFAULT_MASK = default_mask,
+    EOF_MASK = dispatch_mask_literal(pattern.eof_candidates),
+    FULL_MASK = full_mask,
+    ALTERNATIVES = table.concat(alternatives, "\n"),
+    REPLAYS = table.concat(replays, "\n"),
+  })
 end
 
 -- Generate code for number of repetitions

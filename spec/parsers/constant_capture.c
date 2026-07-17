@@ -722,7 +722,6 @@ static bool parse_boolean(Parser *parser) {
         }
       }
 
-      // Only try alternative if ordinary failure (not labeled failure from T())
       if (!parser->success && !parser->throw_label) {
         parser->success = true;
         { // Match literal "false"
@@ -810,7 +809,6 @@ static bool parse_identifier(Parser *parser) {
           }
         }
 
-        // Only try alternative if ordinary failure (not labeled failure from T())
         if (!parser->success && !parser->throw_label) {
           parser->success = true;
           { // Match character range: "AZ"
@@ -1292,14 +1290,12 @@ static bool parse_value(Parser *parser) {
     { // Choice
       parse_string(parser);
 
-      // Only try alternative if ordinary failure (not labeled failure from T())
       if (!parser->success && !parser->throw_label) {
         parser->success = true;
         parse_number(parser);
       }
     }
 
-    // Only try alternative if ordinary failure (not labeled failure from T())
     if (!parser->success && !parser->throw_label) {
       parser->success = true;
       parse_boolean(parser);

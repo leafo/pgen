@@ -33,7 +33,7 @@ function analyze.changes_backtrack_state(pattern, rules, rule_states)
     return analyze.changes_backtrack_state(pattern.value, rules, rule_states)
   elseif t == "repeat" or t == "negate" then
     return analyze.changes_backtrack_state(pattern[1], rules, rule_states)
-  elseif t == "sequence" or t == "choice" then
+  elseif t == "sequence" or t == "choice" or t == "dispatch_choice" then
     for _, child in ipairs(pattern) do
       if analyze.changes_backtrack_state(child, rules, rule_states) then
         return true
@@ -72,7 +72,7 @@ function analyze.position_pure(pattern, rules, rule_purity)
     return analyze.position_pure(pattern.value, rules, rule_purity)
   elseif t == "repeat" or t == "negate" then
     return analyze.position_pure(pattern[1], rules, rule_purity)
-  elseif t == "sequence" or t == "choice" then
+  elseif t == "sequence" or t == "choice" or t == "dispatch_choice" then
     for _, child in ipairs(pattern) do
       if not analyze.position_pure(child, rules, rule_purity) then
         return false
@@ -144,8 +144,9 @@ function analyze.is_nullable(pattern, rules, rule_memo, visiting)
     if type(v) == "string" then
       return #v == 0
     else
-      -- P(n) matches exactly n characters
-      return v == 0
+      -- P(n) matches exactly n characters; P(-n) asserts fewer than n
+      -- characters remain and consumes nothing when it succeeds
+      return v <= 0
     end
   elseif t == types.R or t == types.S then
     return false -- always consume one character
@@ -190,7 +191,7 @@ function analyze.is_nullable(pattern, rules, rule_memo, visiting)
       end
     end
     return true
-  elseif t == "choice" then
+  elseif t == "choice" or t == "dispatch_choice" then
     for _, child in ipairs(pattern) do
       if analyze.is_nullable(child, rules, rule_memo, visiting) then
         return true
@@ -212,6 +213,133 @@ function analyze.is_nullable(pattern, rules, rule_memo, visiting)
     -- unknown pattern type: conservative
     return true
   end
+end
+
+local function add_bytes(dst, src)
+  for byte in pairs(src) do
+    dst[byte] = true
+  end
+end
+
+-- Return the set of bytes that may begin a match and whether the pattern's
+-- beginning is unknown. Unknown patterns must remain candidates for every
+-- dispatch byte. Whether a pattern may succeed without consuming input is
+-- not part of the summary: that is is_nullable's job, and nullable_memo is
+-- its per-grammar rule memo. The rule_first table is computed to a fixed
+-- point by first_sets below.
+function analyze.first_set(pattern, rules, rule_first, nullable_memo)
+  if type(pattern) ~= "table" then
+    return {bytes = {}, unknown = true}
+  end
+
+  local t = pattern.type
+  local result = {bytes = {}, unknown = false}
+
+  if t == types.P then
+    local value = pattern.value
+    if type(value) == "string" then
+      if #value > 0 then
+        result.bytes[value:byte(1)] = true
+      end
+    elseif value > 0 then
+      for byte = 0, 255 do result.bytes[byte] = true end
+    end
+    -- P"" and P(n <= 0) consume nothing; is_nullable accounts for them
+  elseif t == types.R then
+    for _, range in ipairs(pattern.value) do
+      local low, high = range:byte(1, 2)
+      for byte = low, high do result.bytes[byte] = true end
+    end
+  elseif t == types.S then
+    for i = 1, #pattern.value do
+      result.bytes[pattern.value:byte(i)] = true
+    end
+  elseif t == "literal_trie" then
+    for char in pairs(pattern.trie.children) do
+      result.bytes[char:byte(1)] = true
+    end
+  elseif t == types.V then
+    local summary = rule_first[pattern.value]
+    if type(rules[pattern.value]) ~= "table" or not summary then
+      result.unknown = true
+    else
+      add_bytes(result.bytes, summary.bytes)
+      result.unknown = summary.unknown
+    end
+  elseif t == types.C or t == types.Ct or t == types.Cg or t == types.Cn or
+      t == types.Cfn then
+    return analyze.first_set(pattern.value, rules, rule_first, nullable_memo)
+  elseif t == types.Cp or t == types.Cc then
+    -- consume nothing; contribute no bytes
+  elseif t == "sequence" then
+    for _, child in ipairs(pattern) do
+      local child_first = analyze.first_set(child, rules, rule_first, nullable_memo)
+      add_bytes(result.bytes, child_first.bytes)
+      result.unknown = result.unknown or child_first.unknown
+      if not analyze.is_nullable(child, rules, nullable_memo, {}) then
+        break
+      end
+    end
+  elseif t == "choice" or t == "dispatch_choice" then
+    for _, child in ipairs(pattern) do
+      local child_first = analyze.first_set(child, rules, rule_first, nullable_memo)
+      add_bytes(result.bytes, child_first.bytes)
+      result.unknown = result.unknown or child_first.unknown
+    end
+  elseif t == "repeat" then
+    local child_first = analyze.first_set(pattern[1], rules, rule_first, nullable_memo)
+    add_bytes(result.bytes, child_first.bytes)
+    result.unknown = child_first.unknown
+  elseif t == types.L or t == "negate" then
+    -- Predicates consume nothing, but their success depends on input. Keeping
+    -- them unknown prevents dispatch from skipping observable failures.
+    result.unknown = true
+  else
+    -- Cmt, Cmb, T, indenter operations, and future pattern types may inspect
+    -- state or fail before a terminal is reached.
+    result.unknown = true
+  end
+
+  return result
+end
+
+-- Compute FIRST-byte summaries for all rules as a monotone fixed point. This
+-- handles recursive expression grammars without treating every recursive
+-- reference as unknown. nullable_memo is optional and lets callers share
+-- is_nullable's rule memo with their own queries.
+function analyze.first_sets(rules, nullable_memo)
+  nullable_memo = nullable_memo or {}
+
+  local summaries = {}
+  for name, pattern in pairs(rules) do
+    if type(name) == "string" and type(pattern) == "table" then
+      summaries[name] = {bytes = {}, unknown = false}
+    end
+  end
+
+  -- first_set is monotone in rule_first and every summary starts at bottom,
+  -- so a recomputed summary can only gain bytes or flip unknown on.
+  local function differs(old, new)
+    if old.unknown ~= new.unknown then return true end
+    for byte in pairs(new.bytes) do
+      if not old.bytes[byte] then return true end
+    end
+    return false
+  end
+
+  local changed = true
+  while changed do
+    changed = false
+    for name, old in pairs(summaries) do
+      local new = analyze.first_set(rules[name], rules, summaries, nullable_memo)
+      if differs(old, new) then
+        summaries[name] = new
+        changed = true
+      end
+    end
+  end
+
+  return summaries
 end
 
 -- Error if any unbounded repetition (patt^n for n >= 0) has a body that may

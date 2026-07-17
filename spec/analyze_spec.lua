@@ -182,3 +182,45 @@ describe("position purity analysis", function()
     assert.matches("parser%->memo%[", output)
   end)
 end)
+
+describe("FIRST-byte analysis", function()
+  local analyze = require "pgen.analyze"
+
+  it("follows nullable sequence prefixes and rule references", function()
+    local rules = {
+      start = V"space" * (P"if" + P"while"),
+      space = S" \t"^0,
+    }
+    local first = analyze.first_sets(rules).start
+    assert.is_true(first.bytes[string.byte(" ")])
+    assert.is_true(first.bytes[string.byte("\t")])
+    assert.is_true(first.bytes[string.byte("i")])
+    assert.is_true(first.bytes[string.byte("w")])
+    assert.is_false(first.unknown)
+  end)
+
+  it("treats negative P as nullable", function()
+    -- P(-n) consumes nothing when it succeeds near end of input
+    assert.is_true(analyze.is_nullable(P(-1), {}, {}, {}))
+    assert.is_false(analyze.is_nullable(P(1), {}, {}, {}))
+  end)
+
+  it("reaches a fixed point through recursive rules", function()
+    local rules = {
+      value = P"(" * V"value" * P")" + P"name",
+    }
+    local first = analyze.first_sets(rules).value
+    assert.is_true(first.bytes[string.byte("(")])
+    assert.is_true(first.bytes[string.byte("n")])
+    assert.is_false(first.unknown)
+  end)
+
+  it("marks predicates and match-time operations unknown", function()
+    local first = analyze.first_sets({
+      predicate = -P"x" * P"a",
+      dynamic = pgen.Cmt(P"a", "return true"),
+    })
+    assert.is_true(first.predicate.unknown)
+    assert.is_true(first.dynamic.unknown)
+  end)
+end)

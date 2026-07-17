@@ -339,6 +339,7 @@ function pgen.require(module_name, options)
     -- TODO: generate non-conflicting parser name
     parser_name = parser_name,
     optimize = options.optimize,
+    pgen_errors = options.pgen_errors,
     max_depth = options.max_depth
   })
   log_time("Compiled grammar to C code (" .. tostring(#output) .. " bytes)", start_time)

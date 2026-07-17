@@ -727,7 +727,6 @@ static bool parse_identifier(Parser *parser) {
           }
         }
 
-        // Only try alternative if ordinary failure (not labeled failure from T())
         if (!parser->success && !parser->throw_label) {
           parser->success = true;
           { // Match character range: "AZ"

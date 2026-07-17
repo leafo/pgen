@@ -594,7 +594,6 @@ static bool parse_1(Parser *parser) {
   { // Choice
     parse_positive(parser);
 
-    // Only try alternative if ordinary failure (not labeled failure from T())
     if (!parser->success && !parser->throw_label) {
       parser->success = true;
       parse_negative(parser);

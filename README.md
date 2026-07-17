@@ -486,3 +486,25 @@ of captures (see above) also makes them memoizable.
 Like the backtrack state analysis, this is a code-generation decision and
 is always applied, even with `--no-optimize`.
 
+### FIRST-Byte Choice Dispatch
+
+With optimization enabled, ordered choices containing at least four
+alternatives may be guarded by a non-consuming FIRST-byte dispatcher. The
+generator computes which alternatives can begin with each possible input
+byte, selects a candidate mask at runtime, and tries only those candidates in
+their original PEG order. Nullable alternatives and patterns whose beginning
+cannot be determined safely (including predicates, `Cmt`, `Cmb`, `T`, and
+indenter operations) remain candidates for every byte.
+
+The dispatcher never consumes input and never commits to an alternative, so
+captures, backtracking, and labeled failures retain their normal semantics.
+Error reporting is preserved as well: skipping alternatives still records
+the furthest failure position they would have failed at, and in
+`--pgen-errors` builds a dispatch where every candidate fails replays the
+whole choice in original order so the error message names the same
+alternative the undispatched parser would (match-time `Cmt` code may
+therefore run again on this failure path).
+
+It is most useful for wide structured choices such as keyword-led statement
+rules; pure literal choices continue to use the more specialized trie
+optimization. Use `optimize = false` or `--no-optimize` to disable both.

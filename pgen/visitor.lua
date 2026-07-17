@@ -69,7 +69,7 @@ function visitor.visit_pattern(pattern, visitor_fn)
     if new_value ~= pattern.value then
       return visitor.copy_node(pattern, {value = new_value}), false
     end
-  elseif t == "sequence" or t == "choice" then
+  elseif t == "sequence" or t == "choice" or t == "dispatch_choice" then
     local changed = false
     local new_children = {}
     for i, child in ipairs(pattern) do

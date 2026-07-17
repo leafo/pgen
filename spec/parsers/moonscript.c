@@ -990,7 +990,6 @@ static bool parse_Block(Parser *parser) {
             { // Choice
               parse_BlankLine(parser);
 
-              // Only try alternative if ordinary failure (not labeled failure from T())
               if (!parser->success && !parser->throw_label) {
                 parser->success = true;
                 parse_Line(parser);
@@ -1022,7 +1021,6 @@ static bool parse_Block(Parser *parser) {
               { // Choice
                 parse_BlankLine(parser);
 
-                // Only try alternative if ordinary failure (not labeled failure from T())
                 if (!parser->success && !parser->throw_label) {
                   parser->success = true;
                   { // Sequence with 2 patterns
@@ -1602,14 +1600,12 @@ static bool parse_Statement(Parser *parser) {
     { // Choice
       parse_IfStatement(parser);
 
-      // Only try alternative if ordinary failure (not labeled failure from T())
       if (!parser->success && !parser->throw_label) {
         parser->success = true;
         parse_Assign(parser);
       }
     }
 
-    // Only try alternative if ordinary failure (not labeled failure from T())
     if (!parser->success && !parser->throw_label) {
       parser->success = true;
       parse_Value(parser);
@@ -1694,7 +1690,6 @@ static bool parse_String(Parser *parser) {
                         }
                       }
 
-                      // Only try alternative if ordinary failure (not labeled failure from T())
                       if (!parser->success && !parser->throw_label) {
                         parser->success = true;
                         { // Sequence with 2 patterns
@@ -1792,7 +1787,6 @@ static bool parse_String(Parser *parser) {
             }
           }
 
-          // Only try alternative if ordinary failure (not labeled failure from T())
           if (!parser->success && !parser->throw_label) {
             parser->success = true;
             { // Sequence with 3 patterns
@@ -1834,7 +1828,6 @@ static bool parse_String(Parser *parser) {
                           }
                         }
 
-                        // Only try alternative if ordinary failure (not labeled failure from T())
                         if (!parser->success && !parser->throw_label) {
                           parser->success = true;
                           { // Sequence with 2 patterns
@@ -1977,14 +1970,12 @@ static bool parse_Value(Parser *parser) {
     { // Choice
       parse_Number(parser);
 
-      // Only try alternative if ordinary failure (not labeled failure from T())
       if (!parser->success && !parser->throw_label) {
         parser->success = true;
         parse_String(parser);
       }
     }
 
-    // Only try alternative if ordinary failure (not labeled failure from T())
     if (!parser->success && !parser->throw_label) {
       parser->success = true;
       parse_Name(parser);

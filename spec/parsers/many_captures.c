@@ -608,7 +608,6 @@ static bool parse_test(Parser *parser) {
       }
     }
 
-    // Only try alternative if ordinary failure (not labeled failure from T())
     if (!parser->success && !parser->throw_label) {
       parser->success = true;
       { // Sequence with 2 patterns

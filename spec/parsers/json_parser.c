@@ -647,7 +647,6 @@ static bool parse_json(Parser *parser) {
             { // Choice
               parse_value(parser);
 
-              // Only try alternative if ordinary failure (not labeled failure from T())
               if (!parser->success && !parser->throw_label) {
                 parser->success = true;
                 { // Throw labeled failure: expected_value
@@ -713,7 +712,6 @@ static bool parse_json(Parser *parser) {
               }
             }
 
-            // Only try alternative if ordinary failure (not labeled failure from T())
             if (!parser->success && !parser->throw_label) {
               parser->success = true;
               { // Throw labeled failure: expected_eof
@@ -833,7 +831,6 @@ static bool parse_array(Parser *parser) {
                                     { // Choice
                                       parse_value(parser);
 
-                                      // Only try alternative if ordinary failure (not labeled failure from T())
                                       if (!parser->success && !parser->throw_label) {
                                         parser->success = true;
                                         { // Throw labeled failure: expected_array_element
@@ -914,7 +911,6 @@ static bool parse_array(Parser *parser) {
                 }
               }
 
-              // Only try alternative if ordinary failure (not labeled failure from T())
               if (!parser->success && !parser->throw_label) {
                 parser->success = true;
                 { // Throw labeled failure: expected_closing_bracket
@@ -968,7 +964,6 @@ static bool parse_char(Parser *parser) {
   { // Choice
     parse_escape(parser);
 
-    // Only try alternative if ordinary failure (not labeled failure from T())
     if (!parser->success && !parser->throw_label) {
       parser->success = true;
       { // Sequence with 2 patterns
@@ -1123,14 +1118,12 @@ static bool parse_escape(Parser *parser) {
             }
           }
 
-          // Only try alternative if ordinary failure (not labeled failure from T())
           if (!parser->success && !parser->throw_label) {
             parser->success = true;
             parse_unicode(parser);
           }
         }
 
-        // Only try alternative if ordinary failure (not labeled failure from T())
         if (!parser->success && !parser->throw_label) {
           parser->success = true;
           { // Throw labeled failure: invalid_escape_sequence
@@ -1354,7 +1347,6 @@ static bool parse_member(Parser *parser) {
                 }
               }
 
-              // Only try alternative if ordinary failure (not labeled failure from T())
               if (!parser->success && !parser->throw_label) {
                 parser->success = true;
                 { // Throw labeled failure: expected_colon
@@ -1375,7 +1367,6 @@ static bool parse_member(Parser *parser) {
                 { // Choice
                   parse_value(parser);
 
-                  // Only try alternative if ordinary failure (not labeled failure from T())
                   if (!parser->success && !parser->throw_label) {
                     parser->success = true;
                     { // Throw labeled failure: expected_value
@@ -1568,7 +1559,6 @@ static bool parse_number(Parser *parser) {
                   }
                 }
 
-                // Only try alternative if ordinary failure (not labeled failure from T())
                 if (!parser->success && !parser->throw_label) {
                   parser->success = true;
                   { // Sequence with 2 patterns
@@ -1980,7 +1970,6 @@ static bool parse_object(Parser *parser) {
                                     { // Choice
                                       parse_member(parser);
 
-                                      // Only try alternative if ordinary failure (not labeled failure from T())
                                       if (!parser->success && !parser->throw_label) {
                                         parser->success = true;
                                         { // Throw labeled failure: expected_member
@@ -2061,7 +2050,6 @@ static bool parse_object(Parser *parser) {
                 }
               }
 
-              // Only try alternative if ordinary failure (not labeled failure from T())
               if (!parser->success && !parser->throw_label) {
                 parser->success = true;
                 { // Throw labeled failure: expected_closing_brace
@@ -2189,7 +2177,6 @@ static bool parse_string(Parser *parser) {
             }
           }
 
-          // Only try alternative if ordinary failure (not labeled failure from T())
           if (!parser->success && !parser->throw_label) {
             parser->success = true;
             { // Throw labeled failure: expected_closing_quote
@@ -2392,53 +2379,134 @@ static bool parse_value(Parser *parser) {
   fprintf(stderr, "%*sEntering rule %s at position %zu\n", (int)parser->depth, "", "value", start);
 #endif
 
-  {           // Choice
-    {         // Choice
-      {       // Choice
-        {     // Choice
-          {   // Choice
-            { // Choice
-              parse_object(parser);
+  { // FIRST-byte dispatched ordered choice
+    unsigned long long pgen_dispatch_mask;
+    if (parser->pos < parser->input_len) {
+      switch ((unsigned char)parser->input[parser->pos]) {
+      case 123:
+        pgen_dispatch_mask = 0x0000000000000001ULL;
+        break;
+      case 91:
+        pgen_dispatch_mask = 0x0000000000000002ULL;
+        break;
+      case 34:
+        pgen_dispatch_mask = 0x0000000000000004ULL;
+        break;
+      case 45:
+      case 48:
+      case 49:
+      case 50:
+      case 51:
+      case 52:
+      case 53:
+      case 54:
+      case 55:
+      case 56:
+      case 57:
+        pgen_dispatch_mask = 0x0000000000000008ULL;
+        break;
+      case 116:
+        pgen_dispatch_mask = 0x0000000000000010ULL;
+        break;
+      case 102:
+        pgen_dispatch_mask = 0x0000000000000020ULL;
+        break;
+      case 110:
+        pgen_dispatch_mask = 0x0000000000000040ULL;
+        break;
+      default:
+        pgen_dispatch_mask = 0x0000000000000000ULL;
+        break;
+      }
+    } else {
+      pgen_dispatch_mask = 0x0000000000000000ULL;
+    }
 
-              // Only try alternative if ordinary failure (not labeled failure from T())
-              if (!parser->success && !parser->throw_label) {
-                parser->success = true;
-                parse_array(parser);
-              }
-            }
-
-            // Only try alternative if ordinary failure (not labeled failure from T())
-            if (!parser->success && !parser->throw_label) {
-              parser->success = true;
-              parse_string(parser);
-            }
-          }
-
-          // Only try alternative if ordinary failure (not labeled failure from T())
-          if (!parser->success && !parser->throw_label) {
-            parser->success = true;
-            parse_number(parser);
-          }
+    parser->success = false;
+    if (!parser->success && !parser->throw_label && (pgen_dispatch_mask & (1ULL << 0))) {
+      parser->success = true;
+      parse_object(parser);
+    }
+    if (!parser->success && !parser->throw_label && (pgen_dispatch_mask & (1ULL << 1))) {
+      if ((pgen_dispatch_mask & 0x0000000000000001ULL) != 0x0000000000000001ULL) {
+        PGEN_RECORD_FURTHEST(parser);
+      }
+      parser->success = true;
+      parse_array(parser);
+    }
+    if (!parser->success && !parser->throw_label && (pgen_dispatch_mask & (1ULL << 2))) {
+      if ((pgen_dispatch_mask & 0x0000000000000003ULL) != 0x0000000000000003ULL) {
+        PGEN_RECORD_FURTHEST(parser);
+      }
+      parser->success = true;
+      parse_string(parser);
+    }
+    if (!parser->success && !parser->throw_label && (pgen_dispatch_mask & (1ULL << 3))) {
+      if ((pgen_dispatch_mask & 0x0000000000000007ULL) != 0x0000000000000007ULL) {
+        PGEN_RECORD_FURTHEST(parser);
+      }
+      parser->success = true;
+      parse_number(parser);
+    }
+    if (!parser->success && !parser->throw_label && (pgen_dispatch_mask & (1ULL << 4))) {
+      if ((pgen_dispatch_mask & 0x000000000000000fULL) != 0x000000000000000fULL) {
+        PGEN_RECORD_FURTHEST(parser);
+      }
+      parser->success = true;
+      parse_true(parser);
+    }
+    if (!parser->success && !parser->throw_label && (pgen_dispatch_mask & (1ULL << 5))) {
+      if ((pgen_dispatch_mask & 0x000000000000001fULL) != 0x000000000000001fULL) {
+        PGEN_RECORD_FURTHEST(parser);
+      }
+      parser->success = true;
+      parse_false(parser);
+    }
+    if (!parser->success && !parser->throw_label && (pgen_dispatch_mask & (1ULL << 6))) {
+      if ((pgen_dispatch_mask & 0x000000000000003fULL) != 0x000000000000003fULL) {
+        PGEN_RECORD_FURTHEST(parser);
+      }
+      parser->success = true;
+      parse_null(parser);
+    }
+    if (!parser->success && !parser->throw_label) {
+      PGEN_RECORD_FURTHEST(parser);
+#ifdef PGEN_ERRORS
+      if (pgen_dispatch_mask != 0x000000000000007fULL) {
+        // Some alternatives were skipped: replay the whole choice in original
+        // order so error_message reports the same failure the undispatched
+        // parser would. Every alternative fails, so this only affects error
+        // state.
+        if (!parser->success && !parser->throw_label) {
+          parser->success = true;
+          parse_object(parser);
         }
-
-        // Only try alternative if ordinary failure (not labeled failure from T())
+        if (!parser->success && !parser->throw_label) {
+          parser->success = true;
+          parse_array(parser);
+        }
+        if (!parser->success && !parser->throw_label) {
+          parser->success = true;
+          parse_string(parser);
+        }
+        if (!parser->success && !parser->throw_label) {
+          parser->success = true;
+          parse_number(parser);
+        }
         if (!parser->success && !parser->throw_label) {
           parser->success = true;
           parse_true(parser);
         }
+        if (!parser->success && !parser->throw_label) {
+          parser->success = true;
+          parse_false(parser);
+        }
+        if (!parser->success && !parser->throw_label) {
+          parser->success = true;
+          parse_null(parser);
+        }
       }
-
-      // Only try alternative if ordinary failure (not labeled failure from T())
-      if (!parser->success && !parser->throw_label) {
-        parser->success = true;
-        parse_false(parser);
-      }
-    }
-
-    // Only try alternative if ordinary failure (not labeled failure from T())
-    if (!parser->success && !parser->throw_label) {
-      parser->success = true;
-      parse_null(parser);
+#endif
     }
   }
 
