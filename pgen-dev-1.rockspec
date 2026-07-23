@@ -20,7 +20,8 @@ description = {
 
 dependencies = {
   "lua >= 5.1",
-  "argparse >= 0.7"
+  "argparse >= 0.7",
+  "lua-cjson"
 }
 
 build = {
