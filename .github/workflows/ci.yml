@@ -23,6 +23,14 @@ jobs:
         include:
           - name: Lua 5.1
             lua-version: "5.1.5"
+          - name: Lua 5.2
+            lua-version: "5.2.4"
+          - name: Lua 5.3
+            lua-version: "5.3.6"
+          - name: Lua 5.4
+            lua-version: "5.4.8"
+          - name: Lua 5.5
+            lua-version: "5.5.0"
           - name: LuaJIT 2.1
             lua-version: "luajit-2.1"
 
