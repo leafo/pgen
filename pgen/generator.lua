@@ -1,6 +1,13 @@
 local generator = {}
 local types = require("pgen.types")
 
+-- Pattern tables overload __len for lookahead on Lua 5.2+, so use the raw
+-- array length when inspecting their children. Lua 5.1 ignores __len on
+-- tables, making # equivalent to rawlen there.
+local raw_length = rawlen or function(value)
+  return #value
+end
+
 -- human readable version of the string that can be embeded into comments
 local function escape_string(str)
   return require("cjson").encode(str)
@@ -1526,7 +1533,7 @@ end
 
 -- Generate code for a sequence
 function generator.generate_sequence_code(patterns, context)
-  if #patterns == 1 then
+  if raw_length(patterns) == 1 then
     -- TODO: throw an error here? shouldn't happen
     return generator.generate_pattern_code(patterns[1], context)
   end
@@ -1555,7 +1562,7 @@ $REMEMBER$
 
 $SEQUENCE$
 }]], {
-    N = #patterns,
+    N = raw_length(patterns),
     REMEMBER = remember,
     SEQUENCE = step(1)
   })
@@ -1645,7 +1652,7 @@ function generator.generate_dispatch_choice_code(pattern, context)
   end
 
   local all_indexes = {}
-  for i = 1, #pattern do all_indexes[i] = i end
+  for i = 1, raw_length(pattern) do all_indexes[i] = i end
   local full_mask = dispatch_mask_literal(all_indexes)
 
   local alternatives = {}
