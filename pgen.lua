@@ -1,5 +1,7 @@
 local pgen = {}
 
+pgen.VERSION = "0.1.0"
+
 -- Pattern types
 local types = require("pgen.types")
 
@@ -291,6 +293,7 @@ function pgen.compile(grammar, options)
 
   local generator = require("pgen.generator")
   return generator.generate(grammar, parser_name, {
+    pgen_version = pgen.VERSION,
     pgen_errors = options.pgen_errors,
     max_depth = options.max_depth
   })

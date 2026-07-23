@@ -8,7 +8,7 @@ source = {
 description = {
   summary = "Parser generator that compiles LPeg-like grammars into C Lua modules",
   detailed = [[
-    PGen takes LPeg-like pattern definitions written in Lua and generates a
+    pgen takes LPeg-like pattern definitions written in Lua and generates a
     standalone Lua module in C for parsing strings. Generated parsers have
     no runtime dependencies beyond Lua itself. Includes captures, match-time
     Lua callbacks, labeled failures, and indentation-sensitive parsing via

@@ -6,8 +6,14 @@ local os = require "os"
 
 local parser = argparse()
   :name("pgen")
-  :description("PGen: Lua Pattern Generator for C")
+  :description("pgen: Lua Pattern Generator for C")
   :epilog("Example: pgen_cli.lua -o my_parser.c -n my_parser grammar.lua -s my_parser.so")
+
+parser:flag("-v --version", "Show the pgen version and exit")
+  :action(function()
+    print("pgen " .. pgen.VERSION)
+    os.exit(0)
+  end)
 
 parser:argument("input_file", "Input grammar file")
   :args(1)
@@ -141,4 +147,3 @@ elseif output_file then
 else
   print(output)
 end
-

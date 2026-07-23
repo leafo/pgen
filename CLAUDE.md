@@ -15,7 +15,7 @@ make busted
 
 ## Project Architecture
 
-PGen is a Lua parser generator that takes LPEG-like pattern definitions and generates Lua modules in C for parsing strings.
+pgen is a Lua parser generator that takes LPEG-like pattern definitions and generates Lua modules in C for parsing strings.
 
 ### Directory Structure
 
