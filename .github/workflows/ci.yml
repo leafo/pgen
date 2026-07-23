@@ -63,7 +63,8 @@ jobs:
       - name: Install Lua dependencies
         run: |
           luarocks make pgen-dev-1.rockspec
-          luarocks install busted 2.2.0
+          luarocks install busted
+          luarocks install ansicolors
 
       - name: Run test suite
         run: make busted
