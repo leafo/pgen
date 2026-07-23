@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Lua 5.1
+            lua-version: "5.1.5"
+          - name: LuaJIT 2.1
+            lua-version: "luajit-2.1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends \
+            clang-format \
+            gcc \
+            liblua5.1-0-dev \
+            make \
+            pkg-config
+
+      - name: Set up Lua
+        uses: leafo/gh-actions-lua@v13
+        with:
+          luaVersion: ${{ matrix.lua-version }}
+
+      - name: Add Lua 5.1 executable alias
+        run: ln -s lua .lua/bin/lua5.1
+
+      - name: Set up LuaRocks
+        uses: leafo/gh-actions-luarocks@v6
+
+      - name: Install Lua dependencies
+        run: |
+          luarocks make pgen-dev-1.rockspec
+          luarocks install busted 2.2.0
+
+      - name: Run test suite
+        run: make busted
