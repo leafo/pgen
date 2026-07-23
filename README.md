@@ -319,7 +319,8 @@ expected_colon at line 5, column 8:
 To compile the generated C code as a Lua module, follow these steps:
 
 1. Ensure you have a C compiler installed (e.g., GCC).
-2. Use the following command to compile the `.c` file into a shared library, adjusting for your Lua version if necessary:
+2. Use the following command to compile the `.c` file into a shared library,
+   selecting the `pkg-config` package for your Lua version:
 
    ```bash
    gcc -shared -o <module_name>.so -fPIC <c_file_name>.c `pkg-config --cflags --libs lua5.1`
@@ -343,6 +344,18 @@ the grammar to a shared library in `/tmp/` and then load it immediately with
 `package.loadlib`. In production environments it recommended to compile to C
 ahead of time and build shared modules with your build system to avoid
 expensive start-up time.
+
+Native compilation defaults to GCC and Lua 5.1 for backwards compatibility.
+Use `PGEN_CC`, `PGEN_LUA_CFLAGS`, and `PGEN_LUA_LIBS` to target another
+installed Lua:
+
+```bash
+PGEN_LUA_CFLAGS="`pkg-config --cflags lua5.4`" \
+PGEN_LUA_LIBS="`pkg-config --libs lua5.4`" \
+lua5.4 your_script.lua
+```
+
+The same variables are honored by `pgen.require`, `pgen -s`, and the Makefile.
 
 
 ```lua

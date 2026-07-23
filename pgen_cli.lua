@@ -1,4 +1,4 @@
-#!/usr/bin/env lua5.1
+#!/usr/bin/env lua
 
 local pgen = require "pgen"
 local argparse = require "argparse"
@@ -114,7 +114,11 @@ end
 
 -- If shared file option is provided, shell out to gcc to create shared object
 if args.shared then
-  local gcc_command = string.format("gcc -shared -o %s -O3 -fPIC -x c - `pkg-config --cflags --libs lua5.1`", args.shared)
+  local cc = os.getenv("PGEN_CC") or "gcc"
+  local lua_cflags = os.getenv("PGEN_LUA_CFLAGS") or "`pkg-config --cflags lua5.1`"
+  local lua_libs = os.getenv("PGEN_LUA_LIBS") or "`pkg-config --libs lua5.1`"
+  local gcc_command = string.format("%s -shared -o %s -O3 -fPIC -x c - %s %s",
+    cc, args.shared, lua_cflags, lua_libs)
 
   io.stderr:write("Running command: " .. gcc_command .. "\n")
 

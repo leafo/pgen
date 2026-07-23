@@ -44,20 +44,21 @@ jobs:
           sudo apt-get install --no-install-recommends \
             clang-format \
             gcc \
-            liblua5.1-0-dev \
-            make \
-            pkg-config
+            make
 
       - name: Set up Lua
         uses: leafo/gh-actions-lua@v13
         with:
           luaVersion: ${{ matrix.lua-version }}
 
-      - name: Add Lua 5.1 executable alias
-        run: ln -s lua .lua/bin/lua5.1
-
       - name: Set up LuaRocks
         uses: leafo/gh-actions-luarocks@v6
+
+      - name: Configure native build
+        run: |
+          lua_incdir="$(luarocks config variables.LUA_INCDIR)"
+          echo "PGEN_LUA_CFLAGS=-I${lua_incdir}" >> "$GITHUB_ENV"
+          echo "PGEN_LUA_LIBS=" >> "$GITHUB_ENV"
 
       - name: Install Lua dependencies
         run: |

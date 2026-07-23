@@ -3,9 +3,13 @@
 
 CLANG_FORMAT_ARGS = -style="{ColumnLimit: 0}"
 PGEN_LUA_FILES = pgen.lua $(wildcard pgen/*.lua)
+LUA ?= lua
+PGEN_CC ?= gcc
+PGEN_LUA_CFLAGS ?= $(shell pkg-config --cflags lua5.1)
+PGEN_LUA_LIBS ?= $(shell pkg-config --libs lua5.1)
 
 test: calc_parser.so
-	lua5.1 test.lua
+	$(LUA) test.lua
 
 local:
 	luarocks --local --lua-version=5.1 make pgen-dev-1.rockspec
@@ -16,10 +20,10 @@ busted: calc_parser.so generate-spec-parsers
 parser.so: examples/numbers.lua
 	./pgen_cli.lua $<
 	clang-format $(CLANG_FORMAT_ARGS) -i parser.c
-	gcc -shared -o parser.so -O3 -fPIC parser.c `pkg-config --cflags --libs lua5.1`
+	$(PGEN_CC) -shared -o parser.so -O3 -fPIC parser.c $(PGEN_LUA_CFLAGS) $(PGEN_LUA_LIBS)
 
 %.so: %.c
-	gcc -shared -o $@ -O3 -fPIC $< `pkg-config --cflags --libs lua5.1`
+	$(PGEN_CC) -shared -o $@ -O3 -fPIC $< $(PGEN_LUA_CFLAGS) $(PGEN_LUA_LIBS)
 
 %.c: examples/%.lua pgen/generator.lua
 	./pgen_cli.lua -o $@ -n $* $<
@@ -35,5 +39,5 @@ spec/parsers/%.c: spec/parsers/%.lua $(PGEN_LUA_FILES)
 	clang-format $(CLANG_FORMAT_ARGS) -i $@
 
 spec/parsers/%.so: spec/parsers/%.c
-	gcc -shared -o $@ -O3 -fPIC $< `pkg-config --cflags --libs lua5.1`
+	$(PGEN_CC) -shared -o $@ -O3 -fPIC $< $(PGEN_LUA_CFLAGS) $(PGEN_LUA_LIBS)
 

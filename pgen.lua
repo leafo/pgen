@@ -296,6 +296,23 @@ function pgen.compile(grammar, options)
   })
 end
 
+local function native_build_config(options)
+  local cc = options.cc or os.getenv("PGEN_CC") or "gcc"
+  local lua_cflags = options.lua_cflags
+  local lua_libs = options.lua_libs
+
+  if lua_cflags == nil then
+    lua_cflags = os.getenv("PGEN_LUA_CFLAGS")
+  end
+  if lua_libs == nil then
+    lua_libs = os.getenv("PGEN_LUA_LIBS")
+  end
+
+  return cc,
+    lua_cflags or "`pkg-config --cflags lua5.1`",
+    lua_libs or "`pkg-config --libs lua5.1`"
+end
+
 -- this will require a module that returns a grammar, it will compile it to C
 -- code, then compile it with gcc to temp file, then load the shared object as
 -- a lua module, then return it
@@ -352,11 +369,14 @@ function pgen.require(module_name, options)
   start_time = show_timing and socket.gettime()
   local tmp_so = os.tmpname() .. ".so"
   local gcc_command
+  local cc, lua_cflags, lua_libs = native_build_config(options)
 
   if options.debug then
-    gcc_command = string.format("gcc -shared -o %s -g -O0 -fno-omit-frame-pointer -fPIC -x c - `pkg-config --cflags --libs lua5.1`", tmp_so)
+    gcc_command = string.format("%s -shared -o %s -g -O0 -fno-omit-frame-pointer -fPIC -x c - %s %s",
+      cc, tmp_so, lua_cflags, lua_libs)
   else
-    gcc_command = string.format("gcc -shared -o %s -march=native -flto -finline-functions -O3 -fPIC -x c - `pkg-config --cflags --libs lua5.1`", tmp_so)
+    gcc_command = string.format("%s -shared -o %s -march=native -flto -finline-functions -O3 -fPIC -x c - %s %s",
+      cc, tmp_so, lua_cflags, lua_libs)
   end
 
   local gcc_process = io.popen(gcc_command, "w")
