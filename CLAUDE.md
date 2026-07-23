@@ -205,6 +205,7 @@ Options:
 - `-j` - Output grammar as JSON (useful for debugging optimizations)
 - `-n name` - Set parser name (affects C function names)
 - `--pgen-errors` - Enable detailed error messages in generated parser
+- `--vendor-errors file.lua` - Also copy the pgen.errors module source to a file (for projects shipping generated parsers without a runtime pgen dependency)
 - `--no-optimize` - Disable grammar optimizations
 
 ### Code Generation Process

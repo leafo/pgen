@@ -31,7 +31,36 @@ parser:flag("--no-optimize", "Disable grammar optimization passes")
 parser:flag("--json", "Output grammar as JSON instead of generating C code")
   :default(false)
 
+parser:option("--vendor-errors", "Copy the pgen.errors module source to FILE, for projects that ship generated parsers without a runtime pgen dependency")
+  :argname("FILE")
+
 local args = parser:parse()
+
+if args.vendor_errors then
+  local errors = require "pgen.errors"
+  local source = debug.getinfo(errors.format, "S").source
+  if source:sub(1, 1) ~= "@" then
+    print("Error: could not locate pgen.errors source file")
+    os.exit(1)
+  end
+
+  local f, err = io.open(source:sub(2), "r")
+  if not f then
+    print("Error reading pgen.errors source: " .. err)
+    os.exit(1)
+  end
+  local contents = f:read("*a")
+  f:close()
+
+  local out, out_err = io.open(args.vendor_errors, "w")
+  if not out then
+    print("Error: could not open output file: " .. out_err)
+    os.exit(1)
+  end
+  out:write(contents)
+  out:close()
+  io.stderr:write("Wrote " .. args.vendor_errors .. "\n")
+end
 
 local input_file = args.input_file
 local output_file = args.output
