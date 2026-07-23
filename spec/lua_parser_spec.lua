@@ -24,12 +24,11 @@ describe("lua_parser", function()
     end)
 
     it("parses booleans", function()
-      -- Note: Both true and false capture as just {"boolean"} - the actual value isn't distinguished
       local result = check_parse("return true", true)
-      assert.same(ret({"boolean"}), result)
+      assert.same(ret({"boolean", true}), result)
 
       result = check_parse("return false", true)
-      assert.same(ret({"boolean"}), result)
+      assert.same(ret({"boolean", false}), result)
     end)
 
     it("parses integers", function()
@@ -185,12 +184,12 @@ describe("lua_parser", function()
     it("parses logical operators", function()
       local result = check_parse("return true and false", true)
       assert.same({"block", {"return", {"explist", {"exp",
-        {"boolean"}, {"binop", "and"}, {"boolean"}
+        {"boolean", true}, {"binop", "and"}, {"boolean", false}
       }}}}, result)
 
       result = check_parse("return true or false", true)
       assert.same({"block", {"return", {"explist", {"exp",
-        {"boolean"}, {"binop", "or"}, {"boolean"}
+        {"boolean", true}, {"binop", "or"}, {"boolean", false}
       }}}}, result)
     end)
 
@@ -236,7 +235,7 @@ describe("lua_parser", function()
 
       result = check_parse("return not true", true)
       assert.same({"block", {"return", {"explist", {"exp",
-        {"unop", "not", {"exp", {"boolean"}}}
+        {"unop", "not", {"exp", {"boolean", true}}}
       }}}}, result)
 
       result = check_parse("return #t", true)
@@ -523,7 +522,7 @@ describe("lua_parser", function()
 
     it("parses while loop", function()
       local result = check_parse("while true do end", true)
-      assert.same({"block", {"while", {"exp", {"boolean"}}, {"block"}}}, result)
+      assert.same({"block", {"while", {"exp", {"boolean", true}}, {"block"}}}, result)
 
       result = check_parse("while x < 10 do x = x + 1 end", true)
       assert.same({"block", {"while",
@@ -537,7 +536,7 @@ describe("lua_parser", function()
 
     it("parses repeat loop", function()
       local result = check_parse("repeat until true", true)
-      assert.same({"block", {"repeat", {"block"}, {"exp", {"boolean"}}}}, result)
+      assert.same({"block", {"repeat", {"block"}, {"exp", {"boolean", true}}}}, result)
 
       result = check_parse("repeat x = x + 1 until x > 10", true)
       assert.same({"block", {"repeat",
@@ -592,11 +591,11 @@ describe("lua_parser", function()
 
     it("parses if statement", function()
       local result = check_parse("if true then end", true)
-      assert.same({"block", {"if", {"exp", {"boolean"}}, {"block"}}}, result)
+      assert.same({"block", {"if", {"exp", {"boolean", true}}, {"block"}}}, result)
 
       result = check_parse("if true then x = 1 end", true)
       assert.same({"block", {"if",
-        {"exp", {"boolean"}},
+        {"exp", {"boolean", true}},
         {"block", {"assign",
           {"varlist", {"var", {"name", "x"}}},
           {"explist", {"exp", {"number", "1"}}}
@@ -607,7 +606,7 @@ describe("lua_parser", function()
     it("parses if-else statement", function()
       local result = check_parse("if true then x = 1 else x = 2 end", true)
       assert.same({"block", {"if",
-        {"exp", {"boolean"}},
+        {"exp", {"boolean", true}},
         {"block", {"assign", {"varlist", {"var", {"name", "x"}}}, {"explist", {"exp", {"number", "1"}}}}},
         {"block", {"assign", {"varlist", {"var", {"name", "x"}}}, {"explist", {"exp", {"number", "2"}}}}}
       }}, result)
@@ -627,7 +626,7 @@ describe("lua_parser", function()
     it("parses break", function()
       local result = check_parse("while true do break end", true)
       assert.same({"block", {"while",
-        {"exp", {"boolean"}},
+        {"exp", {"boolean", true}},
         {"block", {"break"}}
       }}, result)
     end)

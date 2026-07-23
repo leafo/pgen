@@ -82,8 +82,11 @@ end
 
 -- Constant capture
 function pgen.Cc(...)
-  local count = select("#", ...)
-  return pattern(types.Cc, {..., count = count})
+  -- The vararg must be the last entry in the constructor: mixing it with
+  -- the count field would truncate it to a single value
+  local values = {...}
+  values.count = select("#", ...)
+  return pattern(types.Cc, values)
 end
 
 -- Lookahead pattern (matches without consuming input)
