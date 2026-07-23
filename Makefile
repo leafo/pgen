@@ -1,4 +1,4 @@
-.PHONY: test busted generate-spec-parsers clean-spec-parsers
+.PHONY: test busted local generate-spec-parsers clean-spec-parsers
 .SECONDARY:
 
 CLANG_FORMAT_ARGS = -style="{ColumnLimit: 0}"
@@ -6,6 +6,9 @@ PGEN_LUA_FILES = pgen.lua $(wildcard pgen/*.lua)
 
 test: calc_parser.so
 	lua5.1 test.lua
+
+local:
+	luarocks --local --lua-version=5.1 make pgen-dev-1.rockspec
 
 busted: calc_parser.so generate-spec-parsers
 	busted spec

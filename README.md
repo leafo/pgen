@@ -1,7 +1,23 @@
-parser generator in Lua that takes LPeg-like pattern definitions written in Lua
-and generates a Lua module written in C that can parse input strings.
+# pgen
 
-This is just an experiment that will eventually find its way into [moonparse](https://github.com/leafo/moonparse)
+A parser generator in Lua that takes LPeg-like pattern definitions written in
+Lua and generates a Lua module written in C that can parse input strings.
+Generated parsers are standalone: they need nothing at runtime beyond Lua
+itself.
+
+The largest grammar built with pgen is the compiled MoonScript parser,
+[moonscript-parser](https://github.com/leafo/moonscript-parser).
+
+## Install
+
+```bash
+luarocks install pgen
+```
+
+This installs the `pgen` library and the `pgen` command line tool. Generating
+C code needs only Lua; compiling the generated parser (including
+`pgen.require`, which compiles and loads grammars on the fly) additionally
+needs a C compiler and the Lua headers.
 
 ## Features
 
@@ -508,3 +524,7 @@ therefore run again on this failure path).
 It is most useful for wide structured choices such as keyword-led statement
 rules; pure literal choices continue to use the more specialized trie
 optimization. Use `optimize = false` or `--no-optimize` to disable both.
+
+## License (MIT)
+
+Copyright (C) 2026 by Leaf Corcoran. See [LICENSE](LICENSE) for the full text.

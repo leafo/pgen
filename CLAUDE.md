@@ -30,20 +30,19 @@ pgen/
 │   ├── types.lua         # Type constants (P=1, R=2, etc.)
 │   └── visitor.lua       # AST visitor pattern for traversal/transformation
 ├── examples/             # Example grammars (calc, JSON, numbers)
-├── moonscript_pgen/      # Full MoonScript parser built on pgen
-│   ├── grammar.lua       # Grammar (port of moonscript/moonscript/parse.lua)
-│   ├── tree.lua          # Transform helpers for the grammar's Cfn callbacks
-│   └── init.lua          # parse.string() API (compiles parser on first use)
 └── spec/                 # Test suite (busted framework)
     ├── *_spec.lua        # Test files
     └── parsers/          # Test grammars and their generated C/so files
 ```
 
-The MoonScript parser is validated differentially: `spec/moonscript_diff_spec.lua`
-asserts tree-identical output (including `[-1]` positions) against the
-reference LPeg parser over every `.moon` file in the `moonscript/` checkout.
-It is skipped automatically when `moonscript/` or lpeg is unavailable. Design
-notes and porting decisions live in **moonscript_pgen/moonscript_indent.md**.
+pgen is published as a rock (`pgen-dev-1.rockspec`); `luarocks make` installs
+the working tree locally, including the `pgen` CLI binary.
+
+The largest real-world grammar built on pgen is the MoonScript parser, which
+lives in its own repository (https://github.com/leafo/moonscript-parser,
+locally at `../../moon/moonscript-parser`). Its test suite compiles the
+grammar with the installed pgen rock on the fly, so after generator changes
+run `luarocks make` here followed by `make test` there.
 
 ### Key Components
 
@@ -95,7 +94,8 @@ to ensure the new type doesn't interfere with any optimizers.
 ### Indenters (indentation-sensitive parsing)
 
 `pgen.indenter(opts)` declares a match-time integer stack that lives in the
-generated parser, for indent-based grammars (see **moonscript_pgen/moonscript_indent.md**).
+generated parser, for indent-based grammars (see **moonscript_indent.md** in
+the moonscript-parser repository for a worked example).
 Options: `tab_width` (default 4), `initial` (default 0). All operations are
 **transactional**: pushes/pops are recorded on an undo trail and reversed when
 the parser backtracks past them, so failed alternatives never leak stack
