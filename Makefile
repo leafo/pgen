@@ -17,8 +17,13 @@ local:
 busted: calc_parser.so generate-spec-parsers
 	busted spec
 
+# Run the same suite against the pure Lua code generation target (no C
+# compiler involved for the parsers under test)
+busted-lua: calc_parser.so
+	PGEN_TARGET=lua busted spec
+
 parser.so: examples/numbers.lua
-	./pgen_cli.lua $<
+	$(LUA) pgen_cli.lua $<
 	clang-format $(CLANG_FORMAT_ARGS) -i parser.c
 	$(PGEN_CC) -shared -o parser.so -O3 -fPIC parser.c $(PGEN_LUA_CFLAGS) $(PGEN_LUA_LIBS)
 
@@ -26,7 +31,7 @@ parser.so: examples/numbers.lua
 	$(PGEN_CC) -shared -o $@ -O3 -fPIC $< $(PGEN_LUA_CFLAGS) $(PGEN_LUA_LIBS)
 
 %.c: examples/%.lua pgen/generator.lua
-	./pgen_cli.lua -o $@ -n $* $<
+	$(LUA) pgen_cli.lua -o $@ -n $* $<
 	clang-format $(CLANG_FORMAT_ARGS) -i $@
 
 generate-spec-parsers: $(patsubst spec/parsers/%.lua, spec/parsers/%.so, $(wildcard spec/parsers/*.lua))
@@ -35,7 +40,7 @@ clean-spec-parsers:
 	rm spec/parsers/*.{c,so}
 
 spec/parsers/%.c: spec/parsers/%.lua $(PGEN_LUA_FILES)
-	./pgen_cli.lua -o $@ -n $* $< --pgen-errors
+	$(LUA) pgen_cli.lua -o $@ -n $* $< --pgen-errors
 	clang-format $(CLANG_FORMAT_ARGS) -i $@
 
 spec/parsers/%.so: spec/parsers/%.c

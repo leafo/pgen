@@ -9,6 +9,10 @@ local parser = argparse()
   :description("pgen: Lua Pattern Generator for C")
   :epilog("Example: pgen_cli.lua -o my_parser.c -n my_parser grammar.lua -s my_parser.so")
 
+parser:option("--target", "Code generation target: c (default) or lua (self-contained pure Lua module, no C compiler needed). Inferred as lua when the output file ends in .lua")
+  :argname("TARGET")
+  :choices({"c", "lua"})
+
 parser:flag("-v --version", "Show the pgen version and exit")
   :action(function()
     print("pgen " .. pgen.VERSION)
@@ -18,7 +22,7 @@ parser:flag("-v --version", "Show the pgen version and exit")
 parser:argument("input_file", "Input grammar file")
   :args(1)
 
-parser:option("-o --output", "Output C file")
+parser:option("-o --output", "Output source file (.c, or .lua for the lua target)")
   :argname("FILE")
 
 parser:option("-s --shared", "Output shared object file")
@@ -106,11 +110,28 @@ if args.json then
   return
 end
 
+-- Pick the code generation target: explicit flag first, then a .lua output
+-- file implies the Lua target
+local target = args.target
+if not target then
+  if output_file and output_file:match("%.lua$") then
+    target = "lua"
+  else
+    target = "c"
+  end
+end
+
+if target == "lua" and args.shared then
+  print("Error: --shared cannot be combined with the lua target")
+  os.exit(1)
+end
+
 -- Compile the grammar
 local output, err = pgen.compile(result, {
   parser_name = args.name,
   pgen_errors = args.pgen_errors,
-  optimize = not args.no_optimize
+  optimize = not args.no_optimize,
+  target = target
 })
 
 if not output then

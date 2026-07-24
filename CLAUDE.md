@@ -11,11 +11,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Build and run tests using busted (test framework)
 make busted
+
+# Run the same suite against the pure Lua code generation target
+make busted-lua
 ```
 
 ## Project Architecture
 
-pgen is a Lua parser generator that takes LPEG-like pattern definitions and generates Lua modules in C for parsing strings.
+pgen is a Lua parser generator that takes LPEG-like pattern definitions and generates Lua modules for parsing strings. The primary target generates C code compiled to a shared object; a second target generates a self-contained pure Lua module for environments without a C compiler.
 
 ### Directory Structure
 
@@ -26,6 +29,8 @@ pgen/
 ├── Makefile              # Build automation
 ├── pgen/                 # Core implementation modules
 │   ├── generator.lua     # C code generation
+│   ├── generator_lua.lua # Pure Lua code generation
+│   ├── codegen_common.lua # Target-independent collection passes/templates
 │   ├── optimize.lua      # Grammar optimizations (trie, flattening)
 │   ├── types.lua         # Type constants (P=1, R=2, etc.)
 │   └── visitor.lua       # AST visitor pattern for traversal/transformation
@@ -40,18 +45,20 @@ the working tree locally, including the `pgen` CLI binary.
 
 The largest real-world grammar built on pgen is the MoonScript parser, which
 lives in its own repository (https://github.com/leafo/moonscript-parser,
-locally at `../../moon/moonscript-parser`). Its test suite compiles the
-grammar with the installed pgen rock on the fly, so after generator changes
-run `luarocks make` here followed by `make test` there.
+locally at `../../moon/moonscript-parser`). Its checked-in C parser is
+generated with the installed pgen rock, so after generator changes run
+`make local` here followed by `make generate && make test` there.
 
 ### Key Components
 
 1. **pgen.lua**: Core module with pattern constructors and compilation functions
-2. **pgen/generator.lua**: C code generator (~1400 lines) that transforms grammar into parser code
-3. **pgen/optimize.lua**: Grammar optimizer (trie optimization for literal alternatives, choice flattening)
-4. **pgen/visitor.lua**: Generic visitor pattern for AST traversal and transformation
-5. **pgen/types.lua**: Type constants for pattern types
-6. **pgen_cli.lua**: Command-line interface for the generator
+2. **pgen/generator.lua**: C code generator that transforms grammar into parser code
+3. **pgen/generator_lua.lua**: Lua code generator with the same feature set and semantics as the C target
+4. **pgen/codegen_common.lua**: Collection passes and template helpers shared by both generators
+5. **pgen/optimize.lua**: Grammar optimizer (trie optimization for literal alternatives, choice flattening)
+6. **pgen/visitor.lua**: Generic visitor pattern for AST traversal and transformation
+7. **pgen/types.lua**: Type constants for pattern types
+8. **pgen_cli.lua**: Command-line interface for the generator
 
 ### Workflow
 
@@ -68,6 +75,32 @@ local pgen = require("pgen")
 local parser = pgen.require("grammar.module") --> uses same search path as require()
 parser.parse("input string")
 ```
+
+### Lua Target
+
+Passing `target = "lua"` to `pgen.compile()` or `pgen.require()` generates a
+self-contained pure Lua module instead of C, for environments without a C
+compiler. The generated file has no dependencies, runs on Lua 5.1+ and
+LuaJIT regardless of which Lua version ran the generator, and has the same
+`parse()` contract and semantics as the C target (captures, Cmt/Cfn,
+labeled failures, indenters, furthest-failure positions, `pgen_errors`
+messages, memoization). `pgen.require` with the Lua target loads the
+generated chunk directly — no compiler, no temp files.
+
+```lua
+local parser = pgen.require("grammar.module", {target = "lua"})
+```
+
+Setting `PGEN_TARGET=lua` in the environment switches `pgen.require`'s
+default target, which is how `make busted-lua` runs the whole test suite
+against the Lua backend.
+
+Performance: roughly 10-30x slower than the C parser under PUC Lua.
+LuaJIT's interpreter (`-joff`) runs the generated parsers about 2x faster
+than PUC Lua; the trace compiler helps small parsers (~3x over the
+interpreter) but can thrash on very large ones (the MoonScript-scale
+grammar runs 10x slower with tracing on than off), so benchmark before
+choosing for big grammars.
 
 ### Pattern Types
 
@@ -94,8 +127,9 @@ to ensure the new type doesn't interfere with any optimizers.
 ### Indenters (indentation-sensitive parsing)
 
 `pgen.indenter(opts)` declares a match-time integer stack that lives in the
-generated parser, for indent-based grammars (see **moonscript_indent.md** in
-the moonscript-parser repository for a worked example).
+generated parser, for indent-based grammars (see
+`moonscript_parser/grammar.lua` in the moonscript-parser repository for a
+worked example).
 Options: `tab_width` (default 4), `initial` (default 0). All operations are
 **transactional**: pushes/pops are recorded on an undo trail and reversed when
 the parser backtracks past them, so failed alternatives never leak stack
@@ -200,8 +234,9 @@ lua pgen_cli.lua grammar.lua [options]
 ```
 
 Options:
-- `-o file.c` - Output to C file
+- `-o file.c` - Output to source file (`-o file.lua` implies `--target lua`)
 - `-c file.so` - Compile directly to shared object
+- `--target c|lua` - Code generation target (default c)
 - `-j` - Output grammar as JSON (useful for debugging optimizations)
 - `-n name` - Set parser name (affects C function names)
 - `--pgen-errors` - Enable detailed error messages in generated parser
@@ -220,6 +255,9 @@ Options:
 ### Testing
 
 Tests use the busted framework. Test grammars live in `spec/parsers/`.
+`make busted-lua` runs the same suite with `PGEN_TARGET=lua` so every spec
+exercises the Lua code generation target; `spec/lua_target_spec.lua`
+additionally covers the Lua target explicitly in default runs.
 
 The compiled `.so` and `.c` files in `spec/parsers/` are not actually used by
 the test suite, they are built by the make command so that we can track changes

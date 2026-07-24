@@ -283,10 +283,21 @@ function mt.__div(a, b)
 end
 
 
--- Compile grammar to C code
+-- Compile grammar to source code for the given target: "c" (default)
+-- generates a C Lua module, "lua" generates a self-contained pure Lua module
 function pgen.compile(grammar, options)
   options = options or {}
   local parser_name = options.parser_name or "parser"
+  local target = options.target or "c"
+
+  local generator
+  if target == "c" then
+    generator = require("pgen.generator")
+  elseif target == "lua" then
+    generator = require("pgen.generator_lua")
+  else
+    error("Unknown compile target: " .. tostring(target))
+  end
 
   -- Apply optimizations before generation (unless disabled)
   if options.optimize ~= false then
@@ -294,7 +305,6 @@ function pgen.compile(grammar, options)
     grammar = optimize.optimize_grammar(grammar)
   end
 
-  local generator = require("pgen.generator")
   return generator.generate(grammar, parser_name, {
     pgen_version = pgen.VERSION,
     pgen_errors = options.pgen_errors,
@@ -323,10 +333,15 @@ end
 -- code, then compile it with gcc to temp file, then load the shared object as
 -- a lua module, then return it
 -- this does not cache the compiled code, so it will be recompiled every time require is called
+--
+-- With target = "lua" (or PGEN_TARGET=lua in the environment) the grammar is
+-- compiled to Lua source instead and loaded directly, with no C compiler
+-- involved
 function pgen.require(module_name, options)
   options = options or {}
   local show_timing = options.show_timing
   local parser_name = options.parser_name or "parser"
+  local target = options.target or os.getenv("PGEN_TARGET") or "c"
 
   local socket
   if show_timing then
@@ -356,19 +371,33 @@ function pgen.require(module_name, options)
     log_time("Applied grammar transform", start_time)
   end
 
-  -- Compile the grammar into C code
+  -- Compile the grammar into source code
   start_time = show_timing and socket.gettime()
   local output, err = pgen.compile(grammar, {
     -- TODO: generate non-conflicting parser name
     parser_name = parser_name,
     optimize = options.optimize,
     pgen_errors = options.pgen_errors,
-    max_depth = options.max_depth
+    max_depth = options.max_depth,
+    target = target
   })
-  log_time("Compiled grammar to C code (" .. tostring(#output) .. " bytes)", start_time)
+  log_time("Compiled grammar to " .. target .. " code (" .. tostring(#output) .. " bytes)", start_time)
 
   if not output then
     error("Error generating parser: " .. (err or "unknown error"))
+  end
+
+  -- Lua target: load the generated chunk directly, no C compiler involved
+  if target == "lua" then
+    start_time = show_timing and socket.gettime()
+    local load_chunk = loadstring or load
+    local chunk, load_err = load_chunk(output, "pgen generated parser '" .. parser_name .. "'")
+    if not chunk then
+      error("Error loading generated Lua parser: " .. tostring(load_err))
+    end
+    local parser = chunk()
+    log_time("Loaded generated Lua parser", start_time)
+    return parser
   end
 
   -- Compile the C code to a shared object using gcc, piping to stdin
