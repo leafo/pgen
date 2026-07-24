@@ -34,7 +34,7 @@ pgen/
 │   ├── optimize.lua      # Grammar optimizations (trie, flattening)
 │   ├── types.lua         # Type constants (P=1, R=2, etc.)
 │   └── visitor.lua       # AST visitor pattern for traversal/transformation
-├── examples/             # Example grammars (calc, JSON, numbers)
+├── examples/             # Example grammars (calc, JSON, numbers, Teal)
 └── spec/                 # Test suite (busted framework)
     ├── *_spec.lua        # Test files
     └── parsers/          # Test grammars and their generated C/so files

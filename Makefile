@@ -43,6 +43,9 @@ spec/parsers/%.c: spec/parsers/%.lua $(PGEN_LUA_FILES)
 	$(LUA) pgen_cli.lua -o $@ -n $* $< --pgen-errors
 	clang-format $(CLANG_FORMAT_ARGS) -i $@
 
+# the teal parser grammar is a shim that loads the example grammar
+spec/parsers/teal_parser.c: examples/teal_parser.lua
+
 spec/parsers/%.so: spec/parsers/%.c
 	$(PGEN_CC) -shared -o $@ -O3 -fPIC $< $(PGEN_LUA_CFLAGS) $(PGEN_LUA_LIBS)
 
