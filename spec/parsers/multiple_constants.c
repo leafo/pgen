@@ -342,7 +342,7 @@ static int __const_refs[3];
 static void __const_init(lua_State *L) {
   lua_pushlstring(L, "test_field", 10);
   __const_refs[0] = luaL_ref(L, LUA_REGISTRYINDEX);
-  lua_pushnumber(L, 42);
+  lua_pushinteger(L, 42);
   __const_refs[1] = luaL_ref(L, LUA_REGISTRYINDEX);
   lua_pushboolean(L, 1);
   __const_refs[2] = luaL_ref(L, LUA_REGISTRYINDEX);

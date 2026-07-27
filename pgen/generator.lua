@@ -500,9 +500,16 @@ local function generate_const_infrastructure(const_pool, cg_names)
         LENGTH = #value
       })
     elseif t == "number" then
-      push_line = template_code("  lua_pushnumber(L, $VALUE$);", {
-        VALUE = string.format("%.17g", value)
-      })
+      -- integer-valued constants must stay integers on Lua 5.3+
+      if value % 1 == 0 and value >= -2^31 and value < 2^31 then
+        push_line = template_code("  lua_pushinteger(L, $VALUE$);", {
+          VALUE = string.format("%d", value)
+        })
+      else
+        push_line = template_code("  lua_pushnumber(L, $VALUE$);", {
+          VALUE = string.format("%.17g", value)
+        })
+      end
     else -- boolean
       push_line = "  lua_pushboolean(L, " .. (value and "1" or "0") .. ");"
     end
