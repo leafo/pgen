@@ -6,7 +6,7 @@ Generated parsers are standalone: they need nothing at runtime beyond Lua
 itself.
 
 The largest grammar built with pgen is the compiled MoonScript parser,
-[moonscript-parser](https://github.com/leafo/moonscript-parser).
+[grammar.moon](https://github.com/leafo/moonscript/blob/master/moonscript/parse/grammar.moon).
 
 ## Install
 
